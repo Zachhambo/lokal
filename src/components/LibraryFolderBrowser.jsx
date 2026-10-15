@@ -253,26 +253,43 @@ export default function LibraryFolderBrowser({
         >
           {visibleFolders.length > 0 && view === 'grid' && (
             <div className="grid grid-cols-2 @sm:grid-cols-3 @md:grid-cols-4 @lg:grid-cols-5 gap-3">
-              {visibleFolders.map(folder => (
-                <motion.button
-                  key={folder.path}
-                  type="button"
-                  initial={false}
-                  whileHover={{ y: -3 }}
-                  onClick={() => navigateToFolder(folder.path)}
-                  className="group flex min-w-0 flex-col gap-2 text-left"
-                >
-                  <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-elevated transition-colors group-hover:border-accent/40 group-hover:bg-accent/5">
-                    <Folder size={42} strokeWidth={1.5} className="text-muted transition-colors group-hover:text-accent" />
-                  </div>
-                  <div className="w-full min-w-0 px-1">
-                    <p className="truncate text-xs font-medium text-white" title={folder.name}>{folder.name}</p>
-                    <p className="text-[11px] text-muted">
-                      {folder.trackCount != null ? `${folder.trackCount} ${folder.trackCount === 1 ? t('track') : t('tracks')}` : t('Folder')}
-                    </p>
-                  </div>
-                </motion.button>
-              ))}
+              {visibleFolders.map(folder => {
+                const coverSrc = folder.coverPath
+                  ? (api.isElectron ? api.fileURL(folder.coverPath) : api.libraryFolderArtworkURL(folder.path))
+                  : folder.coverArtworkPath && folder.coverTrackId
+                    ? (api.isElectron ? api.fileURL(folder.coverArtworkPath) : api.artworkURL(folder.coverTrackId))
+                    : null
+                return (
+                  <motion.button
+                    key={folder.path}
+                    type="button"
+                    initial={false}
+                    whileHover={{ y: -3 }}
+                    onClick={() => navigateToFolder(folder.path)}
+                    className="group flex min-w-0 flex-col gap-2 text-left"
+                  >
+                    <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-elevated transition-colors group-hover:border-accent/40 group-hover:bg-accent/5">
+                      <Folder size={42} strokeWidth={1.5} className="text-muted transition-colors group-hover:text-accent" />
+                      {coverSrc && (
+                        <img
+                          src={coverSrc}
+                          alt={folder.name}
+                          loading="lazy"
+                          decoding="async"
+                          className="absolute inset-0 h-full w-full object-cover"
+                          onError={event => { event.currentTarget.style.display = 'none' }}
+                        />
+                      )}
+                    </div>
+                    <div className="w-full min-w-0 px-1">
+                      <p className="truncate text-xs font-medium text-white" title={folder.name}>{folder.name}</p>
+                      <p className="text-[11px] text-muted">
+                        {folder.trackCount != null ? `${folder.trackCount} ${folder.trackCount === 1 ? t('track') : t('tracks')}` : t('Folder')}
+                      </p>
+                    </div>
+                  </motion.button>
+                )
+              })}
             </div>
           )}
 

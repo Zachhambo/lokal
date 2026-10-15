@@ -183,6 +183,7 @@ export const api = {
   getLibraryFolders: (relativePath = '', search = '') => isE()
     ? el().getLibraryFolders(relativePath, search)
     : apiFetch('/tracks/library-folders?path=' + encodeURIComponent(relativePath) + (search ? '&search=' + encodeURIComponent(search) : '')),
+  libraryFolderArtworkURL: (relativePath = '') => `${BASE}/tracks/library-folder-artwork?path=${encodeURIComponent(relativePath)}`,
   // A song that couldn't be played (Library → Songs with errors), or played again fine.
   reportTrackError: (id, message) => isE() ? el().reportTrackError(id, message) : apiFetch(`/tracks/${encodeURIComponent(id)}/error`, { method: 'POST', body: { message } }),
   clearTrackError: (id) => isE() ? el().clearTrackError(id) : apiFetch(`/tracks/${encodeURIComponent(id)}/error`, { method: 'DELETE' }),

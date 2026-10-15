@@ -135,6 +135,21 @@ function readAutoOpenSidePanelSetting() {
   }
 }
 
+function readSidePanelViewSetting() {
+  try {
+    const value = localStorage.getItem('lokal-side-panel-view')
+    return value === 'queue' || value === 'lyrics' ? value : 'info'
+  } catch {
+    return 'info'
+  }
+}
+
+function persistSidePanelView(view) {
+  const next = view === 'queue' || view === 'lyrics' ? view : 'info'
+  try { localStorage.setItem('lokal-side-panel-view', next) } catch {}
+  return next
+}
+
 function readOutputDevice() {
   try { return localStorage.getItem('lokal-output-device') || 'default' } catch { return 'default' }
 }
@@ -232,8 +247,9 @@ export const usePlayerStore = create((set, get) => ({
   showRightSidebar: false, showFullscreen: false, showQueue: false, showLyricsPanel: false,
   // Which content the right-hand panel shows. Only meaningful in merged
   // mode -- independent mode's Queue lives in its own separate panel and
-  // never touches this.
-  sidePanelView: 'info',
+  // never touches this. Persisted across app restarts so the last selected
+  // Details/Queue/Lyrics tab reopens the same way.
+  sidePanelView: readSidePanelViewSetting(),
   // Settings > Appearance > Layout > Side Panels. Store state (not just a
   // localStorage read inside actions) so components can react live when
   // the setting changes, without needing a reload. Initialized from
@@ -906,7 +922,9 @@ export const usePlayerStore = create((set, get) => ({
       return { showRightSidebar: !s.showRightSidebar }
     }
     if (!s.showRightSidebar) {
-      return { showRightSidebar: true, sidePanelView: 'info' }
+      const next = 'info'
+      persistSidePanelView(next)
+      return { showRightSidebar: true, sidePanelView: next }
     }
     // Panel's already open, whatever it's currently showing (info, Queue,
     // or Lyrics). This is the sidebar's own collapse button (the chevron in
@@ -946,9 +964,13 @@ export const usePlayerStore = create((set, get) => ({
       return { showQueue: !s.showQueue }
     }
     if (!s.showRightSidebar) {
-      return { showRightSidebar: true, sidePanelView: 'queue' }
+      const next = 'queue'
+      persistSidePanelView(next)
+      return { showRightSidebar: true, sidePanelView: next }
     }
-    return { sidePanelView: s.sidePanelView === 'queue' ? 'info' : 'queue' }
+    const next = s.sidePanelView === 'queue' ? 'info' : 'queue'
+    persistSidePanelView(next)
+    return { sidePanelView: next }
   }),
   // Closes the *standalone* Lyrics panel (independent mode only -- mirrors
   // toggleQueue exactly, for the same reason: that's the only mode where
@@ -967,11 +989,18 @@ export const usePlayerStore = create((set, get) => ({
       return { showLyricsPanel: !s.showLyricsPanel }
     }
     if (!s.showRightSidebar) {
-      return { showRightSidebar: true, sidePanelView: 'lyrics' }
+      const next = 'lyrics'
+      persistSidePanelView(next)
+      return { showRightSidebar: true, sidePanelView: next }
     }
-    return { sidePanelView: s.sidePanelView === 'lyrics' ? 'info' : 'lyrics' }
+    const next = s.sidePanelView === 'lyrics' ? 'info' : 'lyrics'
+    persistSidePanelView(next)
+    return { sidePanelView: next }
   }),
-  setSidePanelView: (view) => set({ sidePanelView: view }),
+  setSidePanelView: (view) => set(() => {
+    const next = persistSidePanelView(view)
+    return { sidePanelView: next }
+  }),
   setAutoOpenSidePanel: (value) => {
     try { localStorage.setItem('lokal-auto-open-side-panel', value ? '1' : '0') } catch {}
     set({ autoOpenSidePanel: !!value, autoOpenSidePanelUserSet: true })

@@ -11,14 +11,13 @@ function findFolderArtwork(folderPath) {
       .map(entry => entry.name)
     if (!images.length) return null
 
+    const folderStem = path.basename(folderPath).toLowerCase().replace(/[^a-z0-9]+/g, '')
     const priority = (name) => {
-      const stem = path.parse(name).name.toLowerCase().replace(/[\s_-]+/g, '')
-      if (stem === 'cover') return 0
-      if (stem === 'folder') return 1
-      if (stem === 'front') return 2
-      if (stem === 'albumart') return 3
-      if (stem === 'album') return 4
-      if (stem === 'art') return 5
+      const stem = path.parse(name).name.toLowerCase().replace(/[^a-z0-9]+/g, '')
+      if (stem === 'cover' || stem === 'folder' || stem === 'front') return 0
+      if (stem === 'albumart' || stem === 'albumartwork') return 1
+      if (stem === 'album' || stem === 'art') return 2
+      if (stem === folderStem) return 3
       return 99
     }
     images.sort((left, right) =>
@@ -131,13 +130,33 @@ function getLibraryFolders(db, relativePath = '', search = '') {
     folderTrackCounts.set(childKey, (folderTrackCounts.get(childKey) || 0) + 1)
   }
 
+  const firstTrackPaths = new Map()
+  for (const filePath of descendantTrackPaths) {
+    const relativeTrackPath = path.relative(targetPath, filePath)
+    const separator = relativeTrackPath.indexOf(path.sep)
+    if (separator <= 0) continue
+    const childName = relativeTrackPath.slice(0, separator)
+    const childKey = process.platform === 'win32' ? childName.toLowerCase() : childName
+    if (!firstTrackPaths.has(childKey)) firstTrackPaths.set(childKey, filePath)
+  }
+  const firstTracks = new Map(getTracksForPaths(db, [...firstTrackPaths.values()]).map(track => [track.file_path, track]))
+
   const folders = entries
     .filter(entry => entry.isDirectory())
     .map(entry => {
       const fullPath = path.join(targetPath, entry.name)
       const childRelative = path.relative(rootPath, fullPath).split(path.sep).join('/')
       const childKey = process.platform === 'win32' ? entry.name.toLowerCase() : entry.name
-      return { name: entry.name, path: childRelative, trackCount: folderTrackCounts.get(childKey) || 0 }
+      const coverPath = findFolderArtwork(fullPath)
+      const firstTrack = firstTracks.get(firstTrackPaths.get(childKey))
+      return {
+        name: entry.name,
+        path: childRelative,
+        trackCount: folderTrackCounts.get(childKey) || 0,
+        coverPath,
+        coverTrackId: firstTrack?.id || null,
+        coverArtworkPath: firstTrack?.artwork_path || null,
+      }
     })
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }))
 

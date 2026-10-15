@@ -2,7 +2,7 @@ const { mergeDuplicates, mergeAllDuplicates } = require('../../electron/ipc/merg
 const router = require('express').Router()
 const { removeTrackFiles, forgetDownloads } = require('../../electron/ipc/trackFiles')
 const { getDB } = require('../../electron/ipc/db')
-const { getLibraryFolders } = require('../../electron/libraryFolder')
+const { findFolderArtwork, getLibraryFolders } = require('../../electron/libraryFolder')
 const { recordListeningEvent } = require('../../electron/ipc/recaps')
 const path = require('path')
 const fs = require('fs')
@@ -537,6 +537,31 @@ router.get('/library-folders', (req, res) => {
   } catch (error) {
     console.error('[library-folders] Could not read library folder:', error.message)
     res.status(500).json({ available: false, error: 'Could not read the selected music folder', folders: [], tracks: [] })
+  }
+})
+
+router.get('/library-folder-artwork', (req, res) => {
+  try {
+    const db = getDB()
+    const configuredRoot = db.prepare("SELECT value FROM settings WHERE key = 'music_folder'").get()?.value
+    if (!configuredRoot) return res.status(404).end()
+
+    const rootPath = fs.realpathSync(path.resolve(configuredRoot))
+    const relativePath = typeof req.query.path === 'string' ? req.query.path.slice(0, 4096) : ''
+    const folderPath = fs.realpathSync(path.resolve(rootPath, relativePath || '.'))
+    const isWithin = (base, candidate) => {
+      const relative = path.relative(base, candidate)
+      return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative))
+    }
+    if (!isWithin(rootPath, folderPath) || !fs.statSync(folderPath).isDirectory()) return res.status(404).end()
+
+    const artworkPath = findFolderArtwork(folderPath)
+    if (!artworkPath) return res.status(404).end()
+    const realArtworkPath = fs.realpathSync(artworkPath)
+    if (!isWithin(folderPath, realArtworkPath)) return res.status(404).end()
+    return res.sendFile(realArtworkPath)
+  } catch {
+    return res.status(404).end()
   }
 })
 
