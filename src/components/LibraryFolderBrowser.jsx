@@ -183,6 +183,7 @@ export default function LibraryFolderBrowser({
   const currentFolder = segments.length ? segments[segments.length - 1] : (data?.rootName || 'Music folder')
   const isCurrentPath = !!data && data.relativePath === folderPath
   const displayedError = error || (isCurrentPath ? data?.error : '')
+  const folderView = data?.relativePath && data.folders?.length === 0 && data.tracks?.length > 0 ? 'list' : view
   const canGoBack = historyIndex > 0 || segments.length > 0
   const canGoForward = historyIndex < history.length - 1
 
@@ -251,7 +252,7 @@ export default function LibraryFolderBrowser({
           transition={{ duration: 0.16 }}
           className="space-y-5"
         >
-          {visibleFolders.length > 0 && view === 'grid' && (
+          {visibleFolders.length > 0 && folderView === 'grid' && (
             <div className="grid grid-cols-2 @sm:grid-cols-3 @md:grid-cols-4 @lg:grid-cols-5 gap-3">
               {visibleFolders.map(folder => {
                 const coverSrc = folder.coverPath
@@ -293,7 +294,7 @@ export default function LibraryFolderBrowser({
             </div>
           )}
 
-          {visibleFolders.length > 0 && view === 'list' && (
+          {visibleFolders.length > 0 && folderView === 'list' && (
             <div className="overflow-hidden rounded-xl border border-border bg-card/40 divide-y divide-border">
               {visibleFolders.map(folder => (
                 <button
@@ -315,11 +316,11 @@ export default function LibraryFolderBrowser({
             </div>
           )}
 
-          {visibleTracks.length > 0 && view === 'list' && (
+          {visibleTracks.length > 0 && folderView === 'list' && (
             <TrackList tracks={visibleTracks} showQuality reduceMotion context={{ type: 'library-folder' }} />
           )}
 
-          {visibleTracks.length > 0 && view === 'grid' && (
+          {visibleTracks.length > 0 && folderView === 'grid' && (
             <div className="grid grid-cols-3 @sm:grid-cols-4 @md:grid-cols-5 gap-3">
               {visibleTracks.map((track, index) => {
                 const src = artSrc(track)
@@ -347,7 +348,7 @@ export default function LibraryFolderBrowser({
             </div>
           )}
 
-          {matchingDeepTracks.length > 0 && view === 'list' && (
+          {matchingDeepTracks.length > 0 && folderView === 'list' && (
             <div className="space-y-3 pt-4 border-t border-border/50">
               <div className="flex items-center gap-2">
                 <Folder size={14} className="text-muted" />
@@ -363,7 +364,7 @@ export default function LibraryFolderBrowser({
             </div>
           )}
 
-          {matchingDeepTracks.length > 0 && view === 'grid' && (
+          {matchingDeepTracks.length > 0 && folderView === 'grid' && (
             <div className="space-y-3 pt-4 border-t border-border/50">
               <div className="flex items-center gap-2">
                 <Folder size={14} className="text-muted" />

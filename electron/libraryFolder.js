@@ -158,6 +158,7 @@ function getLibraryFolders(db, relativePath = '', search = '') {
         coverArtworkPath: firstTrack?.artwork_path || null,
       }
     })
+    .filter(folder => !(folder.name.startsWith('.') && folder.trackCount === 0))
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }))
 
   const trackPaths = entries
