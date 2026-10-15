@@ -13,6 +13,14 @@ import { useTranslation } from '../i18n'
 
 const LIBRARY_PAGE_SIZE = 50
 const HEAVY_GRID_THRESHOLD = 80
+const readLibraryPreference = (key, fallback, choices) => {
+  try {
+    const value = localStorage.getItem(key)
+    return choices.includes(value) ? value : fallback
+  } catch {
+    return fallback
+  }
+}
 
 export default function Library() {
   const { t } = useTranslation()
@@ -28,8 +36,18 @@ export default function Library() {
   // One audio quality tier, or '' for all (the Audio Quality page's tiers).
   const [quality, setQuality] = useCachedState('library:quality', '')
   const [problemsOnly, setProblemsOnly] = useCachedState('library:problemsOnly', false)
-  const [view, setView] = useCachedState('library:view', 'list')
-  const [libraryMode, setLibraryMode] = useCachedState('library:mode', 'simple')
+  const [view, setCachedView] = useCachedState('library:view', () => readLibraryPreference('lokal-library-view', 'list', ['list', 'grid']))
+  const setView = value => {
+    if (value !== 'list' && value !== 'grid') return
+    try { localStorage.setItem('lokal-library-view', value) } catch {}
+    setCachedView(value)
+  }
+  const [libraryMode, setCachedLibraryMode] = useCachedState('library:mode', () => readLibraryPreference('lokal-library-mode', 'simple', ['simple', 'advanced']))
+  const setLibraryMode = value => {
+    if (value !== 'simple' && value !== 'advanced') return
+    try { localStorage.setItem('lokal-library-mode', value) } catch {}
+    setCachedLibraryMode(value)
+  }
   const [folderPath, setFolderPath] = useCachedState('library:folderPath', '')
   const [folderSearch, setFolderSearch] = useState('')
   const [folderData, setFolderData] = useState(null)
