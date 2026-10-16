@@ -173,7 +173,7 @@ export default function PlayerBar() {
           </AnimatePresence>
         </button>
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 w-[136px] flex-shrink-0">
           {/* The new song's title in at once (fading in), never waiting on the old one's way out. */}
             <motion.div key={currentTrack?.id||'none'} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
               <div className="flex items-center gap-2 min-w-0">
@@ -230,7 +230,7 @@ export default function PlayerBar() {
             </motion.div>
         </div>
 
-        <div className="flex flex-shrink-0 -translate-x-3 items-center gap-3">
+        <div className="flex h-5 w-[99px] flex-shrink-0 items-center gap-3">
           {currentTrack && (
             <button onClick={() => openAddToPlaylist(currentTrack)} title={t("Add to playlist")} aria-label={t("Add to playlist")}
               className="flex-shrink-0 text-text/90 hover:text-accent transition-colors">
