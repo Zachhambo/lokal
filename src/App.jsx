@@ -1626,15 +1626,113 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [])
 
-  // An addon's login / verification window closed: sources refresh, and a
-  // successful verification is confirmed wherever the person is.
-  useEffect(() => api.onAddonAuthChanged(status => {
-    window.dispatchEvent(new Event('lokal:addons-changed'))
-    if (status?.authenticated) showToast('Addon access verified. It can now stream and download.')
-  }), [])
-
   // An online song that couldn't be streamed (shown as a small notice).
   const [streamError, setStreamError] = useState(null)
+  const [addonVerificationPrompt, setAddonVerificationPrompt] = useState(null)
+  const [addonVerificationBusy, setAddonVerificationBusy] = useState(false)
+  const [addonVerificationMessage, setAddonVerificationMessage] = useState('')
+  const [playbackRetryNonce, setPlaybackRetryNonce] = useState(0)
+  const addonVerificationRetryRef = useRef(null)
+
+  const completeAddonVerification = useCallback((key) => {
+    const pending = addonVerificationRetryRef.current
+    if (!pending || pending.key !== key || pending.retrying) return
+    if (typeof pending.retry === 'function') {
+      // The popup may be completed both by its immediate response and by the
+      // auth-window event. Guard the retry and close only once it has started.
+      pending.retrying = true
+      setAddonVerificationBusy(true)
+      setAddonVerificationMessage('Access verified. Starting the selected song…')
+      return Promise.resolve().then(async () => {
+        let result = await pending.retry()
+        if (addonVerificationRetryRef.current !== pending) return
+        // An auth-window close event can arrive a fraction before the provider
+        // runtime reports the fresh session. Recheck and retry once automatically
+        // rather than requiring the listener to click Play again.
+        if (result === false) {
+          const status = await api.addonsPackages({ action: 'package.auth', key }).catch(() => null)
+          if (status?.authenticated) result = await pending.retry()
+        }
+        if (addonVerificationRetryRef.current !== pending) return
+        if (result === true || result === undefined || (Array.isArray(result) && result.length > 0)) {
+          addonVerificationRetryRef.current = null
+          setAddonVerificationPrompt(current => current?.key === key ? null : current)
+          setAddonVerificationMessage('')
+          if (result === true) setIsPlaying(true)
+        } else if (result === false || Array.isArray(result)) {
+          addonVerificationRetryRef.current = null
+          setAddonVerificationPrompt(current => current?.key === key ? null : current)
+          setAddonVerificationMessage('')
+          showToast('Access was verified, but no playable match could be resolved for this song.')
+        } else if (result === null) {
+          setAddonVerificationMessage('Access was verified, but playback could not resume automatically. Lokal will keep the selected song ready to retry.')
+        }
+      }).catch(error => {
+        if (addonVerificationRetryRef.current === pending) {
+          setAddonVerificationMessage(error?.message || "Verification succeeded, but playback couldn't be resumed automatically.")
+        }
+      }).finally(() => {
+        if (addonVerificationRetryRef.current === pending) pending.retrying = false
+        setAddonVerificationBusy(false)
+      })
+    }
+    addonVerificationRetryRef.current = null
+    setAddonVerificationPrompt(current => current?.key === key ? null : current)
+    setAddonVerificationMessage('')
+    const state = usePlayerStore.getState()
+    // The actual stream-preparation path hasn't assigned a src when it detects
+    // VERIFY_REQUIRED. Replaying the same queue entry with a new generation
+    // makes the source effect prepare it again after access is granted.
+    if (state.currentTrack && state.currentTrack.id === pending.trackId) {
+      setPlaybackRetryNonce(value => value + 1)
+      setIsPlaying(true)
+    }
+  }, [setIsPlaying])
+
+  const dismissAddonVerificationPrompt = useCallback(() => {
+    const pending = addonVerificationRetryRef.current
+    addonVerificationRetryRef.current = null
+    try { pending?.cancel?.() } catch {}
+    setAddonVerificationPrompt(null)
+    setAddonVerificationMessage('')
+  }, [])
+
+  useEffect(() => {
+    const onAddonVerificationRequired = event => {
+      const detail = event?.detail || {}
+      const provider = String(detail.provider || '')
+      const key = String(detail.key || (provider.startsWith('a-') ? provider.slice(2) : ''))
+      if (!key) return
+      const state = usePlayerStore.getState()
+      const title = detail.title || state.currentTrack?.title || 'this song'
+      addonVerificationRetryRef.current = {
+        key, provider: provider || 'a-' + key, title,
+        trackId: state.currentTrack?.id ?? null,
+        retry: typeof detail.retry === 'function' ? detail.retry : null,
+        cancel: typeof detail.cancel === 'function' ? detail.cancel : null,
+        isCurrentPlayback: false,
+      }
+      setAddonVerificationMessage('')
+      setAddonVerificationPrompt({ key, provider: provider || 'a-' + key, title, isCurrentPlayback: false })
+      // This event is raised during recommendation resolution, before its
+      // candidate is installed in the queue. Keep the current song untouched;
+      // the actual stream-preparation path owns its own pause/resume handling.
+    }
+    window.addEventListener('lokal:addon-verification-required', onAddonVerificationRequired)
+    return () => window.removeEventListener('lokal:addon-verification-required', onAddonVerificationRequired)
+  }, [])
+
+  // A verified add-on is retried at the point that was interrupted: either the
+  // selected Discovery candidate/batch, or the current track's stream request.
+  useEffect(() => api.onAddonAuthChanged(status => {
+    window.dispatchEvent(new Event('lokal:addons-changed'))
+    if (status?.authenticated) {
+      showToast('Addon access verified. It can now stream and download.')
+      completeAddonVerification(status.key)
+    } else if (status?.key && addonVerificationRetryRef.current?.key === status.key) {
+      setAddonVerificationMessage(status.error || "Verification wasn't completed. Try again when you're ready.")
+    }
+  }), [completeAddonVerification])
   useEffect(() => {
     if (!streamError) return undefined
     const t = setTimeout(() => setStreamError(null), 9000)
@@ -2306,7 +2404,29 @@ export default function App() {
       if (unavailable && isAddonProvider(ref.provider) && addonError) {
         const access = ADDON_ACCESS_ERROR.test(addonError)
         detail = access ? 'it needs verifying: Settings → Addons → Verify access' : addonError.slice(0, 160)
-        if (access) window.dispatchEvent(new Event('lokal:addons-changed'))
+        if (access) {
+          window.dispatchEvent(new Event('lokal:addons-changed'))
+          // A verification failure is actionable, not a missing match. Keep
+          // this song selected and paused instead of trying other providers or
+          // advancing Discovery/Flow to another song.
+          el.pause()
+          el.dataset.fallbackPending = ''
+          setIsPlaying(false)
+          setIsBuffering(false)
+          const key = ref.provider.slice(2)
+          addonVerificationRetryRef.current = {
+            key, provider: ref.provider, title: live.currentTrack.title || 'this song',
+            trackId: live.currentTrack.id, retry: null, isCurrentPlayback: true,
+          }
+          setAddonVerificationMessage('')
+          setAddonVerificationPrompt({
+            key,
+            provider: ref.provider,
+            title: live.currentTrack.title || 'this song',
+            isCurrentPlayback: true,
+          })
+          return
+        }
       }
       if (unavailable) { await recoverOnlinePlayback(el, live.currentTrack, ref, unavailable, detail); return }
       el.dataset.fallbackPending = ''
@@ -2317,7 +2437,7 @@ export default function App() {
     }
     start()
     return () => { cancelled = true; el.dataset.fallbackPending = ''; el.dataset.lokalTrackPending = '' }
-  }, [currentTrack?.id, currentTrack?.file_path, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
+  }, [currentTrack?.id, currentTrack?.file_path, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
 
   useEffect(() => {
     if (!api.isElectron) return
@@ -2850,6 +2970,61 @@ export default function App() {
             {renderUpdateToast()}
             <Toaster />
             <AnimatePresence>
+              {addonVerificationPrompt && (
+                <motion.div
+                  className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={event => { if (event.target === event.currentTarget && !addonVerificationBusy) dismissAddonVerificationPrompt() }}
+                >
+                  <motion.div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="addon-verification-title"
+                    initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.98 }}
+                    className="w-full max-w-md rounded-2xl border border-border bg-elevated p-5 shadow-2xl"
+                  >
+                    <p id="addon-verification-title" className="text-base font-semibold text-text">{t('Provider verification required')}</p>
+                    <p className="mt-2 text-sm text-muted">{addonVerificationPrompt.isCurrentPlayback
+                      ? t('Playback of “{title}” is paused because this provider needs verification. Verify access to continue; Lokal will not skip to another song.', { title: addonVerificationPrompt.title })
+                      : t('The selected song “{title}” needs this provider to be verified before it can play. Current playback will continue until verification finishes.', { title: addonVerificationPrompt.title })}</p>
+                    {addonVerificationMessage && <p role="status" className="mt-3 text-xs text-muted">{t(addonVerificationMessage)}</p>}
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button
+                        disabled={addonVerificationBusy}
+                        onClick={dismissAddonVerificationPrompt}
+                        className="rounded-lg border border-border px-3 py-2 text-sm text-muted hover:text-text disabled:opacity-50"
+                      >{t('Not now')}</button>
+                      <button
+                        disabled={addonVerificationBusy}
+                        onClick={async () => {
+                          setAddonVerificationBusy(true)
+                          setAddonVerificationMessage('')
+                          try {
+                            const result = await api.addonsPackages({ action: 'package.verify', key: addonVerificationPrompt.key })
+                            if (result?.authenticated) {
+                              window.dispatchEvent(new Event('lokal:addons-changed'))
+                              await completeAddonVerification(addonVerificationPrompt.key)
+                            } else if (result?.opened) {
+                              setAddonVerificationMessage('Complete verification in the browser window that opened. Lokal will start the selected song automatically when access is confirmed.')
+                            } else {
+                              setAddonVerificationMessage(result?.error || "Verification couldn't be started. Open Settings → Addons to verify this provider.")
+                            }
+                          } catch (error) {
+                            setAddonVerificationMessage(error?.message || "Verification couldn't be started. Open Settings → Addons to verify this provider.")
+                          } finally {
+                            setAddonVerificationBusy(false)
+                          }
+                        }}
+                        className="rounded-lg bg-accent px-3 py-2 text-sm text-base disabled:opacity-50"
+                      >{addonVerificationBusy ? t('Opening…') : t('Verify access')}</button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
               {streamError && (
                 <motion.div
                   role="status"
