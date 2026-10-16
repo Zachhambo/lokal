@@ -3,6 +3,7 @@ import { packQueue, unpackQueue, QUEUE_KEYS } from '../queueStorage.js'
 import { isPlayable } from '../onlineTracks.js'
 import { songKey } from '../recommendations.js'
 import { CROSSFADE_DEFAULTS } from '../audio/crossfade.js'
+import { PLAYBACK_FADE_MS, playbackFadeLevel } from '../audio/playbackFade.js'
 
 // Only used by toggleMiniPlayer's setWindowSize/setAlwaysOnTop fallback path
 // below (when window.electron.setMiniMode isn't available), to remember the
@@ -17,6 +18,47 @@ let miniModeFallbackPrevSize = null
 // before either one's IPC round-trip resolves -- each call now only reads
 // `next` after any prior toggle has actually finished.
 let miniModeToggleChain = Promise.resolve()
+let playbackFadeTimer = null
+let playbackFadeGeneration = 0
+let playbackPausePending = false
+let playbackFadeRestoreVolume = null
+let playbackFadeCurrentVolume = null
+
+function cancelPlaybackFade() {
+  if (playbackFadeTimer) clearInterval(playbackFadeTimer)
+  playbackFadeTimer = null
+  playbackFadeGeneration++
+}
+
+function fadePlaybackVolume(setVolume, from, to, onComplete) {
+  cancelPlaybackFade()
+  const generation = playbackFadeGeneration
+  const startedAt = Date.now()
+  playbackFadeCurrentVolume = from
+  const update = () => {
+    if (generation !== playbackFadeGeneration) return
+    const elapsed = Date.now() - startedAt
+    try {
+      const nextVolume = playbackFadeLevel(from, to, elapsed)
+      setVolume(nextVolume)
+      playbackFadeCurrentVolume = nextVolume
+    } catch (error) {
+      console.error('Failed to fade playback volume', error)
+      cancelPlaybackFade()
+      onComplete?.()
+      return
+    }
+    if (elapsed >= PLAYBACK_FADE_MS) {
+      clearInterval(playbackFadeTimer)
+      playbackFadeTimer = null
+      onComplete?.()
+    }
+  }
+  update()
+  if (generation === playbackFadeGeneration) playbackFadeTimer = setInterval(update, 16)
+  return generation
+}
+
 // A cover fades over the window before the native resize and away after the
 // swap, so neither layout is ever seen at the other's size (App.jsx).
 const MINI_FADE_MS = 110
@@ -475,12 +517,84 @@ export const usePlayerStore = create((set, get) => ({
   },
 
   togglePlay: () => {
-    if (outputRoute) { set(s => ({ isPlaying: !s.isPlaying })); return }
-    const { audioRef, cfAudioRef, activeAudioElement, isPlaying } = get()
+    const { audioRef, cfAudioRef, activeAudioElement, isPlaying, volume } = get()
+    const route = outputRoute
     const activeRef = activeAudioElement === 'primary' ? audioRef : cfAudioRef
-    if (!activeRef?.current) return
-    isPlaying ? activeRef.current.pause() : activeRef.current.play()
-    set({ isPlaying: !isPlaying })
+    const element = activeRef?.current
+    if (!route && !element) return
+
+    if (isPlaying && playbackPausePending) {
+      playbackPausePending = false
+      const targetVolume = playbackFadeRestoreVolume ?? (route ? get().volume : element.volume)
+      playbackFadeRestoreVolume = null
+      if (route) {
+        fadePlaybackVolume(level => route.setVolume(level), playbackFadeCurrentVolume ?? 0, targetVolume)
+      } else {
+        fadePlaybackVolume(level => { element.volume = level }, element.volume, targetVolume)
+      }
+      return
+    }
+
+    if (isPlaying) {
+      playbackPausePending = true
+      const currentVolume = route ? volume : element.volume
+      playbackFadeRestoreVolume = currentVolume
+      const playbackGeneration = get().playbackGeneration
+      const trackAtPause = get().currentTrack
+      const pause = () => {
+        playbackPausePending = false
+        playbackFadeRestoreVolume = null
+        const latest = get()
+        if (latest.playbackGeneration !== playbackGeneration || latest.currentTrack !== trackAtPause ||
+          latest.activeAudioElement !== activeAudioElement || outputRoute !== route) {
+          if (route) route.setVolume(latest.volume)
+          else element.volume = currentVolume
+          return
+        }
+        if (route) {
+          route.setVolume(latest.volume)
+        } else {
+          element.pause()
+          element.volume = currentVolume
+        }
+        set({ isPlaying: false })
+      }
+      fadePlaybackVolume(
+        level => route ? route.setVolume(level) : (element.volume = level),
+        currentVolume,
+        0,
+        pause,
+      )
+      return
+    }
+
+    playbackPausePending = false
+    if (route) {
+      route.setVolume(0)
+      set({ isPlaying: true })
+      fadePlaybackVolume(level => route.setVolume(level), 0, volume)
+      return
+    }
+
+    const targetVolume = element.volume
+    element.volume = 0
+    let playResult
+    try {
+      playResult = element.play()
+    } catch (error) {
+      console.error('Failed to start playback', error)
+      element.volume = targetVolume
+      return
+    }
+    set({ isPlaying: true })
+    const generation = fadePlaybackVolume(level => { element.volume = level }, 0, targetVolume)
+    playResult?.catch(error => {
+      if (generation !== playbackFadeGeneration) return
+      console.error('Failed to start playback', error)
+      cancelPlaybackFade()
+      element.volume = targetVolume
+      set({ isPlaying: false })
+    })
   },
 
   next: () => {
@@ -1123,12 +1237,8 @@ export const usePlayerStore = create((set, get) => ({
       if (!sleepTimerEndTime) return
       
       if (Date.now() >= sleepTimerEndTime) {
-        const { audioRef, cfAudioRef, activeAudioElement } = get()
-        const activeRef = activeAudioElement === 'primary' ? audioRef : cfAudioRef
-        if (activeRef?.current) {
-          activeRef.current.pause()
-        }
-        set({ isPlaying: false, sleepTimerMinutes: 0, sleepTimerEndTime: null, sleepTimerInterval: null })
+        if (isPlaying) get().togglePlay()
+        set({ sleepTimerMinutes: 0, sleepTimerEndTime: null, sleepTimerInterval: null })
         clearInterval(interval)
       }
     }, 1000)

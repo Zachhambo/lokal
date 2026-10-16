@@ -1294,19 +1294,13 @@ export default function App() {
         })
       } catch {}
     }
-    navigator.mediaSession.setActionHandler('play', () => { 
-      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(true); return }
-      const activeEl = getActiveAudio()
-      activeEl?.play() 
+    navigator.mediaSession.setActionHandler('play', () => {
+      const player = usePlayerStore.getState()
+      if (!player.isPlaying) player.togglePlay()
     })
-    navigator.mediaSession.setActionHandler('pause', () => { 
-      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(false); return }
-      const activeEl = getActiveAudio()
-      activeEl?.pause() 
-      // An explicit pause: record it in the store directly, since the element's
-      // own pause event is ignored while a file is failing or being swapped
-      // for its playable copy (ignoreElementPause).
-      usePlayerStore.getState().setIsPlaying(false)
+    navigator.mediaSession.setActionHandler('pause', () => {
+      const player = usePlayerStore.getState()
+      if (player.isPlaying) player.togglePlay()
     })
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (usePlayerStore.getState().castActive) { if (typeof details.seekTime === 'number') usePlayerStore.getState().setProgressWithAudioUpdate(details.seekTime); return }

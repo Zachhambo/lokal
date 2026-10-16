@@ -28,10 +28,17 @@ function likeMatches(value, pattern) {
 }
 
 try {
-  const album = path.join(root, 'Artist', 'Album')
-  const emojiAlbum = path.join(root, '🎧Artist', 'Album')
+  const musicRoot = path.join(root, 'music')
+  const album = path.join(musicRoot, 'Artist', 'Album')
+  const emojiAlbum = path.join(musicRoot, '🎧Artist', 'Album')
+  const hiddenEmptyFolder = path.join(musicRoot, '.hidden-empty')
+  const hiddenWithTracksFolder = path.join(musicRoot, '.hidden-with-tracks')
   fs.mkdirSync(album, { recursive: true })
   fs.mkdirSync(emojiAlbum, { recursive: true })
+  fs.mkdirSync(hiddenEmptyFolder, { recursive: true })
+  fs.mkdirSync(hiddenWithTracksFolder, { recursive: true })
+  const hiddenTrackPath = path.join(hiddenWithTracksFolder, 'hidden-track.flac')
+  fs.writeFileSync(hiddenTrackPath, 'audio')
   fs.writeFileSync(path.join(album, 'a.png'), 'image')
   fs.writeFileSync(path.join(album, 'cover.jpg'), 'cover')
   fs.writeFileSync(path.join(album, '01-track.flac'), 'audio')
@@ -42,10 +49,14 @@ try {
   fs.unlinkSync(path.join(album, 'cover.jpg'))
   assert.equal(findFolderArtwork(album), path.join(album, 'a.png'), 'an image without a conventional name still works as fallback')
 
+  const embeddedArtworkPath = path.join(root, 'stored-artwork', 'track-cover.jpg')
+  fs.mkdirSync(path.dirname(embeddedArtworkPath), { recursive: true })
+  fs.writeFileSync(embeddedArtworkPath, 'embedded artwork')
   const indexedTracks = [
-    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', file_path: path.join(album, '01-track.flac') },
+    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', file_path: path.join(album, '01-track.flac'), artwork_path: embeddedArtworkPath },
     { id: 'track-percent', title: 'Literal 100% Track', artist: 'Artist', album: 'Album', file_path: path.join(album, '02-percent.flac') },
     { id: 'track-underscore', title: 'Name_with_underscore', artist: 'Artist', album: 'Album', file_path: path.join(album, '03-underscore.flac') },
+    { id: 'hidden-track', title: 'Hidden Track', artist: 'Hidden', album: 'Hidden', file_path: hiddenTrackPath },
     // This row is stale: it must not count or appear in a playable queue.
     { id: 'stale', title: 'Deleted Track', artist: 'Artist', album: 'Album', file_path: path.join(album, 'deleted.flac') },
   ]
@@ -53,13 +64,20 @@ try {
     const filename = 'bulk-' + String(i).padStart(4, '0') + '.flac'
     const filePath = path.join(emojiAlbum, filename)
     fs.writeFileSync(filePath, 'audio')
-    indexedTracks.push({ id: 'bulk-' + i, title: 'Bulk Track ' + i, artist: 'Bulk Artist', album: 'Large Album', file_path: filePath })
+    indexedTracks.push({
+      id: 'bulk-' + i,
+      title: 'Bulk Track ' + i,
+      artist: 'Bulk Artist',
+      album: 'Large Album',
+      file_path: filePath,
+      artwork_path: i === 0 ? embeddedArtworkPath : null,
+    })
   }
 
   const isInRange = (filePath, start, end) => filePath >= start && filePath < end
   const db = {
     prepare(sql) {
-      if (sql.includes("key = 'music_folder'")) return { get: () => ({ value: root }) }
+      if (sql.includes("key = 'music_folder'")) return { get: () => ({ value: musicRoot }) }
       if (sql.includes('SELECT file_path FROM tracks')) {
         return {
           all: (start, end) => indexedTracks
@@ -88,12 +106,17 @@ try {
 
   const rootView = getLibraryFolders(db, '')
   assert.equal(rootView.available, true)
-  assert.deepEqual(rootView.folders.map(folder => folder.name).sort(), ['Artist', '🎧Artist'])
+  assert.deepEqual(rootView.folders.map(folder => folder.name).sort(), ['.hidden-with-tracks', 'Artist', '🎧Artist'])
+  assert.equal(rootView.folders.some(folder => folder.name === '.hidden-empty'), false, 'dot-prefixed folders with no tracks are hidden')
+  assert.equal(rootView.folders.find(folder => folder.name === '.hidden-with-tracks').trackCount, 1, 'dot-prefixed folders with tracks remain visible')
   assert.equal(rootView.tracks.length, 0)
-  assert.equal(rootView.totalTracks, 1004, 'root count excludes stale database paths')
-  assert.equal(rootView.allTracks.length, 1004, 'Play All includes every descendant, with no 1,000-track cap')
-  assert.equal(rootView.folders[0].trackCount, 3, 'child folder count is recursive and excludes stale files')
-  assert.equal(rootView.folders[1].trackCount, 1001, 'emoji-leading folder names are included in the recursive count')
+  assert.equal(rootView.totalTracks, 1005, 'root count excludes stale database paths')
+  assert.equal(rootView.allTracks.length, 1005, 'Play All includes every descendant, with no 1,000-track cap')
+  assert.equal(rootView.folders.find(folder => folder.name === 'Artist').trackCount, 3, 'child folder count is recursive and excludes stale files')
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').trackCount, 1001, 'emoji-leading folder names are included in the recursive count')
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverPath, null, 'folders without a saved image have no file cover')
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverTrackId, 'bulk-0', 'folders without a saved image use their first song')
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverArtworkPath, embeddedArtworkPath, 'first-song embedded artwork is available as the folder cover')
 
   const artistView = getLibraryFolders(db, 'Artist')
   assert.equal(artistView.relativePath, 'Artist')
@@ -102,6 +125,9 @@ try {
   assert.equal(artistView.allTracks.length, 3, 'parent subfolder Play All includes all valid descendants')
   assert.equal(artistView.folders[0].name, 'Album')
   assert.equal(artistView.folders[0].trackCount, 3)
+  assert.equal(artistView.folders[0].coverPath, path.join(album, 'a.png'), 'folder entries expose their saved image cover path')
+  assert.equal(artistView.folders[0].coverTrackId, 'track-1', 'folder entries expose the first song for artwork fallback')
+  assert.equal(artistView.folders[0].coverArtworkPath, embeddedArtworkPath, 'folder entries expose the first song embedded artwork')
 
   const emojiView = getLibraryFolders(db, '🎧Artist')
   assert.equal(emojiView.totalTracks, 1001)
