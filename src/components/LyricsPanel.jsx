@@ -5,6 +5,7 @@ import { Mic2, Search, Languages, RotateCcw, Check, ChevronDown, Loader2 } from 
 import LyricsSearchDrawer from './LyricsSearchDrawer'
 import LyricBreakDots from './LyricBreakDots'
 import { api } from '../api'
+import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
 import { useLyricSubline } from '../lyrics/useLyricSubline'
 import { announceLyricsChanged } from '../lyricLine'
 import { usePlayerStore } from '../store/player'
@@ -148,7 +149,7 @@ export function paintVoice(voiceEl, units, t, live) {
 // ---------------------------------------------------------------- rows
 
 const Row = React.memo(function Row({
-  line, index, until, clock, distance, isFocused, isLive, synced, browsing, wordSync, fullscreen, textScale, duet, sub, onSeek, registerRow,
+  line, index, until, clock, distance, isFocused, isLive, synced, browsing, wordSync, fullscreen, textScale, duet, sub, onSeek, registerRow, onGapCollapse,
 }) {
   const { t } = useTranslation()
   const rowRef = useRef(null)
@@ -181,6 +182,7 @@ const Row = React.memo(function Row({
     return (
       <div ref={rowRef} data-row={index} className="w-full" style={{ willChange: 'transform' }}>
         <div
+          onTransitionEnd={event => { if (event.propertyName === 'height' && !open) onGapCollapse?.() }}
           style={{
             height: open ? `${baseSize * 1.5}rem` : 0,
             opacity: open ? 1 : 0,
@@ -546,9 +548,11 @@ export default function LyricsPanel({
 
   useEffect(() => {
     if (!synced || !lines.length) return
-    let raf
+    let raf = null
+    let hidden = isWindowHidden()
     const tick = () => {
-      raf = requestAnimationFrame(tick)
+      raf = null
+      if (hidden) return
       const t = now()
       const live = new Set(activeRows(lines, t))
       // Lines that just stopped being sung get settled into their final state once.
@@ -573,9 +577,22 @@ export default function LyricsPanel({
         if (sub?.words?.length && refs.subEl) paintVoice(refs.subEl.querySelector('[data-voice="timed"]'), sub.words, t, true)
       }
       paintedRows.current = live
+      raf = requestAnimationFrame(tick)
     }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    const unsubscribeVisibility = onWindowVisibility(nextHidden => {
+      hidden = nextHidden
+      if (hidden) {
+        if (raf !== null) cancelAnimationFrame(raf)
+        raf = null
+      } else if (raf === null) {
+        raf = requestAnimationFrame(tick)
+      }
+    })
+    if (!hidden) raf = requestAnimationFrame(tick)
+    return () => {
+      unsubscribeVisibility()
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
   }, [synced, lines, nextTimes, now, wordSync, subLines])
 
   // When the list re-renders, bring every timed line to its correct resting state.
@@ -638,6 +655,14 @@ export default function LyricsPanel({
       rowEl.style.transform = ''
     })
   }, [focusIdx, anchorFraction])
+
+  // When a focused three-dot break collapses, its height changes throughout a
+  // CSS transition. Re-align after that final layout shift so the next lyric
+  // line doesn't get clipped at the top of the scroll viewport.
+  const handleGapCollapse = useCallback(() => {
+    if (focusIdx < 0 || browsing) return
+    scrollToFocus(true)
+  }, [focusIdx, browsing, scrollToFocus])
 
   useLayoutEffect(() => {
     if (focusIdx < 0 || browsing) return
@@ -815,9 +840,10 @@ export default function LyricsPanel({
                   sub={subLines?.[i] || null}
                   onSeek={seek}
                   registerRow={registerRow}
+                  onGapCollapse={line.gap ? handleGapCollapse : undefined}
                 />
               ))}
-              <div style={{ height: fullscreen ? '55vh' : 0 }} />
+              <div style={{ height: fullscreen ? '55vh' : compact ? '240px' : 0 }} />
               {sourceLabel && (
                 <p className="px-3 pb-10 text-[11px] text-white/30">
                   Lyrics via {sourceLabel}{result?.sync ? ` · ${SYNC_LABEL[result.sync] || ''}` : ''}
