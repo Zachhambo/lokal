@@ -1,7 +1,7 @@
 import { useTranslation } from '../i18n'
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Volume2, Film, Clapperboard, Image as ImageIcon } from 'lucide-react'
+import { X, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Film, Clapperboard, Image as ImageIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -9,7 +9,6 @@ import LyricsPanel from './LyricsPanel'
 import { cacheLyrics, hasLyricLines, peekLyrics } from '../lyrics/lyricsCache'
 import ArtworkBackdrop, { useArtworkBackdropEnabled } from './ArtworkBackdrop'
 import MotionCover, { loadMotionCover } from './MotionCover'
-import LikeBurst from './LikeBurst'
 import { useMotionCoverOff } from '../motionCoverPrefs'
 import MixCovers from './MixCovers'
 import MixingMark from './MixingMark'
@@ -22,7 +21,7 @@ import { contextLabel, isContextNavigable, navigateToContext } from '../playback
 import { trackArtURL } from '../onlineTracks'
 
 // The cover's size (square), and the lyrics/queue panel's width beside it.
-const COVER_SIZE = 'min(34rem, 54vh)'
+const COVER_SIZE = 'min(60rem, 78vh, calc(100vw - 8rem), calc(110vh - 25rem))'
 const PANEL_WIDTH = 'min(52vw, 780px)'
 const FULLSCREEN_LYRICS_WAIT_MS = 1500 // lyrics found after this don't open the panel on their own
 // The header and the cover's controls hide (and the cursor too) after this
@@ -55,41 +54,6 @@ function CoverIcon({ onClick, label, pressed, dim = false, children }) {
       className={`flex items-center justify-center transition-[color,transform] hover:scale-105 active:scale-95 drop-shadow-[0_2px_8px_rgba(0,0,0,0.45)] ${dim ? 'text-white/60 hover:text-white' : 'text-white/90 hover:text-white'}`}>
       {children}
     </button>
-  )
-}
-
-/** Volume as a slim glass pill up the cover's edge: drag (or click) along it. */
-function VolumePill({ volume, onChange }) {
-  const { t } = useTranslation()
-  const ref = useRef(null)
-  const setFrom = (clientY) => {
-    const r = ref.current?.getBoundingClientRect()
-    if (!r) return
-    onChange(Math.max(0, Math.min(1, (r.bottom - clientY) / r.height)))
-  }
-  const start = (event) => {
-    event.preventDefault()
-    setFrom(event.clientY)
-    const move = e => setFrom(e.clientY)
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-  const keys = (event) => {
-    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(1, volume + 0.05)) }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') { event.preventDefault(); onChange(Math.max(0, volume - 0.05)) }
-  }
-  // The speaker sits inside the pill, at its foot: dark over the white fill,
-  // light over the glass.
-  const covered = volume > 0.12
-  return (
-    <div ref={ref} role="slider" tabIndex={0} aria-label={t("Volume")} aria-orientation="vertical"
-      aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(volume * 100)} title={`Volume ${Math.round(volume * 100)}%`}
-      onPointerDown={start} onKeyDown={keys}
-      className={`relative h-44 w-7 cursor-pointer overflow-hidden rounded-full border border-white/[0.14] bg-white/[0.06] backdrop-blur-[2px] drop-shadow-[0_1px_4px_rgba(0,0,0,0.3)] outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${COVER_FADE}`}>
-      <div className="absolute inset-x-0 bottom-0 bg-white/60" style={{ height: `${Math.round(volume * 100)}%` }} />
-      <Volume2 size={13} className={`pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 ${covered ? 'text-black/55' : 'text-white/80'}`} />
-    </div>
   )
 }
 
@@ -224,34 +188,29 @@ export default function FullscreenPlayer() {
   const { t } = useTranslation()
   const {
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    audioRef, cfAudioRef, activeAudioElement,
+    playbackContext,
   } = usePlayerStore(useShallow(({
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    audioRef, cfAudioRef, activeAudioElement,
+    playbackContext,
   }) => ({
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    audioRef, cfAudioRef, activeAudioElement,
+    playbackContext,
   })))
-  const { user, openAddToPlaylist } = useAppStore()
+  const { openAddToPlaylist } = useAppStore()
   const nav = useNavigate()
   const wordSync = wordSyncEnabled()
-  const [likeAnim, setLikeAnim] = useState(false)
-  const [burst, setBurst] = useState(null)
-  const likeBusy = useRef(false)
-  const burstTimer = useRef(0)
-  useEffect(() => () => window.clearTimeout(burstTimer.current), [])
   const [bgLoaded, setBgLoaded] = useState(false)
   const backdropFx = useArtworkBackdropEnabled()
   const [fsCanvas, setFsCanvas] = useState(false)
@@ -486,38 +445,7 @@ export default function FullscreenPlayer() {
 
   const artSrc = trackArtURL(currentTrack)
 
-  const isLiked = currentTrack && likedIds.has(currentTrack.id)
   const RepeatIcon = repeat === 'one' ? Repeat1 : Repeat
-
-
-  const toggleLike = async () => {
-    if (!currentTrack || likeBusy.current) return
-    likeBusy.current = true
-    try {
-      const r = await api.toggleLike(currentTrack.id, user?.id, currentTrack)
-      const liked = typeof r === 'boolean' ? r : r?.liked ?? false
-      setLiked(currentTrack.id, liked)
-      if (liked && !reduceMotion) { setLikeAnim(true); setTimeout(() => setLikeAnim(false), 700) }
-    } finally {
-      likeBusy.current = false
-    }
-  }
-
-  // Double-clicking the cover itself (not a button or the volume pill on it)
-  // likes the song; doing it again un-likes it. One at a time, so a quick triple
-  // click can't get the heart and the server out of step.
-  const doubleClickLike = async (event) => {
-    if (!currentTrack || likeBusy.current) return
-    if (event.target.closest?.('button, a, input, [role="slider"]')) return
-    window.clearTimeout(burstTimer.current)
-    setBurst({ id: Date.now(), trackId: currentTrack.id, kind: isLiked ? 'unlike' : 'like' })
-    burstTimer.current = window.setTimeout(() => setBurst(null), 1200)
-    try {
-      await toggleLike()
-    } catch {
-      setBurst(null)
-    }
-  }
 
   const handleLyricsSelect = (lyrics, type) => {
     if (!currentTrack) return
@@ -551,6 +479,26 @@ export default function FullscreenPlayer() {
   const chromeFade = `transition-[opacity,color,background-color] duration-300 ${chromeHidden ? 'opacity-0' : 'opacity-100'}`
   const [coverHover, setCoverHover] = useState(false)
   const controlsShown = coverHover && !chromeHidden
+  const handleCoverPointerMove = (event) => {
+    if (reduceMotion || event.pointerType !== 'mouse') return
+    const cover = event.currentTarget
+    const bounds = cover.querySelector('.fullscreen-cover-surface')?.getBoundingClientRect()
+    if (!bounds) return
+    const x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width))
+    const y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))
+    cover.style.setProperty('--cover-rotate-x', `${(0.5 - y) * 9}deg`)
+    cover.style.setProperty('--cover-rotate-y', `${(x - 0.5) * 9}deg`)
+    cover.style.setProperty('--cover-highlight-x', `${(0.5 - (x - 0.5) * 0.7) * 100}%`)
+    cover.style.setProperty('--cover-highlight-y', `${(0.5 - (y - 0.5) * 0.7) * 100}%`)
+    cover.style.setProperty('--cover-highlight-opacity', '0.28')
+  }
+  const resetCoverPointer = (event) => {
+    setCoverHover(false)
+    const cover = event.currentTarget
+    cover.style.setProperty('--cover-rotate-x', '0deg')
+    cover.style.setProperty('--cover-rotate-y', '0deg')
+    cover.style.setProperty('--cover-highlight-opacity', '0')
+  }
 
   // The whole screen (the OS's full screen), on top of this view; left when
   // the view closes.
@@ -590,6 +538,7 @@ export default function FullscreenPlayer() {
 
   const isAutoSynced = settings.unsynced_auto_sync === '1'
   const isPanelVisible = currentTrack && fullscreenPanel !== 'none'
+  const coverSize = COVER_SIZE
   // The two layout-affecting transitions below (main content re-centering,
   // panel width collapsing) only need to animate while this view is
   // actually staying open -- while it's closing, the whole overlay is
@@ -718,85 +667,67 @@ export default function FullscreenPlayer() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 26 }}
                 onMouseEnter={() => setCoverHover(true)}
-                onMouseLeave={() => setCoverHover(false)}
-                onDoubleClick={doubleClickLike}
-                className="group/cover relative select-none rounded-2xl overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.8)] border border-white/10 flex-shrink-0 bg-white/5 flex items-center justify-center"
+                onMouseLeave={resetCoverPointer}
+                onPointerMove={handleCoverPointerMove}
+                className="group/cover relative flex flex-shrink-0 select-none items-center justify-center"
                 // A tall (9:16) canvas plays in the card itself, which grows to
                 // its shape. (It used to fill the whole screen behind the
                 // lyrics panel, whose blur then had to be redone every video
                 // frame -- slow, especially while the panel slid open.)
-                style={fsCanvas
-                  ? { height: 'min(38rem, 62vh)', aspectRatio: '9 / 16', transition: 'height 420ms ease' }
-                  : { width: COVER_SIZE, height: COVER_SIZE }}
               >
-                {artSrc
-                  ? <MixCovers track={currentTrack} render={(track, { top }) => (
-                      <>
-                        <img src={trackArtURL(track)} className="absolute inset-0 w-full h-full object-cover" alt="" />
-                        <MotionCover trackId={track?.id} only="square" off={coverOff} />
-                        <MotionCover trackId={track?.id} only="tall" onActive={top ? setFsCanvas : undefined} off={coverOff} />
-                      </>
-                    )} />
-                  : <span className="text-white/10 text-7xl">♪</span>
-                }
-
-                {currentTrack && (
-                  <div data-shown={controlsShown} className="group/controls absolute inset-0 z-10 flex flex-col justify-between">
-                    <div className={`absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40 pointer-events-none ${COVER_FADE}`} />
-                    <div className="relative flex items-center justify-center gap-3 pt-5">
-                      <CoverButton onClick={toggleLike} label={isLiked ? 'Remove from Liked Songs' : 'Add to Liked Songs'} active={isLiked}>
-                        <Heart size={19} fill={isLiked ? 'currentColor' : 'none'} />
-                        <AnimatePresence>
-                          {likeAnim && (
-                            <motion.span initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.5, opacity: 0 }} exit={{}}
-                              transition={{ duration: 0.5 }} className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                              <Heart size={19} className="text-accent" fill="currentColor" />
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </CoverButton>
+                <div data-shown={controlsShown} className="fullscreen-cover-stage group/controls flex flex-col items-center">
+                  {currentTrack && (
+                    <div className={`absolute left-full top-1/2 ml-3 flex -translate-y-1/2 flex-col items-center gap-3 ${COVER_FADE}`}>
                       <CoverButton onClick={() => openAddToPlaylist(currentTrack)} label={t("Add to a playlist")}><ListPlus size={19} /></CoverButton>
                       <CoverButton onClick={() => setFullscreenPanel(p => p === 'queue' ? 'none' : 'queue')} label={fullscreenPanel === 'queue' ? 'Hide the queue' : 'Show the queue'} active={fullscreenPanel === 'queue'}><ListMusic size={19} /></CoverButton>
                       <CoverButton onClick={() => setFullscreenPanel(p => p === 'lyrics' ? 'none' : 'lyrics')} label={fullscreenPanel === 'lyrics' ? 'Hide the lyrics' : 'Show the lyrics'} active={fullscreenPanel === 'lyrics'}><Mic2 size={19} /></CoverButton>
+                      {musicVideo && <CoverButton onClick={showMusicVideo} label={t("Play the music video")}><Clapperboard size={19} /></CoverButton>}
                       {clipNow && (
                         <CoverButton onClick={() => setCoverOff(!coverOff)} label={coverOff ? `Show ${clipName}` : `Hide ${clipName}`} active={coverOff}>
                           {coverOff ? <Film size={19} /> : <ImageIcon size={19} />}
                         </CoverButton>
                       )}
                     </div>
-                    <div className={`relative flex items-center justify-center gap-8 pb-7 ${COVER_FADE}`}>
-                      <CoverIcon onClick={toggleShuffle} label={t("Shuffle")} pressed={shuffle} dim={!shuffle}>
-                        <Shuffle size={22} className={shuffle ? 'text-accent' : ''} />
-                      </CoverIcon>
-                      <CoverIcon onClick={prev} label={t("Previous")}>
-                        <SkipBack size={32} fill="currentColor" />
-                      </CoverIcon>
-                      <CoverIcon onClick={togglePlay} label={isPlaying ? 'Pause' : 'Play'}>
-                        {isPlaying ? <Pause size={44} fill="currentColor" strokeWidth={0} /> : <Play size={44} fill="currentColor" strokeWidth={0} className="translate-x-0.5" />}
-                      </CoverIcon>
-                      <CoverIcon onClick={() => next(false)} label={t("Next")}>
-                        <SkipForward size={32} fill="currentColor" />
-                      </CoverIcon>
-                      <CoverIcon onClick={toggleRepeat} label={t("Repeat")} pressed={repeat !== 'none'} dim={repeat === 'none'}>
-                        <RepeatIcon size={22} className={repeat !== 'none' ? 'text-accent' : ''} />
-                      </CoverIcon>
-                    </div>
-                    {/* The music video, mid left edge (opposite the volume). */}
-                    {musicVideo && (
-                      <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                        <CoverButton onClick={showMusicVideo} label={t("Play the music video")}><Clapperboard size={19} /></CoverButton>
-                      </div>
-                    )}
-                    {/* Volume, up the right edge. */}
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <VolumePill volume={volume} onChange={setVolume} />
-                    </div>
+                  )}
+                  <div
+                    className="fullscreen-cover-surface relative flex flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-[0_32px_80px_rgba(0,0,0,0.8)]"
+                    style={fsCanvas
+                      ? { height: 'min(38rem, 62vh)', aspectRatio: '9 / 16', transition: 'height 420ms ease' }
+                      : { width: coverSize, height: coverSize }}
+                  >
+                    {artSrc
+                      ? <MixCovers track={currentTrack} render={(track, { top }) => (
+                          <>
+                            <img src={trackArtURL(track)} className="absolute inset-0 w-full h-full object-cover" alt="" />
+                            <MotionCover trackId={track?.id} only="square" off={coverOff} />
+                            <MotionCover trackId={track?.id} only="tall" onActive={top ? setFsCanvas : undefined} off={coverOff} />
+                          </>
+                        )} />
+                      : <span className="text-white/10 text-7xl">♪</span>
+                    }
+                    <div className="fullscreen-cover-highlight absolute inset-0 pointer-events-none" />
                   </div>
-                )}
-                {burst && burst.trackId === currentTrack?.id && <LikeBurst key={burst.id} kind={burst.kind} />}
+                  <div className={`flex items-center justify-center gap-8 pt-3 ${COVER_FADE}`}>
+                    <CoverIcon onClick={toggleShuffle} label={t("Shuffle")} pressed={shuffle} dim={!shuffle}>
+                      <Shuffle size={22} className={shuffle ? 'text-accent' : ''} />
+                    </CoverIcon>
+                    <CoverIcon onClick={prev} label={t("Previous")}>
+                      <SkipBack size={32} fill="currentColor" />
+                    </CoverIcon>
+                    <CoverIcon onClick={togglePlay} label={isPlaying ? 'Pause' : 'Play'}>
+                      {isPlaying ? <Pause size={44} fill="currentColor" strokeWidth={0} /> : <Play size={44} fill="currentColor" strokeWidth={0} className="translate-x-0.5" />}
+                    </CoverIcon>
+                    <CoverIcon onClick={() => next(false)} label={t("Next")}>
+                      <SkipForward size={32} fill="currentColor" />
+                    </CoverIcon>
+                    <CoverIcon onClick={toggleRepeat} label={t("Repeat")} pressed={repeat !== 'none'} dim={repeat === 'none'}>
+                      <RepeatIcon size={22} className={repeat !== 'none' ? 'text-accent' : ''} />
+                    </CoverIcon>
+                  </div>
+                </div>
               </motion.div>
 
-            <div className="relative mt-6 flex items-center gap-3" style={{ width: COVER_SIZE }}>
+            <div className="relative mt-6 flex items-center gap-3" style={{ width: coverSize }}>
               <MixingMark className="absolute -top-4 left-1/2 -translate-x-1/2 pointer-events-none !text-white/80" />
               <span className="w-11 text-right text-sm tabular-nums text-white/75">{fmt(progress)}</span>
               <div ref={barRef} className="group/bar relative h-3.5 flex-1 cursor-pointer overflow-hidden rounded-full bg-white/20 backdrop-blur-[2px] drop-shadow-[0_1px_4px_rgba(0,0,0,0.25)]"
@@ -808,7 +739,7 @@ export default function FullscreenPlayer() {
 
             {/* In at once, fading: never waiting on the old title's way out (see PlayerBar). */}
             <motion.div key={currentTrack?.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              className="mt-5 text-center" style={{ width: COVER_SIZE }}>
+              className="mt-5 text-center" style={{ width: coverSize }}>
               <h2 className="text-3xl font-bold text-white leading-tight truncate">{currentTrack?.title || '—'}</h2>
               <p className="mt-1.5 text-lg text-white/70 truncate">{currentTrack?.artist}</p>
               {currentTrack?.album && <p className="mt-0.5 text-sm text-white/40 truncate">{currentTrack.album}</p>}

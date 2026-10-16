@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Home, Library, Plus, Heart, LogIn, LogOut, BarChart2, Disc3, Users, AudioWaveform, PanelLeftClose, PanelLeftOpen, Sparkles, Import, Clapperboard } from 'lucide-react'
+import { Home, Library, Plus, LogIn, LogOut, BarChart2, Disc3, Users, AudioWaveform, PanelLeftClose, PanelLeftOpen, Sparkles, Import, Clapperboard } from 'lucide-react'
 import { useAppStore } from '../store/player'
 import { api } from '../api'
 import { latestPeriod, listenerTimeZone, nextPeriodBoundary, recapOpened, recapTree } from '../recapPeriods'
@@ -359,16 +359,6 @@ export default function Sidebar() {
               className="px-2 py-1 bg-accent text-base rounded-lg text-xs font-medium">{t('Add')}</button>
           </div>
         )}
-
-        <button onClick={() => nav('/playlist/liked')}
-          title={collapsed ? t('Liked Songs') : undefined}
-          aria-label={collapsed ? t('Liked Songs') : undefined}
-          className={`w-full flex items-center gap-2.5 py-2 rounded-lg text-xs transition-all group ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === '/playlist/liked' ? 'bg-accent/10 text-accent' : 'text-muted hover:text-white hover:bg-elevated'}`}>
-          <div className="w-7 h-7 rounded bg-accent/20 flex items-center justify-center flex-shrink-0">
-            <Heart size={12} className="text-accent" fill="currentColor" />
-          </div>
-          {!collapsed && <span className="truncate font-medium">{t('Liked Songs')}</span>}
-        </button>
 
         {playlists.map(pl => (
           <div key={pl.id} onDragOver={(e) => { if (pl.smart_rules) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}

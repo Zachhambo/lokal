@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate } from 'react-router-dom'
@@ -22,7 +22,6 @@ import { openRadio } from '../radioActions'
 import { useCastStore } from '../cast/castStore'
 import MarqueeText from './MarqueeText'
 import TrackArtistLinks from './TrackArtistLinks'
-import { useVolumeWheel } from '../volumeWheel'
 
 function fmt(s) { return `${Math.floor((s||0)/60)}:${Math.floor((s||0)%60).toString().padStart(2,'0')}` }
 
@@ -36,7 +35,7 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
+    audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
   } = usePlayerStore(useShallow(({
@@ -44,7 +43,7 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
+    audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
   }) => ({
@@ -52,22 +51,19 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
-    likedIds, setLiked, audioRef, cfAudioRef, activeAudioElement,
+    audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
   })))
   const { user, openAddToPlaylist } = useAppStore()
-  const [likeAnim, setLikeAnim] = useState(false)
   const [showAudioPipeline, setShowAudioPipeline] = useState(false)
   const [keepCommaArtists, setKeepCommaArtists] = useState([])
-  const volumeWheelRef = useVolumeWheel(volume, setVolume)
   const scrubbing = useRef(false)
   const [localProg, setLocalProg] = useState(null)
   const [showSleepTimer, setShowSleepTimer] = useState(false)
   const [sleepTimerDisplay, setSleepTimerDisplay] = useState(null)
   const menu = useContextMenu()
   const display = localProg ?? progress
-  const isLiked = currentTrack && likedIds.has(currentTrack.id)
   const RepeatIcon = repeat === 'one' ? Repeat1 : Repeat
 
   useEffect(() => {
@@ -119,14 +115,6 @@ export default function PlayerBar() {
     // Through the store: it seeks the playing element, or the TV while casting.
     if (scrubbing.current) usePlayerStore.getState().setProgressWithAudioUpdate(t)
   }, [duration])
-
-  const toggleLike = async () => {
-    if (!currentTrack) return
-    const r = await api.toggleLike(currentTrack.id, user?.id, currentTrack)
-    const liked = typeof r === 'boolean' ? r : r?.liked ?? false
-    setLiked(currentTrack.id, liked)
-    if (liked) { setLikeAnim(true); setTimeout(() => setLikeAnim(false), 600) }
-  }
 
   const artSrc = trackArtURL(currentTrack)
 
@@ -244,24 +232,6 @@ export default function PlayerBar() {
 
         <div className="flex flex-shrink-0 -translate-x-3 items-center gap-3">
           {currentTrack && (
-            <div className="relative flex-shrink-0">
-              <motion.button onClick={toggleLike} whileTap={{ scale: 0.75 }}
-                className={`flex h-5 w-5 items-center justify-center leading-none transition-colors ${isLiked ? 'text-accent' : 'text-text/90 hover:text-text'}`}
-                title={isLiked ? t("Unlike") : t("Like")} aria-label={isLiked ? t("Unlike") : t("Like")}>
-                <Heart size={16} fill={isLiked ? 'currentColor' : 'none'} />
-              </motion.button>
-              <AnimatePresence>
-                {likeAnim && (
-                  <motion.div initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.8, opacity: 0 }} exit={{}}
-                    transition={{ duration: 0.5 }}
-                    className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <Heart size={16} className="text-accent" fill="currentColor" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-          {currentTrack && (
             <button onClick={() => openAddToPlaylist(currentTrack)} title={t("Add to playlist")} aria-label={t("Add to playlist")}
               className="flex-shrink-0 text-text/90 hover:text-accent transition-colors">
               <Plus size={14} />
@@ -343,9 +313,6 @@ export default function PlayerBar() {
             <button onClick={() => setVolume(volume > 0 ? 0 : 0.8)} className="text-text/90 hover:text-text transition-colors">
               {volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
             </button>
-            <input ref={volumeWheelRef} type="range" min={0} max={1} step={0.01} value={volume}
-              onChange={e => setVolume(parseFloat(e.target.value))}
-              className="w-18 accent-accent cursor-pointer h-1" style={{ width: 72 }} />
           </div>
         </div>
       </div>
