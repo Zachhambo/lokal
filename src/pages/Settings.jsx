@@ -638,6 +638,7 @@ export default function Settings() {
     }
   }
   const setHardwareAcceleration = (on) => savePerfField('hardwareAcceleration', on)
+  const setPerformanceMode = (on) => savePerfField('performanceMode', on)
   const perfRestartNeeded = !!perfSettings.running && perfSettings.running.hardwareAcceleration !== perfSettings.hardwareAcceleration
 
   // Every change saves itself (see queueSettings above).
@@ -1202,6 +1203,13 @@ activeCategory === 'data' ? usersTried
               </button>
             </div>
           </Row>
+          <Row label={t("Performance Mode")} desc={perfSaveError?.key === 'performanceMode' ? `${t("Couldn't save")} (${perfSaveError.message})` : t('Disable visual effects such as backdrop blur, waveform drawing, ambient video glow, and cover-mix transitions to reduce CPU/GPU usage. Changes apply immediately without restarting.') }>
+            <button
+              onClick={() => setPerformanceMode(!perfSettings.performanceMode)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${perfSettings.performanceMode ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+              {perfSettings.performanceMode ? t('On') : t('Off')}
+            </button>
+          </Row>
           <Row label={t("Close to Tray")} desc={t("The close button hides Lokal in the system tray instead of quitting: its taskbar icon goes away and the tray icon brings it back. Quit from the tray icon's menu.")}>
             <button
               onClick={() => set('close_to_tray', settings.close_to_tray === '1' ? '0' : '1')}
@@ -1210,6 +1218,7 @@ activeCategory === 'data' ? usersTried
             </button>
           </Row>
         </Section>
+
       )}
 
       {inCategory('library') && (
