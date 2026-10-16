@@ -6,7 +6,7 @@
 import { useTranslation } from '../i18n'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Disc3, Download, ListPlus, Play, Shuffle } from 'lucide-react'
+import { ArrowLeft, Clock, Disc3, Download, ListPlus, Play, Shuffle } from 'lucide-react'
 import DiscoveryImage from '../components/DiscoveryImage'
 import ImageZoom from '../components/ImageZoom'
 import OnlineSongList from '../components/OnlineSongList'
@@ -15,7 +15,7 @@ import { usePageReady } from '../pageCache'
 import { albumCacheKey, isOnlineTrack, libraryAlbum, loadOnlineAlbumCached, mergeWithLibrary, onlineAlbumPath, peekOnline } from '../onlineBrowse'
 import { api } from '../api'
 import { downloadOnline, playOnline, resolveOnline } from '../onlineActions'
-import { saveAsPlaylist } from '../trackActions'
+import { playNextMany, saveAsPlaylist } from '../trackActions'
 import { artistPath } from '../releaseActions'
 import { showToast } from '../components/Toaster'
 
@@ -144,6 +144,7 @@ export default function OnlineAlbum() {
           {!state.loading && tracks.length > 0 && <p className="mt-1 text-xs text-subtle">{t(tracks.length === 1 ? '{count} song' : '{count} songs', { count: tracks.length })}{duration ? ` · ${t('{count} min', { count: Math.round(duration / 60) })}` : ''}{owned ? ` · ${t(owned === tracks.length ? 'All songs are in your library.' : '{owned} of {total} songs are in your library.', { owned, total: tracks.length })}` : ''}</p>}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button onClick={() => play(tracks[0])} disabled={!tracks.length} className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-base transition-opacity hover:opacity-90 disabled:opacity-40"><Play size={15} fill="currentColor" /> {t("Play")}</button>
+            <button onClick={() => playNextMany(tracks)} disabled={!tracks.length} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Clock size={15} /> {t("Play next")}</button>
             <button onClick={() => { const list = shuffled(tracks); play(list[0], list) }} disabled={!tracks.length} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Shuffle size={15} /> {t("Shuffle")}</button>
             {missing.length > 0 && <button onClick={download} disabled={!!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Download size={15} /> {busy === 'download' ? t('Finding songs…') : owned ? t('Download missing ({count})', { count: missing.length }) : t('Download album')}</button>}
             <button onClick={savePlaylist} disabled={!tracks.length || !!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><ListPlus size={15} /> {busy === 'playlist' ? t('Saving…') : t('Save as playlist')}</button>
