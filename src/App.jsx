@@ -1,5 +1,5 @@
 import { NativeAudioBridge, readOutputPreferences, saveOutputPreferences } from './audio/nativeOutput'
-import { replayGainMultiplier } from './audio/replayGain.mjs'
+import { effectiveReplayGainMode, replayGainMultiplier } from './audio/replayGain.mjs'
 import { readCrossfadeSettings, fadeCurve, crossfadeDurations, CROSSFADE_MIN_S } from './audio/crossfade'
 import { planTransition, AUTOMIX_PRELOAD_S } from './audio/automix'
 
@@ -650,7 +650,8 @@ export default function App() {
 
       const latestAssignedId = element.dataset.lokalTrackPending || element.dataset.lokalTrackId
       if (latestAssignedId && latestAssignedId !== id) return null
-      apply(replayGainMultiplier(tags, usePlayerStore.getState().replayGainMode))
+      const state = usePlayerStore.getState()
+      apply(replayGainMultiplier(tags, effectiveReplayGainMode(state.replayGainMode, track, state)))
       return tags || null
     } catch {
       apply(1)

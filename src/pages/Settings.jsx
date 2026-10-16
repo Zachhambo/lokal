@@ -1477,12 +1477,13 @@ activeCategory === 'data' ? usersTried
       {inCategory('playback') && (
       <Section title={t("Playback")}>
         <OutputPrecisionSettings />
-        <Row label={t("ReplayGain")} desc={t("Use embedded ReplayGain tags to bring tracks closer in loudness. Peak tags limit boosts; tracks without tags are unchanged.")}>
+        <Row label={t("ReplayGain")} desc={t("Use embedded ReplayGain tags to bring tracks closer in loudness. Smart gain uses album tags for album queues and track tags otherwise. Peak tags limit boosts; tracks without tags are unchanged.")}>
           <select aria-label={t("ReplayGain mode")} value={settings.replaygain_mode ?? replayGainMode ?? 'off'} onChange={e => set('replaygain_mode', e.target.value)}
             className="bg-card border border-border rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-accent/50">
             <option value="off">{t('Off')}</option>
             <option value="track">{t('Track gain')}</option>
             <option value="album">{t('Album gain')}</option>
+            <option value="smart">{t('Smart gain')}</option>
           </select>
         </Row>
         <Row label={t("Song Transitions")} desc={crossfade.mode === 'automix'
@@ -2956,4 +2957,3 @@ function SpotifyLikesRow({ hasCookie, userId }) {
     </Row>
   )
 }
-

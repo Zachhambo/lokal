@@ -197,7 +197,7 @@ function readOutputDevice() {
   try { return localStorage.getItem('lokal-output-device') || 'default' } catch { return 'default' }
 }
 
-const normalizeReplayGainMode = value => ['off', 'track', 'album'].includes(value) ? value : 'off'
+const normalizeReplayGainMode = value => ['off', 'track', 'album', 'smart'].includes(value) ? value : 'off'
 function readReplayGainModeSetting() {
   try { return normalizeReplayGainMode(localStorage.getItem('lokal-replaygain-mode')) } catch { return 'off' }
 }
@@ -345,7 +345,7 @@ export const usePlayerStore = create((set, get) => ({
     set({ replayGainMode: mode, replayGainModeUserSet: true })
   },
   hydrateReplayGainMode: (value) => {
-    if (get().replayGainModeUserSet || !['off', 'track', 'album'].includes(value)) return
+    if (get().replayGainModeUserSet || !['off', 'track', 'album', 'smart'].includes(value)) return
     const mode = normalizeReplayGainMode(value)
     try { localStorage.setItem('lokal-replaygain-mode', mode) } catch {}
     set({ replayGainMode: mode })
