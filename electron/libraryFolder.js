@@ -104,6 +104,9 @@ function getLibraryFolders(db, relativePath = '', search = '') {
   })
 
   if (isOutside(rootPath, targetPath)) return empty('Folder is outside the selected music folder', true)
+  if (normalizedRelative.split('/').some(segment => segment.startsWith('.'))) {
+    return empty('Dot-prefixed folders are hidden', true)
+  }
 
   let entries
   try {
@@ -120,6 +123,9 @@ function getLibraryFolders(db, relativePath = '', search = '') {
   // Query descendant paths once, not once per child folder. Verify they still
   // exist so stale index rows do not inflate counts or Play All.
   const descendantTrackPaths = getExistingTrackPaths(db, targetPath)
+  if (normalizedRelative && descendantTrackPaths.length === 0) {
+    return empty('Folder has no tracks', true)
+  }
   const folderTrackCounts = new Map()
   for (const filePath of descendantTrackPaths) {
     const relativeTrackPath = path.relative(targetPath, filePath)
@@ -158,7 +164,7 @@ function getLibraryFolders(db, relativePath = '', search = '') {
         coverArtworkPath: firstTrack?.artwork_path || null,
       }
     })
-    .filter(folder => !(folder.name.startsWith('.') && folder.trackCount === 0))
+    .filter(folder => !folder.name.startsWith('.') && folder.trackCount > 0)
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }))
 
   const trackPaths = entries
@@ -230,4 +236,3 @@ function getLibraryFolders(db, relativePath = '', search = '') {
 }
 
 module.exports = { findFolderArtwork, getLibraryFolders }
-
