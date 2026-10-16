@@ -11,7 +11,7 @@ import MotionCover, { loadMotionCover } from './MotionCover'
 import { useMotionCoverOff } from '../motionCoverPrefs'
 import MixCovers from './MixCovers'
 import { useMusicVideo, useMusicVideoView } from '../musicVideo'
-import { api, wordSyncEnabled } from '../api'
+import { api, peekSettings, wordSyncEnabled } from '../api'
 import { useTranslation } from '../i18n'
 import {
   contextLabel,
@@ -331,6 +331,32 @@ export default function RightSidebar() {
     </div>
   ) : null
   const hasAlbumLink = !!currentTrack?.album || (isStreamed(currentTrack) && !!(currentTrack?.source_album_id || currentTrack?.sourceAlbumId || currentTrack?.albumId))
+  const trackFilePath = currentTrack?.file_path && !String(currentTrack.file_path).startsWith('ghost://')
+    ? currentTrack.file_path
+    : null
+  const trackFolderName = trackFilePath ? trackFilePath.split(/[\\/]/).filter(Boolean).slice(-2, -1)[0] : null
+  const openTrackFolderInLibrary = async () => {
+    if (!trackFilePath) return
+    try {
+      const musicRoot = peekSettings()?.music_folder || (await api.getSettings())?.music_folder
+      if (!musicRoot) throw new Error('No music folder is configured')
+      const rootPath = String(musicRoot).replace(/\\/g, '/')
+      const normalizedRoot = rootPath.replace(/\/+$/, '').replace(/^([a-z]:)$/, '$1/') || (rootPath.startsWith('/') ? '/' : '')
+      const normalizedTrack = String(trackFilePath).replace(/\\/g, '/')
+      const isWindowsPath = /^[a-z]:\//i.test(normalizedRoot)
+      const pathRoot = isWindowsPath ? normalizedRoot.toLowerCase() : normalizedRoot
+      const pathTrack = isWindowsPath ? normalizedTrack.toLowerCase() : normalizedTrack
+      const rootPrefix = pathRoot.endsWith('/') ? pathRoot : `${pathRoot}/`
+      if (pathTrack !== pathRoot && !pathTrack.startsWith(rootPrefix)) {
+        throw new Error('The track is outside the configured music folder')
+      }
+      const relativeTrack = normalizedTrack.slice(normalizedRoot.length).replace(/^\/+/, '')
+      const folderPath = relativeTrack.split('/').slice(0, -1).join('/')
+      navigate('/library', { state: { openFolder: folderPath } })
+    } catch (error) {
+      showToast(`Could not open folder in Library: ${error?.message || error}`)
+    }
+  }
 
   return (
     <>
@@ -494,11 +520,6 @@ export default function RightSidebar() {
                   })()}
 
                   {currentTrack && (
-                    infoCardView === 'lyrics' ? (
-                      <div className={`relative h-[420px] min-h-[320px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
-                        <LyricsPanel track={currentTrack} progress={progress} wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
-                      </div>
-                    ) : (
                     <div className={fx ? 'bg-black/25 rounded-xl border border-white/10 px-4 py-1' : 'bg-card rounded-xl border border-border px-4 py-1'}>
                       <InfoRow
                         fx={fx}
@@ -506,6 +527,13 @@ export default function RightSidebar() {
                         value={currentTrack.album || (hasAlbumLink ? t('Album · Online') : null)}
                         title={hasAlbumLink ? t('Go to album: {album}', { album: currentTrack.album || t('Album · Online') }) : null}
                         onClick={hasAlbumLink ? () => navigateToTrackAlbum(nav, currentTrack) : null}
+                      />
+                      <InfoRow
+                        fx={fx}
+                        label={t("Folder")}
+                        value={trackFolderName}
+                        title={trackFilePath ? t('Open folder in Library') : null}
+                        onClick={trackFilePath ? openTrackFolderInLibrary : null}
                       />
                       {currentTrack.album_artist && currentTrack.album_artist !== currentTrack.artist && <InfoRow fx={fx} label={t("Alb. Artist")} value={currentTrack.album_artist} />}
                       <InfoRow fx={fx} label={t("Year")} value={currentTrack.year} />
@@ -516,7 +544,11 @@ export default function RightSidebar() {
                       {!currentTrack.bitrate && <InfoRow fx={fx} label={t("Quality")} value={streamQualityLabel(currentTrack)} />}
                       <InfoRow fx={fx} label={t("Plays")} value={plays > 0 ? plays.toLocaleString() : null} />
                     </div>
-                    )
+                  )}
+                  {currentTrack && infoCardView === 'lyrics' && (
+                    <div className={`relative mt-3 h-[420px] min-h-[320px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
+                      <LyricsPanel track={currentTrack} progress={progress} wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
+                    </div>
                   )}
                 </div>
               </div>

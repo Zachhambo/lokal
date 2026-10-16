@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { LayoutGrid, List, Music, Disc3, Search, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { LayoutGrid, List, Music, Disc3, Search, X, Clock, Shuffle, Play } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '../store/player'
 import TrackList from '../components/TrackList'
 import FadeImg from '../components/FadeImg'
@@ -10,9 +10,18 @@ import LibraryFolderBrowser from '../components/LibraryFolderBrowser'
 import { api } from '../api'
 import { useCachedState, usePageReady } from '../pageCache'
 import { useTranslation } from '../i18n'
+import { playNextMany } from '../trackActions'
 
 const LIBRARY_PAGE_SIZE = 50
 const HEAVY_GRID_THRESHOLD = 80
+const shuffledList = list => {
+  const out = [...list]
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[out[i], out[j]] = [out[j], out[i]]
+  }
+  return out
+}
 const readLibraryPreference = (key, fallback, choices) => {
   try {
     const value = localStorage.getItem(key)
@@ -58,6 +67,7 @@ export default function Library() {
   usePageReady(loaded)
   const playQueue = usePlayerStore(s => s.playQueue)
   const navigate = useNavigate()
+  const location = useLocation()
   const offsetRef = useRef(tracks.length)
   const loadingRef = useRef(false)
   const loadMoreRef = useRef(null)
@@ -66,6 +76,14 @@ export default function Library() {
   const playAllTracks = libraryMode === 'simple'
     ? tracks
     : (folderData?.filteredTracks || (folderData?.tracks?.length ? folderData.tracks : folderData?.allTracks) || [])
+
+  useEffect(() => {
+    if (typeof location.state?.openFolder !== 'string') return
+    setLibraryMode('advanced')
+    setFolderPath(location.state.openFolder)
+    setFolderSearch('')
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, location.state, navigate])
 
   const load = async (append = false) => {
     // Synchronous in-flight check: the observer's `loading` can be stale, and a
@@ -224,10 +242,22 @@ export default function Library() {
                   : `${folderData.totalTracks != null ? folderData.totalTracks : (folderData.tracks?.length || 0)} ${(folderData.totalTracks != null ? folderData.totalTracks : (folderData.tracks?.length || 0)) === 1 ? t('track') : t('tracks')} · ${folderData.relativePath || folderData.rootName}`)
               : t('Browse your music folders')}
         </p>
-        <div className="flex flex-shrink-0 items-center gap-3">
-          {playAllTracks.length > 0 && (
-            <button onClick={() => playQueue(playAllTracks, 0, libraryMode === 'advanced' ? { type: 'library-folder' } : null)} className="text-xs text-accent hover:text-accent/70 font-display uppercase tracking-wider transition-colors">{t("Play All")}</button>
-          )}
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+          {libraryMode === 'advanced' && playAllTracks.length > 0 ? (
+            <>
+              <button onClick={() => playQueue(playAllTracks, 0, { type: 'library-folder' })} className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-base transition-opacity hover:opacity-90 disabled:opacity-40">
+                <Play size={15} fill="currentColor" /> {t('Play')}
+              </button>
+              <button onClick={() => playNextMany(playAllTracks)} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40">
+                <Clock size={15} /> {t('Play next')}
+              </button>
+              <button onClick={() => { const shuffledTracks = shuffledList(playAllTracks); if (shuffledTracks.length) playQueue(shuffledTracks, 0, { type: 'library-folder' }) }} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40">
+                <Shuffle size={15} /> {t('Shuffle')}
+              </button>
+            </>
+          ) : libraryMode === 'simple' && playAllTracks.length > 0 ? (
+            <button onClick={() => playQueue(playAllTracks, 0, null)} className="text-xs text-accent hover:text-accent/70 font-display uppercase tracking-wider transition-colors">{t("Play All")}</button>
+          ) : null}
           <button
             type="button"
             onClick={() => setLibraryMode(libraryMode === 'simple' ? 'advanced' : 'simple')}
