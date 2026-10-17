@@ -352,7 +352,7 @@ export default function RightSidebar() {
       }
       const relativeTrack = normalizedTrack.slice(normalizedRoot.length).replace(/^\/+/, '')
       const folderPath = relativeTrack.split('/').slice(0, -1).join('/')
-      navigate('/library', { state: { openFolder: folderPath } })
+      nav('/library', { state: { openFolder: folderPath } })
     } catch (error) {
       showToast(`Could not open folder in Library: ${error?.message || error}`)
     }
