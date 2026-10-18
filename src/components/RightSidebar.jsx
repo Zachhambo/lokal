@@ -558,60 +558,57 @@ export default function RightSidebar() {
                   })()}
 
                   {currentTrack && (
-                    infoCardView === 'lyrics' ? (
-                      <div className={`relative h-[420px] min-h-[320px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
-                        <LyricsPanel track={currentTrack} progress={progress} darkMode wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
+                    <>
+                      <div className={fx ? 'bg-black/25 rounded-xl border border-white/10 px-4 py-1' : 'bg-card rounded-xl border border-border px-4 py-1'}>
+                        <InfoRow
+                          fx={fx}
+                          label={t("Album")}
+                          value={currentTrack.album || (hasAlbumLink ? t('Album · Online') : null)}
+                          title={hasAlbumLink ? t('Go to album: {album}', { album: currentTrack.album || t('Album · Online') }) : null}
+                          onClick={hasAlbumLink ? () => navigateToTrackAlbum(nav, currentTrack) : null}
+                        />
+                        <InfoRow
+                          fx={fx}
+                          label={t("Folder")}
+                          value={trackFolderName}
+                          title={trackFilePath ? t('Open folder in Library') : null}
+                          onClick={trackFilePath ? openTrackFolderInLibrary : null}
+                        />
+                        {currentTrack.album_artist && currentTrack.album_artist !== currentTrack.artist && <InfoRow fx={fx} label={t("Alb. Artist")} value={currentTrack.album_artist} />}
+                        <InfoRow fx={fx} label={t("Year")} value={currentTrack.year} />
+                        {!isStationTrack(currentTrack) && currentTrack.file_path && !String(currentTrack.file_path).startsWith('ghost://') ? (
+                          <div className={`flex items-start gap-3 py-1.5 border-b border-white/10`}>
+                            <span className={`text-xs font-display uppercase tracking-wider w-20 flex-shrink-0 pt-0.5 ${fx ? 'text-white/45' : 'text-muted'}`}>{t('Genre')}</span>
+                            <button type="button" onClick={event => {
+                              const rect = event.currentTarget.getBoundingClientRect()
+                              setGenrePopover({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })
+                            }}
+                              title={t('Edit genres')}
+                              className="text-xs text-white/70 leading-relaxed break-all text-left hover:text-accent hover:underline transition-colors">
+                              {trackGenreList(currentTrack).join(', ') || t('Add a genre…')}
+                            </button>
+                          </div>
+                        ) : <InfoRow fx={fx} label={t("Genre")} value={genre} />}
+                        <InfoRow fx={fx} label={t("Track #")} value={currentTrack.track_num ? `${currentTrack.track_num}` : null} />
+                        <InfoRow fx={fx} label={t("Bitrate")} value={currentTrack.bitrate ? `${currentTrack.bitrate} kbps` : null} />
+                        {/* A stream (an addon's) has no file to measure: what the source says of it. */}
+                        {!currentTrack.bitrate && <InfoRow fx={fx} label={t("Quality")} value={streamQualityLabel(currentTrack)} />}
+                        <InfoRow fx={fx} label={t("Plays")} value={plays > 0 ? plays.toLocaleString() : null} />
                       </div>
-                    ) : infoCardView === 'visualization' ? (
-                      <div className={`relative h-[clamp(140px,24vh,210px)] min-h-[140px] max-h-[210px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
-                        {sideVisualizer || <p className="absolute inset-0 flex items-center justify-center text-sm text-muted">{t('Visualization is off')}</p>}
-                      </div>
-                    ) : (
-                    <div className={fx ? 'bg-black/25 rounded-xl border border-white/10 px-4 py-1' : 'bg-card rounded-xl border border-border px-4 py-1'}>
-                      <InfoRow
-                        fx={fx}
-                        label={t("Album")}
-                        value={currentTrack.album || (hasAlbumLink ? t('Album · Online') : null)}
-                        title={hasAlbumLink ? t('Go to album: {album}', { album: currentTrack.album || t('Album · Online') }) : null}
-                        onClick={hasAlbumLink ? () => navigateToTrackAlbum(nav, currentTrack) : null}
-                      />
-                      <InfoRow
-                        fx={fx}
-                        label={t("Folder")}
-                        value={trackFolderName}
-                        title={trackFilePath ? t('Open folder in Library') : null}
-                        onClick={trackFilePath ? openTrackFolderInLibrary : null}
-                      />
-                      {currentTrack.album_artist && currentTrack.album_artist !== currentTrack.artist && <InfoRow fx={fx} label={t("Alb. Artist")} value={currentTrack.album_artist} />}
-                      <InfoRow fx={fx} label={t("Year")} value={currentTrack.year} />
-                      {!isStationTrack(currentTrack) && currentTrack.file_path && !String(currentTrack.file_path).startsWith('ghost://') ? (
-                        <div className={`flex items-start gap-3 py-1.5 border-b border-white/10`}>
-                          <span className={`text-xs font-display uppercase tracking-wider w-20 flex-shrink-0 pt-0.5 ${fx ? 'text-white/45' : 'text-muted'}`}>{t('Genre')}</span>
-                          <button type="button" onClick={event => {
-                            const rect = event.currentTarget.getBoundingClientRect()
-                            setGenrePopover({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })
-                          }}
-                            title={t('Edit genres')}
-                            className="text-xs text-white/70 leading-relaxed break-all text-left hover:text-accent hover:underline transition-colors">
-                            {trackGenreList(currentTrack).join(', ') || t('Add a genre…')}
-                          </button>
+                      {infoCardView === 'lyrics' && (
+                        <section aria-label={t("Lyrics")} className={`mt-4 overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
+                          <h3 className={`px-4 pt-3 text-xs font-display uppercase tracking-wider ${fx ? 'text-white/45' : 'text-muted'}`}>{t("Lyrics")}</h3>
+                          <div className="relative h-[320px]">
+                            <LyricsPanel track={currentTrack} progress={progress} darkMode wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
+                          </div>
+                        </section>
+                      )}
+                      {infoCardView === 'visualization' && (
+                        <div className={`relative mt-4 h-[clamp(140px,24vh,210px)] min-h-[140px] max-h-[210px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
+                          {sideVisualizer || <p className="absolute inset-0 flex items-center justify-center text-sm text-muted">{t('Visualization is off')}</p>}
                         </div>
-                      ) : <InfoRow fx={fx} label={t("Genre")} value={genre} />}
-                      <InfoRow fx={fx} label={t("Track #")} value={currentTrack.track_num ? `${currentTrack.track_num}` : null} />
-                      <InfoRow fx={fx} label={t("Bitrate")} value={currentTrack.bitrate ? `${currentTrack.bitrate} kbps` : null} />
-                      {/* A stream (an addon's) has no file to measure: what the source says of it. */}
-                      {!currentTrack.bitrate && <InfoRow fx={fx} label={t("Quality")} value={streamQualityLabel(currentTrack)} />}
-                      <InfoRow fx={fx} label={t("Plays")} value={plays > 0 ? plays.toLocaleString() : null} />
-                    </div>
-                    )
-                  )}
-                  {currentTrack && infoCardView === 'info' && (
-                    <section aria-label={t("Lyrics")} className={`overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
-                      <h3 className={`px-4 pt-3 text-xs font-display uppercase tracking-wider ${fx ? 'text-white/45' : 'text-muted'}`}>{t("Lyrics")}</h3>
-                      <div className="relative h-[320px]">
-                        <LyricsPanel track={currentTrack} progress={progress} darkMode wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
-                      </div>
-                    </section>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
