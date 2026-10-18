@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { findFolderArtwork, getLibraryFolders } = require('../electron/libraryFolder.js')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folders-'))
+const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folders-second-'))
 
 function likeMatches(value, pattern) {
   const regexSpecials = '.^$*+?()[]{}|\\'
@@ -28,7 +29,7 @@ function likeMatches(value, pattern) {
 }
 
 try {
-  const musicRoot = path.join(root, 'music')
+  const musicRoot = root
   const album = path.join(musicRoot, 'Artist', 'Album')
   const emojiAlbum = path.join(musicRoot, '🎧Artist', 'Album')
   const emptyFolder = path.join(musicRoot, 'Empty')
@@ -41,27 +42,44 @@ try {
   fs.mkdirSync(hiddenWithTracksFolder, { recursive: true })
   const hiddenTrackPath = path.join(hiddenWithTracksFolder, 'hidden-track.flac')
   fs.writeFileSync(hiddenTrackPath, 'audio')
+  const secondAlbum = path.join(secondRoot, 'Second Artist', 'Second Album')
+  const secondTrackPath = path.join(secondAlbum, '01-second.flac')
+  fs.mkdirSync(secondAlbum, { recursive: true })
+  fs.writeFileSync(secondTrackPath, 'audio')
   fs.writeFileSync(path.join(album, 'a.png'), 'image')
   fs.writeFileSync(path.join(album, 'cover.jpg'), 'cover')
+  fs.writeFileSync(path.join(album, 'Album Art.jpg'), 'named album art')
   fs.writeFileSync(path.join(album, '01-track.flac'), 'audio')
   fs.writeFileSync(path.join(album, '02-percent.flac'), 'audio')
   fs.writeFileSync(path.join(album, '03-underscore.flac'), 'audio')
+  const trackCoverA = path.join(root, 'track-cover-a.jpg')
+  const trackCoverB = path.join(root, 'track-cover-b.jpg')
+  fs.writeFileSync(trackCoverA, 'cover a')
+  fs.writeFileSync(trackCoverB, 'cover b')
 
   assert.equal(findFolderArtwork(album), path.join(album, 'cover.jpg'), 'named cover art takes priority over other images')
   fs.unlinkSync(path.join(album, 'cover.jpg'))
+  assert.equal(findFolderArtwork(album), path.join(album, 'Album Art.jpg'), 'spaced conventional cover names are recognized')
+  fs.unlinkSync(path.join(album, 'Album Art.jpg'))
   assert.equal(findFolderArtwork(album), path.join(album, 'a.png'), 'an image without a conventional name still works as fallback')
+  fs.renameSync(path.join(album, 'a.png'), path.join(album, 'covers.jpg'))
+  fs.writeFileSync(path.join(album, 'poster.png'), 'poster')
+  assert.equal(findFolderArtwork(album), null, 'plural covers is not treated as an explicit cover when images differ')
+  fs.renameSync(path.join(album, 'covers.jpg'), path.join(album, 'a.png'))
+  fs.unlinkSync(path.join(album, 'poster.png'))
 
   const embeddedArtworkPath = path.join(root, 'stored-artwork', 'track-cover.jpg')
   fs.mkdirSync(path.dirname(embeddedArtworkPath), { recursive: true })
   fs.writeFileSync(embeddedArtworkPath, 'embedded artwork')
   const indexedTracks = [
-    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', file_path: path.join(album, '01-track.flac'), artwork_path: embeddedArtworkPath },
-    { id: 'track-percent', title: 'Literal 100% Track', artist: 'Artist', album: 'Album', file_path: path.join(album, '02-percent.flac') },
-    { id: 'track-underscore', title: 'Name_with_underscore', artist: 'Artist', album: 'Album', file_path: path.join(album, '03-underscore.flac') },
+    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', file_path: path.join(album, '01-track.flac'), artwork_path: trackCoverA },
+    { id: 'track-percent', title: 'Literal 100% Track', artist: 'Artist', album: 'Album', file_path: path.join(album, '02-percent.flac'), artwork_path: trackCoverB },
+    { id: 'track-underscore', title: 'Name_with_underscore', artist: 'Artist', album: 'Album', file_path: path.join(album, '03-underscore.flac'), artwork_path: trackCoverA },
     { id: 'hidden-track', title: 'Hidden Track', artist: 'Hidden', album: 'Hidden', file_path: hiddenTrackPath },
     // This row is stale: it must not count or appear in a playable queue.
     { id: 'stale', title: 'Deleted Track', artist: 'Artist', album: 'Album', file_path: path.join(album, 'deleted.flac') },
   ]
+  indexedTracks.push({ id: 'second-root-track', title: 'Second Root Track', artist: 'Second Artist', album: 'Second Album', file_path: secondTrackPath })
   for (let i = 0; i < 1001; i++) {
     const filename = 'bulk-' + String(i).padStart(4, '0') + '.flac'
     const filePath = path.join(emojiAlbum, filename)
@@ -79,7 +97,16 @@ try {
   const isInRange = (filePath, start, end) => filePath >= start && filePath < end
   const db = {
     prepare(sql) {
+      if (sql.includes("key = 'music_folders'")) return { get: () => ({ value: JSON.stringify([root, secondRoot]) }) }
       if (sql.includes("key = 'music_folder'")) return { get: () => ({ value: musicRoot }) }
+      if (sql.includes('SELECT id, file_path, artwork_path, artwork_url FROM tracks')) {
+        return {
+          all: (start, end) => indexedTracks
+            .filter(track => isInRange(track.file_path, start, end) && (track.artwork_path || track.artwork_url))
+            .map(({ id, file_path, artwork_path, artwork_url }) => ({ id, file_path, artwork_path, artwork_url }))
+            .sort((a, b) => a.file_path.localeCompare(b.file_path)),
+        }
+      }
       if (sql.includes('SELECT file_path FROM tracks')) {
         return {
           all: (start, end) => indexedTracks
@@ -108,6 +135,7 @@ try {
 
   const rootView = getLibraryFolders(db, '')
   assert.equal(rootView.available, true)
+  assert.deepEqual(rootView.rootPaths, [musicRoot, secondRoot], 'the folder browser reports every configured music root')
   assert.deepEqual(rootView.folders.map(folder => folder.name).sort(), ['Artist', '🎧Artist'])
   assert.equal(rootView.folders.some(folder => folder.name === 'Empty'), false, 'folders with no tracks are hidden')
   assert.equal(rootView.folders.some(folder => folder.name.startsWith('.')), false, 'all dot-prefixed folders are hidden')
@@ -119,6 +147,19 @@ try {
   assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverPath, null, 'folders without a saved image have no file cover')
   assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverTrackId, 'bulk-0', 'folders without a saved image use their first song')
   assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').coverArtworkPath, embeddedArtworkPath, 'first-song embedded artwork is available as the folder cover')
+  const artistFolder = rootView.folders.find(folder => folder.name === 'Artist')
+  assert.equal(artistFolder.artwork_tracks.length, 2, 'a folder without a direct image exposes distinct album covers for a collage')
+  assert.deepEqual(new Set(artistFolder.artwork_tracks.map(track => track.artwork_path)), new Set([trackCoverA, trackCoverB]))
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').trackCount, 1001, 'emoji-leading folder names are included in the recursive count')
+
+  const secondRootView = getLibraryFolders(db, '', '', secondRoot)
+  assert.equal(secondRootView.available, true, 'a configured secondary music root can be browsed')
+  assert.equal(secondRootView.rootPath, secondRoot)
+  assert.equal(secondRootView.rootName, path.basename(secondRoot))
+  const secondAlbumView = getLibraryFolders(db, 'Second Artist/Second Album', '', secondRoot)
+  assert.deepEqual(secondAlbumView.tracks.map(track => track.id), ['second-root-track'])
+  const invalidRootView = getLibraryFolders(db, '', '', path.join(os.tmpdir(), 'not-configured'))
+  assert.equal(invalidRootView.available, false, 'root overrides cannot browse folders outside the configured root list')
 
   const artistView = getLibraryFolders(db, 'Artist')
   assert.equal(artistView.relativePath, 'Artist')
@@ -129,7 +170,9 @@ try {
   assert.equal(artistView.folders[0].trackCount, 3)
   assert.equal(artistView.folders[0].coverPath, path.join(album, 'a.png'), 'folder entries expose their saved image cover path')
   assert.equal(artistView.folders[0].coverTrackId, 'track-1', 'folder entries expose the first song for artwork fallback')
-  assert.equal(artistView.folders[0].coverArtworkPath, embeddedArtworkPath, 'folder entries expose the first song embedded artwork')
+  assert.equal(artistView.folders[0].coverArtworkPath, trackCoverA, 'folder entries expose the first song embedded artwork')
+  assert.equal(artistView.folders[0].artwork_path, path.join(album, 'a.png'), 'an image inside a folder is used as its cover')
+  assert.equal(artistView.folders[0].artwork_tracks.length, 2, 'track covers remain available as fallback artwork')
 
   const emojiView = getLibraryFolders(db, '🎧Artist')
   assert.equal(emojiView.totalTracks, 1001)
@@ -163,4 +206,5 @@ try {
   console.log('Library folder view tests passed')
 } finally {
   fs.rmSync(root, { recursive: true, force: true })
+  fs.rmSync(secondRoot, { recursive: true, force: true })
 }

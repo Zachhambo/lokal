@@ -22,7 +22,7 @@ import { groupReleases, releaseTypeCounts, useReleaseTypes } from '../releaseTyp
 import FollowArtistButton from '../components/FollowArtistButton'
 import { playNextMany } from '../trackActions'
 
-const shuffledList = list => {
+const shuffledArtistTracks = list => {
   const out = [...list]
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
@@ -277,7 +277,7 @@ export default function Artist() {
           <button onClick={() => playNextMany(artist.tracks)} disabled={!artist.tracks?.length} className="flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2 text-sm text-white/80 transition-colors hover:border-accent/30 hover:text-white disabled:opacity-40">
             <Clock size={14} /> {t('Play next')}
           </button>
-          <button onClick={() => { const tracks = shuffledList(artist.tracks || []); if (tracks.length) playQueue(tracks, 0, artistContext) }} disabled={!artist.tracks?.length} className="flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2 text-sm text-white/80 transition-colors hover:border-accent/30 hover:text-white disabled:opacity-40">
+          <button onClick={() => { const list = shuffledArtistTracks(artist.tracks || []); if (list.length) playQueue(list, 0, artistContext) }} disabled={!artist.tracks?.length} className="flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2 text-sm text-white/80 transition-colors hover:border-accent/30 hover:text-white disabled:opacity-40">
             <Shuffle size={14} /> {t('Shuffle')}
           </button>
           <button onClick={() => openRadio(nav, { artist: artist.name, type: 'artist' }, useAppStore.getState().user?.id)} className="flex items-center gap-2 rounded-full border border-border bg-elevated px-4 py-2 text-sm text-white/80 transition-colors hover:border-accent/30 hover:text-white">

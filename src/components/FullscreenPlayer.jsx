@@ -533,6 +533,10 @@ export default function FullscreenPlayer() {
     cover.style.setProperty('--cover-highlight-y', `${(0.5 - (y - 0.5) * 0.7) * 100}%`)
     cover.style.setProperty('--cover-highlight-opacity', '0.28')
   }
+  /**
+   * Restore the fullscreen cover's neutral tilt when the pointer leaves.
+   * @param {MouseEvent} event Pointer-leave event from the cover.
+   */
   const resetCoverPointer = (event) => {
     setCoverHover(false)
     const cover = event.currentTarget
@@ -710,6 +714,7 @@ export default function FullscreenPlayer() {
                 onMouseEnter={() => setCoverHover(true)}
                 onMouseLeave={resetCoverPointer}
                 onPointerMove={handleCoverPointerMove}
+                onDoubleClick={doubleClickLike}
                 className="group/cover relative flex flex-shrink-0 select-none items-center justify-center"
                 // A tall (9:16) canvas plays in the card itself, which grows to
                 // its shape. (It used to fill the whole screen behind the
