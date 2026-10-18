@@ -189,6 +189,36 @@ function registerOnlineHandlers(ipcMain) {
   ipcMain.handle('musicVideo:find', (event, trackId) => musicVideoFor(trackId, {
     onProgress: musicVideoProgress(event, trackId),
   }).catch(() => null))
+  ipcMain.handle('musicVideo:setManual', (_, trackId, link) => {
+    try {
+      const track = getDB().prepare('SELECT id, title, artist, duration FROM tracks WHERE id = ?').get(trackId)
+      if (!track) throw new Error('Song not found')
+      let url
+      try { url = new URL(String(link || '').trim()) } catch { throw new Error('Enter a valid YouTube video link') }
+      const host = url.hostname.toLowerCase().replace(/^www\./, '')
+      let videoId = ''
+      if (host === 'youtu.be') videoId = url.pathname.split('/').filter(Boolean)[0] || ''
+      else if (['youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) {
+        if (url.pathname === '/watch') videoId = url.searchParams.get('v') || ''
+        else videoId = url.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{11})(?:\/|$)/)?.[1] || ''
+      }
+      if (!/^[\w-]{11}$/.test(videoId)) throw new Error('Enter a valid YouTube video link')
+      const video = {
+        videoId,
+        title: track.title || videoId,
+        artist: track.artist || '',
+        duration: null,
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+        segments: [{ start: 0, end: null, offset: 0 }],
+        check: 'manual',
+        motion: 'unverified',
+        manual: true,
+      }
+      ensureVideoLibrary()
+      saveMusicVideoOncePerVideo(trackId, video, true)
+      return { saved: true, videoId }
+    } catch (error) { return { error: error.message } }
+  })
   ipcMain.handle('musicVideo:download', (_, trackId) => prepareMusicVideoFor(trackId, { download: true }).catch(e => ({ error: e.message })))
   ipcMain.handle('musicVideo:prepare', (_, trackId) => prepareMusicVideoFor(trackId).catch(e => ({ error: e.message })))
   // Where a video that isn't downloaded is streamed from (see videoStreamBase).
@@ -316,15 +346,17 @@ async function musicVideoFor(trackId, { onProgress } = {}) {
   const cacheFile = musicVideoMetadataFile()
   const matcher = require('../online/musicVideo')
   ensureVideoLibrary()
+  let saved = null
+  try {
+    saved = JSON.parse(getDB().prepare('SELECT video_json FROM saved_music_videos WHERE track_id = ?').get(trackId)?.video_json || 'null')
+  } catch {}
+  if (saved?.manual === true && /^[\w-]{11}$/.test(String(saved.videoId || ''))) return saved
   const known = matcher.knownMusicVideos([track], { cacheFile, findFile: musicVideoFile })[0]?.video
   if (known) return known
   for (const row of getDB().prepare('SELECT video_json FROM downloaded_music_videos').all()) {
     try { const video = JSON.parse(row.video_json); if (video.trackId === trackId && (video.motion === 'verified' || musicVideoFile(video, track))) return video } catch {}
   }
-  try {
-    const saved = JSON.parse(getDB().prepare('SELECT video_json FROM saved_music_videos WHERE track_id = ?').get(trackId)?.video_json || 'null')
-    if (/^[\w-]{11}$/.test(String(saved?.videoId || '')) && (saved.motion === 'verified' || musicVideoFile(saved, track))) return saved
-  } catch {}
+  if (/^[\w-]{11}$/.test(String(saved?.videoId || '')) && (saved.motion === 'verified' || musicVideoFile(saved, track))) return saved
   if (accountSession) await accountSession.credentials().catch(() => {})
   const { findFfmpeg } = require('./tools')
   const options = streamOptions()
@@ -463,10 +495,10 @@ function listMusicVideos() {
   // Saved videos keep their metadata even when discovery expires or the file
   // is evicted. Disk-cache membership isn't library membership.
   for (const track of tracks) {
-    if (known.has(track.id) || !saved.has(track.id)) continue
+    if (!saved.has(track.id)) continue
     try {
       const video = JSON.parse(saved.get(track.id))
-      if (/^[\w-]{11}$/.test(String(video?.videoId || ''))) known.set(track.id, { track, video })
+      if (/^[\w-]{11}$/.test(String(video?.videoId || '')) && (video.manual === true || !known.has(track.id))) known.set(track.id, { track, video })
     } catch {}
   }
   const matcher = require('../online/musicVideo')

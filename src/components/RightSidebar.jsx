@@ -6,6 +6,7 @@ import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import LyricsPanel from './LyricsPanel'
 import GenrePopover from './GenrePopover'
+import Modal from './Modal'
 import { trackGenreList } from '../genres'
 import PowerCircle from '../visualizers/PowerCircle'
 import Anomaly from '../visualizers/Anomaly'
@@ -17,7 +18,7 @@ import ArtworkBackdrop, { useArtworkBackdropEnabled } from './ArtworkBackdrop'
 import MotionCover, { loadMotionCover } from './MotionCover'
 import { useMotionCoverOff } from '../motionCoverPrefs'
 import MixCovers from './MixCovers'
-import { useMusicVideo, useMusicVideoView } from '../musicVideo'
+import { refreshMusicVideo, useMusicVideo, useMusicVideoView } from '../musicVideo'
 import { api, peekSettings, wordSyncEnabled } from '../api'
 import { useTranslation } from '../i18n'
 import {
@@ -114,6 +115,10 @@ export default function RightSidebar() {
   const fx = useArtworkBackdropEnabled()
   const menu = useContextMenu()
   const [genrePopover, setGenrePopover] = useState(null)
+  const [manualVideoDialog, setManualVideoDialog] = useState(null)
+  const [manualVideoLink, setManualVideoLink] = useState('')
+  const [manualVideoError, setManualVideoError] = useState('')
+  const [savingManualVideo, setSavingManualVideo] = useState(false)
   // Your plays of the song (30 s or more, as recaps count them), streamed
   // songs too: read for each song, as the one in the player keeps the count
   // it had when it started. This play is counted once it ends.
@@ -342,10 +347,39 @@ export default function RightSidebar() {
     if (!currentTrack) return
     menu.open(event, [
       !isStationTrack(currentTrack) && currentTrack.file_path && !String(currentTrack.file_path).startsWith('ghost://') && { label: t('Open folder in Library'), icon: FolderOpen, onSelect: openCurrentTrackFolder },
+      !isStationTrack(currentTrack) && { label: 'Set YouTube music video…', icon: Clapperboard, onSelect: () => {
+        setManualVideoLink('')
+        setManualVideoError('')
+        setManualVideoDialog({ id: currentTrack.id, title: currentTrack.title, artist: currentTrack.artist })
+      } },
       !isStationTrack(currentTrack) && { label: t('Start radio'), icon: Radio, onSelect: () => openRadio(nav, currentTrack, user?.id) },
       currentTrack.artist && { label: t('Start artist radio'), icon: Radio, onSelect: () => openRadio(nav, { artist: currentTrack.artist, type: 'artist' }, user?.id) },
       !isStationTrack(currentTrack) && losslessMenuItem(currentTrack, Gem),
     ].filter(Boolean))
+  }
+
+  const closeManualVideoDialog = () => {
+    if (savingManualVideo) return
+    setManualVideoDialog(null)
+    setManualVideoError('')
+  }
+
+  const saveManualVideo = async event => {
+    event.preventDefault()
+    if (!manualVideoDialog || !manualVideoLink.trim() || savingManualVideo) return
+    setSavingManualVideo(true)
+    setManualVideoError('')
+    try {
+      const result = await api.musicVideoSetManual(manualVideoDialog.id, manualVideoLink.trim())
+      if (result?.error) throw new Error(result.error)
+      refreshMusicVideo(manualVideoDialog.id)
+      setManualVideoDialog(null)
+      showToast(t('YouTube video added to Videos'))
+    } catch (error) {
+      setManualVideoError(t('Could not add YouTube video: {error}', { error: error?.message || error }))
+    } finally {
+      setSavingManualVideo(false)
+    }
   }
 
   // No backdrop blur on these (nor on the panel): the colour behind them is
@@ -679,6 +713,45 @@ export default function RightSidebar() {
           }}
         />
       )}
+      <Modal
+        open={!!manualVideoDialog}
+        onClose={closeManualVideoDialog}
+        title={t('Set YouTube music video')}
+        width="max-w-md"
+      >
+        <form onSubmit={saveManualVideo} className="space-y-4">
+          <p className="text-sm text-muted">
+            {t('Add a YouTube video for {artist} — {title} to your Videos library.', {
+              artist: manualVideoDialog?.artist || t('Unknown Artist'),
+              title: manualVideoDialog?.title || t('Unknown Song'),
+            })}
+          </p>
+          <div>
+            <label htmlFor="manual-music-video-link" className="mb-1.5 block text-xs font-display uppercase tracking-widest text-muted">
+              {t('YouTube video link')}
+            </label>
+            <input
+              id="manual-music-video-link"
+              type="url"
+              autoFocus
+              required
+              value={manualVideoLink}
+              onChange={event => setManualVideoLink(event.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..."
+              className="w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm text-white placeholder-subtle outline-none transition-colors focus:border-accent/60"
+            />
+          </div>
+          {manualVideoError && <p role="alert" className="text-sm text-red-400">{manualVideoError}</p>}
+          <div className="flex gap-2">
+            <button type="button" onClick={closeManualVideoDialog} disabled={savingManualVideo} className="flex-1 rounded-xl border border-border bg-card py-2.5 text-sm text-muted transition-colors hover:text-white disabled:opacity-40">
+              {t('Cancel')}
+            </button>
+            <button type="submit" disabled={!manualVideoLink.trim() || savingManualVideo} className="flex-1 rounded-xl bg-accent py-2.5 text-sm font-medium text-base transition-colors hover:bg-accent-dim disabled:opacity-40">
+              {savingManualVideo ? t('Adding…') : t('Add to Videos')}
+            </button>
+          </div>
+        </form>
+      </Modal>
       <ContextMenu menu={menu} />
     </>
   )

@@ -36,6 +36,12 @@ export function loadMusicVideo(trackId) {
   return lookups.get(trackId)
 }
 
+export function refreshMusicVideo(trackId) {
+  if (trackId) lookups.delete(trackId)
+  window.dispatchEvent(new CustomEvent('lokal:refresh', { detail: { trackId } }))
+  window.dispatchEvent(new Event('lokal:music-video-found'))
+}
+
 export function useMusicVideo(track, enabled = true, prepare = false) {
   const id = enabled ? track?.id : null
   const [state, setState] = useState({ id: null, video: null, pending: false })

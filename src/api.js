@@ -530,6 +530,8 @@ export const api = {
   musicVideoList: () => isE() && el().musicVideoList ? el().musicVideoList() : Promise.resolve([]),
   musicVideoSave: (trackId, saved = true) => isE() && el().musicVideoSave
     ? el().musicVideoSave(trackId, saved) : Promise.resolve({ error: 'Music videos are available in the desktop app.' }),
+  musicVideoSetManual: (trackId, link) => isE() && el().musicVideoSetManual
+    ? el().musicVideoSetManual(trackId, link) : Promise.resolve({ error: 'Music videos are available in the desktop app.' }),
   // How the lookup is going ({ trackId, stage, index, total }), desktop only.
   onMusicVideoProgress: (fn) => isE() && el().onMusicVideoProgress ? el().onMusicVideoProgress((_, p) => fn(p)) : () => {},
   indexAllMusicVideos: () => isE() && el().indexAllMusicVideos ? el().indexAllMusicVideos() : Promise.resolve(null),

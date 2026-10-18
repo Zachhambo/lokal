@@ -74,6 +74,29 @@ test('renamed local tracks retain downloaded v2 metadata without a network resca
   } finally { state.cleanup() }
 })
 
+test('manually assigned YouTube links override discovered videos and enter the Videos library', async () => {
+  const state = fixture()
+  try {
+    const handlers = new Map()
+    state.online.registerOnlineHandlers({ handle: (name, fn) => handlers.set(name, fn) })
+    const added = await handlers.get('musicVideo:setManual')(null, 'track-id', 'https://youtu.be/ZYXWVUTSRQP')
+    assert.equal(added.saved, true)
+    assert.equal(added.videoId, 'ZYXWVUTSRQP')
+    const found = await handlers.get('musicVideo:find')({ sender: { isDestroyed: () => true } }, 'track-id')
+    assert.equal(found.videoId, 'ZYXWVUTSRQP')
+    assert.equal(found.manual, true)
+    const rows = state.online.listMusicVideos()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].video.videoId, 'ZYXWVUTSRQP')
+    assert.equal(rows[0].video.manual, true)
+    assert.equal(rows[0].video.check, 'manual')
+    assert.equal(rows[0].saved, true)
+    const rejected = await handlers.get('musicVideo:setManual')(null, 'track-id', 'https://example.com/watch?v=ZYXWVUTSRQP')
+    assert.match(rejected.error, /valid YouTube video link/)
+    assert.equal(state.online.listMusicVideos()[0].video.videoId, 'ZYXWVUTSRQP')
+  } finally { state.cleanup() }
+})
+
 test('prepare never queues a replacement download after explicit deletion', async () => {
   const state = fixture()
   try {

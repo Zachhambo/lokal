@@ -50,6 +50,15 @@ test('RightSidebar Details tab shows lyrics beneath the track metadata', () => {
   assert.doesNotMatch(source.slice(metadata, lyrics), /infoCardView === 'lyrics' \?\s*\(/)
 })
 
+test('RightSidebar opens an in-app dialog to enter a manual YouTube music video link', () => {
+  const source = readFileSync(new URL('../src/components/RightSidebar.jsx', import.meta.url), 'utf8')
+  assert.match(source, /label: 'Set YouTube music video…'[\s\S]*?setManualVideoDialog\(\{ id: currentTrack\.id/)
+  assert.doesNotMatch(source, /window\.prompt/)
+  assert.match(source, /<Modal\s+open=\{!!manualVideoDialog\}/)
+  assert.match(source, /id="manual-music-video-link"[\s\S]*?type="url"/)
+  assert.match(source, /onSubmit=\{saveManualVideo\}/)
+})
+
 test('player surfaces do not expose like interactions', () => {
   const playerBar = readFileSync(new URL('../src/components/PlayerBar.jsx', import.meta.url), 'utf8')
   const fullscreen = readFileSync(new URL('../src/components/FullscreenPlayer.jsx', import.meta.url), 'utf8')
