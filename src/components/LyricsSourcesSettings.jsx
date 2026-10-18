@@ -46,6 +46,7 @@ export default function LyricsSourcesSettings({ onPersist } = {}) {
       setSaved(true)
       clearTimeout(savedTimer.current)
       savedTimer.current = setTimeout(() => setSaved(false), 1400)
+      window.dispatchEvent(new Event('lokal:lyrics-sources-saved'))
     }).catch(() => {})
   }
 

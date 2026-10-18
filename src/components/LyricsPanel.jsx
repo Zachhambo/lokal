@@ -292,7 +292,7 @@ const TOOLBAR_FADE = 'transition-[opacity,color,background-color] duration-300 g
 
 const SYNC_LABEL = { syllable: 'Syllable synced', line: 'Line synced', none: 'Not synced' }
 
-function SourceMenu({ sources, current, attempts, busy, onPick, onRefresh, onSearch, hidden = false }) {
+function SourceMenu({ sources, enabledSources, current, attempts, busy, onPick, onRefresh, onSearch, hidden = false }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -329,7 +329,7 @@ function SourceMenu({ sources, current, attempts, busy, onPick, onRefresh, onSea
             className="absolute right-0 top-full mt-1.5 z-30 w-64 rounded-xl border border-white/10 bg-[#161616]/95 backdrop-blur-xl shadow-2xl p-1"
           >
             <p className="px-2.5 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-white/35">{t("Try another source")}</p>
-            {sources.map(s => {
+            {sources.filter(s => enabledSources === null || enabledSources.includes(s.id)).map(s => {
               const status = attempts?.[s.id]
               const note = status === 'syllable' ? 'Syllable' : status === 'line' ? 'Line' : status === 'none' ? 'Plain' : status === 'miss' ? 'Not found' : ''
               return (
@@ -419,6 +419,7 @@ export default function LyricsPanel({
   const [sourceBusy, setSourceBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [sources, setSources] = useState([])
+  const [enabledSources, setEnabledSources] = useState(null)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [focusIdx, setFocusIdx] = useState(-1)
   const [liveKey, setLiveKey] = useState('')
@@ -512,7 +513,10 @@ export default function LyricsPanel({
   useEffect(() => { if (!loading) onLyricsAvailable?.(lines.length > 0) }, [loading, lines.length, onLyricsAvailable])
 
   useEffect(() => {
-    api.getLyricsSources?.().then(s => setSources(s?.providers || [])).catch(() => {})
+    api.getLyricsSources?.().then(s => {
+      setSources(s?.providers || [])
+      setEnabledSources(Array.isArray(s?.enabled) ? s.enabled : null)
+    }).catch(() => {})
     const on = () => setIsOnline(true)
     const off = () => setIsOnline(false)
     window.addEventListener('online', on)
@@ -522,6 +526,21 @@ export default function LyricsPanel({
       window.removeEventListener('offline', off)
     }
   }, [])
+
+  useEffect(() => {
+    const refreshSources = () => {
+      api.getLyricsSources?.().then(s => {
+        setSources(s?.providers || [])
+        setEnabledSources(Array.isArray(s?.enabled) ? s.enabled : null)
+      }).catch(() => {})
+    }
+    const onSourcesSaved = () => {
+      refreshSources()
+      load({ refresh: true }, true)
+    }
+    window.addEventListener('lokal:lyrics-sources-saved', onSourcesSaved)
+    return () => window.removeEventListener('lokal:lyrics-sources-saved', onSourcesSaved)
+  }, [load])
 
   // ---- translation / romanization (src/lyrics/useLyricSubline.js)
   const {
@@ -782,6 +801,7 @@ export default function LyricsPanel({
               <>
                 <SourceMenu
                   sources={sources}
+                  enabledSources={enabledSources}
                   current={result.source}
                   attempts={result.attempts}
                   busy={sourceBusy}

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRequire } from 'node:module'
+import fs from 'node:fs'
+import vm from 'node:vm'
 
 const require = createRequire(import.meta.url)
 const { parse } = require('../electron/lyrics/providers/spicyLyrics.js')
-const { sequenceFor } = require('../electron/lyrics/repository.js')
+const { sequenceFor, DEFAULT_ORDER } = require('../electron/lyrics/repository.js')
 const service = require('../electron/lyrics/service.js')
 const Database = require('better-sqlite3')
 
@@ -54,6 +56,54 @@ test('Spicy Lyrics is inserted before BetterLyrics for legacy source orders', ()
     'local', 'betterlyrics', 'betterlyrics_qq', 'lrclib', 'spicylyrics',
   ])
   assert.ok(order.indexOf('spicylyrics') < order.indexOf('betterlyrics'))
+})
+
+test('disabled lyric sources are excluded, including an explicitly empty enabled list', () => {
+  assert.deepEqual(sequenceFor(DEFAULT_ORDER, []), [])
+  assert.ok(!sequenceFor(DEFAULT_ORDER, ['local', 'lrclib']).includes('betterlyrics_qq'))
+})
+
+test('disabled BetterLyrics Portato is neither reused from cache nor fetched manually', async t => {
+  const filename = require.resolve('../electron/lyrics/service.js')
+  const localRequire = createRequire(filename)
+  let lookupCalls = 0
+  let lookupOptions
+  const context = vm.createContext({
+    module: { exports: {} },
+    require: id => id === './repository'
+      ? { ...localRequire(id), lookup: async (_query, options) => {
+          lookupCalls++
+          lookupOptions = options
+          return {
+            result: { type: 'synced', sync: 'line', lines: [{ time: 1, end: 2, text: 'Enabled source', words: [] }], source: 'lrclib' },
+            attempts: { lrclib: 'line' },
+          }
+        } }
+      : localRequire(id),
+  })
+  vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename })
+  const isolatedService = context.module.exports
+  const db = new Database(':memory:')
+  t.after(() => db.close())
+  db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT, instrumental INTEGER);
+    CREATE TABLE lyrics_cache (track_id TEXT PRIMARY KEY, lyrics_type TEXT, content TEXT, source TEXT, fetched_at INTEGER, file_path TEXT, meta TEXT);`)
+  db.prepare('INSERT INTO tracks (id, file_path, instrumental) VALUES (?, ?, 0)').run('track-portato', '/music/song.flac')
+  const set = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
+  set.run('lyrics_sources_order', JSON.stringify(DEFAULT_ORDER))
+  set.run('lyrics_sources_enabled', JSON.stringify(DEFAULT_ORDER.filter(id => id !== 'betterlyrics_qq')))
+  db.prepare('INSERT INTO lyrics_cache (track_id, lyrics_type, content, source, fetched_at, file_path, meta) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    'track-portato', 'synced', JSON.stringify([{ time: 1, end: 2, text: 'Disabled source', words: [] }]), 'betterlyrics_qq', Date.now(), '/music/song.flac',
+    JSON.stringify({ v: 2, sync: 'line', pinned: false, attempts: { betterlyrics_qq: 'line' } }),
+  )
+
+  const lyrics = await isolatedService.getLyrics(db, { trackId: 'track-portato', title: 'Song', artist: 'Artist', duration: 2 })
+  assert.equal(lyrics.source, 'lrclib')
+  assert.ok(!lookupOptions.enabled.includes('betterlyrics_qq'))
+  const manual = await isolatedService.getLyricsFrom(db, { trackId: 'track-portato', title: 'Song', artist: 'Artist', duration: 2 }, 'betterlyrics_qq')
+  assert.equal(manual.miss, true)
+  assert.equal(manual.attempts.betterlyrics_qq, 'disabled')
+  assert.equal(lookupCalls, 1)
 })
 
 test('a manually selected source remains pinned per track in the lyrics cache', async () => {

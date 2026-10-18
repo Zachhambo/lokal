@@ -39,7 +39,7 @@ function withTimeout(promise, ms) {
 }
 
 function sequenceFor(order, enabled) {
-  const on = new Set(Array.isArray(enabled) && enabled.length ? enabled : DEFAULT_ORDER)
+  const on = new Set(Array.isArray(enabled) ? enabled : DEFAULT_ORDER)
   const known = (Array.isArray(order) && order.length ? order : DEFAULT_ORDER).filter(id => BY_ID[id])
   // Sources added in an update after the user last saved their order fall in after it.
   const full = [...known]

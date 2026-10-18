@@ -217,7 +217,8 @@ async function getLyrics(db, args) {
     const row = readRow(db, trackId, filePath)
     if (row) {
       const meta = parseMeta(row)
-      if (meta) {
+      const sourceDisabled = meta && DEFAULT_ORDER.includes(row.source) && !settings.enabled.includes(row.source)
+      if (meta && !sourceDisabled) {
         if (row.source === 'no-results') {
           const fresh = row.fetched_at && Date.now() - row.fetched_at < NEGATIVE_TTL_MS
           if (fresh && negativeSettingsKeys.get(db)?.get(row.track_id) === settings.settingsKey) return null
@@ -272,6 +273,9 @@ async function getLyrics(db, args) {
 async function getLyricsFrom(db, args, providerId) {
   ensureSchema(db)
   const settings = readSettings(db)
+  if (DEFAULT_ORDER.includes(providerId) && !settings.enabled.includes(providerId)) {
+    return { type: null, lines: [], source: providerId, attempts: { [providerId]: 'disabled' }, miss: true }
+  }
   const filePath = trustedFilePath(db, args.trackId)
   const { result, attempts } = await lookup(
     { title: args.title, artist: args.artist, album: args.album, duration: Number(args.duration) || 0, filePath, keepCommaArtists: settings.keepCommaArtists },
