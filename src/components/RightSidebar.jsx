@@ -605,6 +605,14 @@ export default function RightSidebar() {
                     </div>
                     )
                   )}
+                  {currentTrack && infoCardView === 'info' && (
+                    <section aria-label={t("Lyrics")} className={`overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
+                      <h3 className={`px-4 pt-3 text-xs font-display uppercase tracking-wider ${fx ? 'text-white/45' : 'text-muted'}`}>{t("Lyrics")}</h3>
+                      <div className="relative h-[320px]">
+                        <LyricsPanel track={currentTrack} progress={progress} darkMode wordSync={wordSync} fullscreen={false} textScale={1.4} isAutoSynced={isAutoSynced} hideToolbar compact />
+                      </div>
+                    </section>
+                  )}
                 </div>
               </div>
             </div>

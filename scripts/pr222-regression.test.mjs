@@ -40,6 +40,15 @@ test('RightSidebar resets track view and auto-selects available lyrics unless vi
   assert.match(source, /setInfoCardView\(view => sideCardViewAfterTrackChange\(view, has\)\)/)
 })
 
+test('RightSidebar Details tab shows lyrics beneath the track metadata', () => {
+  const source = readFileSync(new URL('../src/components/RightSidebar.jsx', import.meta.url), 'utf8')
+  const details = source.indexOf('{currentTrack && infoCardView === \'info\' && (')
+  const lyrics = source.indexOf('<LyricsPanel track={currentTrack}', details)
+  assert.ok(details >= 0 && lyrics > details)
+  assert.match(source.slice(details, lyrics), /<section aria-label=\{t\("Lyrics"\)\}/)
+  assert.match(source.slice(lyrics, lyrics + 180), /hideToolbar compact/)
+})
+
 test('player surfaces do not expose like interactions', () => {
   const playerBar = readFileSync(new URL('../src/components/PlayerBar.jsx', import.meta.url), 'utf8')
   const fullscreen = readFileSync(new URL('../src/components/FullscreenPlayer.jsx', import.meta.url), 'utf8')
