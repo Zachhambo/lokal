@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, FolderOpen, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, FolderOpen, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate } from 'react-router-dom'
@@ -280,24 +280,6 @@ export default function PlayerBar() {
         </div>
 
         <div className="flex h-5 w-[99px] flex-shrink-0 items-center gap-3">
-          {currentTrack && !station && (
-            <div className="relative flex-shrink-0">
-              <motion.button onClick={toggleLike} whileTap={{ scale: 0.75 }}
-                className={`flex h-5 w-5 items-center justify-center leading-none transition-colors ${isLiked ? 'text-accent' : 'text-text/90 hover:text-text'}`}
-                title={isLiked ? t("Unlike") : t("Like")} aria-label={isLiked ? t("Unlike") : t("Like")}>
-                <Heart size={16} fill={isLiked ? 'currentColor' : 'none'} />
-              </motion.button>
-              <AnimatePresence>
-                {likeAnim && (
-                  <motion.div initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.8, opacity: 0 }} exit={{}}
-                    transition={{ duration: 0.5 }}
-                    className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <Heart size={16} className="text-accent" fill="currentColor" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
           {currentTrack && !station && (
             <button onClick={() => openAddToPlaylist(currentTrack)} title={t("Add to playlist")} aria-label={t("Add to playlist")}
               className="flex-shrink-0 text-text/90 hover:text-accent transition-colors">

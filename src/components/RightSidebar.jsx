@@ -34,7 +34,6 @@ import { isStreamed, trackArtURL } from '../onlineTracks'
 
 import ContextMenu, { useContextMenu } from './ContextMenu'
 import { openRadio } from '../radioActions'
-import LikeBurst from './LikeBurst'
 import { showToast } from './Toaster'
 import { losslessMenuItem } from '../quality'
 import { sideCardViewAfterTrackChange } from '../sideCardView'
@@ -90,15 +89,15 @@ export default function RightSidebar() {
   const {
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
   } = usePlayerStore(useShallow(({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
   }) => ({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
   })))
   // Back from the mini player: the Lyrics and Queue overlays start over.
   // The app was hidden meanwhile (App's <Activity>), where no animation runs,
@@ -115,10 +114,6 @@ export default function RightSidebar() {
   const fx = useArtworkBackdropEnabled()
   const menu = useContextMenu()
   const [genrePopover, setGenrePopover] = useState(null)
-  const likeBusy = useRef(false)
-  const burstTimer = useRef(null)
-  const [burst, setBurst] = useState(null)
-  useEffect(() => () => clearTimeout(burstTimer.current), [])
   // Your plays of the song (30 s or more, as recaps count them), streamed
   // songs too: read for each song, as the one in the player keeps the count
   // it had when it started. This play is counted once it ends.
@@ -336,20 +331,6 @@ export default function RightSidebar() {
 
   const artSrc = trackArtURL(currentTrack)
 
-  const doubleClickLike = async event => {
-    if (!currentTrack || isStationTrack(currentTrack) || likeBusy.current || event.target.closest?.('button, a, input, [role="slider"]')) return
-    likeBusy.current = true
-    const liked = likedIds.has(currentTrack.id)
-    setBurst({ id: Date.now(), trackId: currentTrack.id, kind: liked ? 'unlike' : 'like' })
-    clearTimeout(burstTimer.current)
-    burstTimer.current = setTimeout(() => setBurst(null), 1200)
-    try {
-      const result = await api.toggleLike(currentTrack.id, user?.id, currentTrack)
-      if (result?.error) throw new Error(result.error)
-      if (useAppStore.getState().user?.id === user?.id) setLiked(currentTrack.id, typeof result === 'boolean' ? result : !!result?.liked)
-    } catch (error) { setBurst(null); showToast(error.message || 'Could not update this song’s like.') } finally { likeBusy.current = false }
-  }
-
   const openCurrentTrackFolder = async () => {
     const root = peekSettings()?.music_folder || (await api.getSettings())?.music_folder
     const relativePath = folderPathForTrack(currentTrack?.file_path, root)
@@ -478,8 +459,6 @@ export default function RightSidebar() {
               {fx && <ArtworkBackdrop trackId={currentTrack?.id} seam={artSrc ? heroHeight : 0} />}
               <div className={`relative flex-1 overflow-y-auto ${fx ? '' : 'p-4'} pb-[calc(var(--player-space,0px)+1rem)]`}>
                 <motion.div
-                  onDoubleClick={doubleClickLike}
-                  title={t("Double-click to like or unlike this song")}
                   className={fx ? 'relative w-full overflow-hidden' : 'relative w-full rounded-xl overflow-hidden bg-card border border-border/50'}
                   style={{
                     // Square cover normally; a tall canvas grows it to ~60% of the panel.
@@ -503,9 +482,8 @@ export default function RightSidebar() {
                   ) : (
                     <div className={`absolute inset-0 flex items-center justify-center ${fx ? 'text-white/25' : 'text-subtle'}`}><Music size={52} /></div>
                   )}
-                  {burst && burst.trackId === currentTrack?.id && <LikeBurst key={burst.id} kind={burst.kind} />}
                   {currentTrack && (
-                    <div className="group/lyrics absolute left-0 top-0 z-10 h-1/3 w-1/2 p-2" onMouseEnter={() => lookUpLyrics()} onDoubleClick={e => e.stopPropagation()}>
+                    <div className="group/lyrics absolute left-0 top-0 z-10 h-1/3 w-1/2 p-2" onMouseEnter={() => lookUpLyrics()}>
                       <button
                         type="button"
                         onClick={() => {

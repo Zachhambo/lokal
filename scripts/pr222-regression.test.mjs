@@ -40,6 +40,15 @@ test('RightSidebar resets track view and auto-selects available lyrics unless vi
   assert.match(source, /setInfoCardView\(view => sideCardViewAfterTrackChange\(view, has\)\)/)
 })
 
+test('player surfaces do not expose like interactions', () => {
+  const playerBar = readFileSync(new URL('../src/components/PlayerBar.jsx', import.meta.url), 'utf8')
+  const fullscreen = readFileSync(new URL('../src/components/FullscreenPlayer.jsx', import.meta.url), 'utf8')
+  const rightSidebar = readFileSync(new URL('../src/components/RightSidebar.jsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(playerBar, /toggleLike|likedIds|<Heart\b/)
+  assert.doesNotMatch(fullscreen, /doubleClickLike|onDoubleClick=|LikeBurst|toggleLike|likedIds/)
+  assert.doesNotMatch(rightSidebar, /doubleClickLike|onDoubleClick=|LikeBurst|toggleLike|likedIds/)
+})
+
 test('Library search is on the right of the track-count row in both modes', () => {
   const source = readFileSync(new URL('../src/pages/Library.jsx', import.meta.url), 'utf8')
   const scanBanner = source.indexOf('<ScanBanner />')
@@ -150,4 +159,3 @@ test('reports missing FFmpeg only when an unsupported codec needs it', () => {
   assert.equal(playbackCopyFailure(wma, '/usr/local/bin/ffmpeg', 'linux'), null)
   assert.equal(playbackCopyFailure({ codec: 'AAC', lossless: false, unplayable: false }, null, 'linux'), null)
 })
-

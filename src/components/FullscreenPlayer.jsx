@@ -714,7 +714,6 @@ export default function FullscreenPlayer() {
                 onMouseEnter={() => setCoverHover(true)}
                 onMouseLeave={resetCoverPointer}
                 onPointerMove={handleCoverPointerMove}
-                onDoubleClick={doubleClickLike}
                 className="group/cover relative flex flex-shrink-0 select-none items-center justify-center"
                 // A tall (9:16) canvas plays in the card itself, which grows to
                 // its shape. (It used to fill the whole screen behind the
