@@ -1,6 +1,6 @@
 {
   "name": "lokal-music",
-  "version": "9.1.3",
+  "version": "9.2.7",
   "description": "Local-first music player built w/ Electron and React. Designed for people with large local music libraries who'd like a modern listening experience w/o the burdens of streaming subscriptions.",
   "author": "sipbuu <97703296+sipbuu@users.noreply.github.com>",
   "main": "electron/main.js",
@@ -14,7 +14,7 @@
     "rebuild:web": "npm rebuild better-sqlite3",
     "postinstall": "electron-builder install-app-deps && npm run native:prepare",
     "native:prepare": "node scripts/prepare-native.js",
-    "test:ported": "node --test scripts/artist-split.test.mjs scripts/cover-mix.test.mjs scripts/download-addon-pacing.test.mjs scripts/genre-cleanup.test.mjs scripts/genre-playlist.test.mjs scripts/file-tags.test.mjs scripts/library-folder-view.test.mjs scripts/library-folder-operations.test.mjs scripts/library-watch.test.mjs scripts/video-section-dedupe.test.mjs scripts/pr222-regression.test.mjs scripts/release-types.test.mjs scripts/replaygain.test.mjs scripts/review-fixes.test.mjs"
+    "test:ported": "node --test scripts/artist-metadata-rescan.test.mjs scripts/artist-split.test.mjs scripts/cover-mix.test.mjs scripts/download-addon-pacing.test.mjs scripts/genre-cleanup.test.mjs scripts/genre-playlist.test.mjs scripts/file-tags.test.mjs scripts/library-folder-view.test.mjs scripts/library-folder-operations.test.mjs scripts/library-watch.test.mjs scripts/video-section-dedupe.test.mjs scripts/pr222-regression.test.mjs scripts/release-types.test.mjs scripts/replaygain.test.mjs scripts/review-fixes.test.mjs scripts/yandex-music-package.test.mjs"
   },
   "build": {
     "appId": "com.lokal.music",
@@ -131,6 +131,8 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^13.0.3",
     "bgutils-js": "^4.0.3",
+    "butterchurn": "^2.6.7",
+    "butterchurn-presets": "^2.4.7",
     "cors": "^2.8.5",
     "discord-rpc": "^4.0.1",
     "dotenv": "^16.4.5",
@@ -140,16 +142,16 @@
     "electron-updater": "^6.8.9",
     "express": "^4.18.3",
     "fs-extra": "^11.3.3",
+    "icecast-metadata-player": "1.17.13",
     "multicast-dns": "^7.2.5",
     "music-metadata": "^12.0.0",
     "node-taglib-sharp": "^6.0.3",
     "quickjs-emscripten": "0.32.0",
     "sharp": "^0.35.5",
+    "three": "^0.175.0",
     "tough-cookie": "6.0.0",
     "yauzl": "^3.4.0",
-    "youtubei.js": "^17.2.0",
-    "three": "^0.175.0",
-    "icecast-metadata-player": "1.17.13"
+    "youtubei.js": "^17.2.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, FolderOpen, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, FolderOpen, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate } from 'react-router-dom'
@@ -9,6 +9,8 @@ import { useTranslation } from '../i18n'
 import { navigateToTrackAlbum } from '../playbackContext'
 import { isOnlineTrack } from '../onlineBrowse'
 import { isStationTrack } from '../radio/stations'
+import { resolveStationSong } from '../radio/stationSong'
+import { showToast } from './Toaster'
 import Waveform from './Waveform'
 import Spectrum from '../visualizers/Spectrum'
 import Waves from '../visualizers/Waves'
@@ -26,6 +28,7 @@ import { openRadio } from '../radioActions'
 import { useCastStore } from '../cast/castStore'
 import MarqueeText from './MarqueeText'
 import TrackArtistLinks from './TrackArtistLinks'
+import { useVolumeWheel } from '../volumeWheel'
 
 const folderPathForTrack = (trackPath, musicRoot) => {
   if (!trackPath || String(trackPath).startsWith('ghost://') || !musicRoot) return null
@@ -69,6 +72,7 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
+    likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
@@ -77,6 +81,7 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
+    likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
@@ -85,19 +90,24 @@ export default function PlayerBar() {
     showRightSidebar, showQueue, showLyricsPanel, sidePanelView, exclusiveSidePanels,
     togglePlay, next, prev, setProgress, setVolume, toggleShuffle, toggleRepeat,
     toggleLyricsButton, toggleRightSidebar, toggleFullscreen, toggleQueueButton,
+    likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
     sleepTimerMinutes, sleepTimerEndTime, setSleepTimer, cancelSleepTimer,
     toggleMiniPlayer,
   })))
   const { user, openAddToPlaylist } = useAppStore()
+  const [likeAnim, setLikeAnim] = useState(false)
   const [showAudioPipeline, setShowAudioPipeline] = useState(false)
   const [keepCommaArtists, setKeepCommaArtists] = useState([])
+  const volumeWheelRef = useVolumeWheel(volume, setVolume)
   const scrubbing = useRef(false)
   const [localProg, setLocalProg] = useState(null)
   const [showSleepTimer, setShowSleepTimer] = useState(false)
   const [sleepTimerDisplay, setSleepTimerDisplay] = useState(null)
   const menu = useContextMenu()
   const display = localProg ?? progress
+  const [stationLikeId, setStationLikeId] = useState({}) // radio: song_key -> the found song's id
+  const isLiked = currentTrack && likedIds.has(isStationTrack(currentTrack) ? stationLikeId[currentTrack.song_key] : currentTrack.id)
   const RepeatIcon = repeat === 'one' ? Repeat1 : Repeat
 
   useEffect(() => {
@@ -150,6 +160,22 @@ export default function PlayerBar() {
     if (scrubbing.current) usePlayerStore.getState().setProgressWithAudioUpdate(t)
   }, [duration])
 
+  // A radio station playing a named song: Like and Save act on that song, found online.
+  const stationSongKnown = isStationTrack(currentTrack) && !!currentTrack?.song_key
+  const toggleLike = async () => {
+    if (!currentTrack) return
+    let track = currentTrack
+    if (stationSongKnown) {
+      track = await resolveStationSong(currentTrack)
+      if (!track) { showToast(t("Couldn't find this song online")); return }
+      setStationLikeId(ids => ({ ...ids, [currentTrack.song_key]: track.id }))
+    }
+    const r = await api.toggleLike(track.id, user?.id, track)
+    const liked = typeof r === 'boolean' ? r : r?.liked ?? false
+    setLiked(track.id, liked)
+    if (liked) { setLikeAnim(true); setTimeout(() => setLikeAnim(false), 600) }
+  }
+
   const artSrc = trackArtURL(currentTrack)
 
   // An online song (YouTube, SoundCloud): label, and a button to save it.
@@ -157,6 +183,11 @@ export default function PlayerBar() {
   const station = isStationTrack(currentTrack)
 
   const hasAlbum = !station && (!!currentTrack?.album || (!!isOnlineTrack(currentTrack) && !!(currentTrack?.source_album_id || currentTrack?.sourceAlbumId || currentTrack?.albumId)))
+  // A radio song: its album, found online (the playing song's lookup, as for Like and Save).
+  const openStationAlbum = async () => {
+    const found = await resolveStationSong(currentTrack)
+    if (!found || !navigateToTrackAlbum(nav, found)) showToast(t("Couldn't find this song's album"))
+  }
   const handleTitleClick = () => {
     if (!hasAlbum) return
     navigateToTrackAlbum(nav, currentTrack)
@@ -221,11 +252,11 @@ export default function PlayerBar() {
             <motion.div key={currentTrack?.id||'none'} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
               <div className="flex items-center gap-2 min-w-0">
                 <MarqueeText className="flex-1 min-w-0">
-                  {hasAlbum ? (
+                  {hasAlbum || stationSongKnown ? (
                     <button
-                      onClick={handleTitleClick}
+                      onClick={hasAlbum ? handleTitleClick : openStationAlbum}
                       onContextMenu={openTrackMenu}
-                      title={`Go to album: ${currentTrack.album || t('Album · Online')}`}
+                      title={hasAlbum ? `Go to album: ${currentTrack.album || t('Album · Online')}` : t('Go to album')}
                       className="text-sm font-medium text-text hover:text-accent hover:underline transition-colors text-left">
                       {currentTrack.title}
                     </button>
@@ -280,6 +311,24 @@ export default function PlayerBar() {
         </div>
 
         <div className="flex h-5 w-[99px] flex-shrink-0 items-center gap-3">
+          {currentTrack && (!station || stationSongKnown) && (
+            <div className="relative flex-shrink-0">
+              <motion.button onClick={toggleLike} whileTap={{ scale: 0.75 }}
+                className={`flex h-5 w-5 items-center justify-center leading-none transition-colors ${isLiked ? 'text-accent' : 'text-text/90 hover:text-text'}`}
+                title={isLiked ? t("Unlike") : t("Like")} aria-label={isLiked ? t("Unlike") : t("Like")}>
+                <Heart size={16} fill={isLiked ? 'currentColor' : 'none'} />
+              </motion.button>
+              <AnimatePresence>
+                {likeAnim && (
+                  <motion.div initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.8, opacity: 0 }} exit={{}}
+                    transition={{ duration: 0.5 }}
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <Heart size={16} className="text-accent" fill="currentColor" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
           {currentTrack && !station && (
             <button onClick={() => openAddToPlaylist(currentTrack)} title={t("Add to playlist")} aria-label={t("Add to playlist")}
               className="flex-shrink-0 text-text/90 hover:text-accent transition-colors">
@@ -294,6 +343,7 @@ export default function PlayerBar() {
             </button>
           )}
           {streamed && <SaveToLibraryButton key={currentTrack.id} track={currentTrack} className="text-text/90" />}
+          {stationSongKnown && <SaveToLibraryButton key={currentTrack.song_key} getTrack={() => resolveStationSong(currentTrack)} meta={{ title: currentTrack.title, artist: currentTrack.artist }} className="text-text/90" />}
         </div>
         </div>
 
@@ -365,6 +415,9 @@ export default function PlayerBar() {
             <button onClick={() => setVolume(volume > 0 ? 0 : 0.8)} className="text-text/90 hover:text-text transition-colors">
               {volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
             </button>
+            <input ref={volumeWheelRef} type="range" min={0} max={1} step={0.01} value={volume}
+              onChange={e => setVolume(parseFloat(e.target.value))}
+              className="w-18 accent-accent cursor-pointer h-1" style={{ width: 72 }} />
           </div>
         </div>
       </div>

@@ -8,7 +8,7 @@ import LyricsPanel from './LyricsPanel'
 import GenrePopover from './GenrePopover'
 import Modal from './Modal'
 import { trackGenreList } from '../genres'
-import PowerCircle from '../visualizers/PowerCircle'
+import MilkDrop from '../visualizers/MilkDrop'
 import Anomaly from '../visualizers/Anomaly'
 import Spectrum from '../visualizers/Spectrum'
 import Waves from '../visualizers/Waves'
@@ -31,11 +31,13 @@ import TrackArtistLinks from './TrackArtistLinks'
 import { cacheLyrics, peekLyrics, hasLyricLines } from '../lyrics/lyricsCache'
 import { isOnlineTrack } from '../onlineBrowse'
 import { isStationTrack } from '../radio/stations'
+import { resolveStationSong } from '../radio/stationSong'
+import { showToast } from './Toaster'
 import { isStreamed, trackArtURL } from '../onlineTracks'
 
 import ContextMenu, { useContextMenu } from './ContextMenu'
 import { openRadio } from '../radioActions'
-import { showToast } from './Toaster'
+import LikeBurst from './LikeBurst'
 import { losslessMenuItem } from '../quality'
 import { sideCardViewAfterTrackChange } from '../sideCardView'
 
@@ -90,15 +92,15 @@ export default function RightSidebar() {
   const {
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   } = usePlayerStore(useShallow(({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   }) => ({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
     toggleFullscreen, toggleLyricsFullscreen, playbackContext,
-    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels,
+    sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   })))
   // Back from the mini player: the Lyrics and Queue overlays start over.
   // The app was hidden meanwhile (App's <Activity>), where no animation runs,
@@ -115,6 +117,10 @@ export default function RightSidebar() {
   const fx = useArtworkBackdropEnabled()
   const menu = useContextMenu()
   const [genrePopover, setGenrePopover] = useState(null)
+  const likeBusy = useRef(false)
+  const burstTimer = useRef(null)
+  const [burst, setBurst] = useState(null)
+  useEffect(() => () => clearTimeout(burstTimer.current), [])
   const [manualVideoDialog, setManualVideoDialog] = useState(null)
   const [manualVideoLink, setManualVideoLink] = useState('')
   const [manualVideoError, setManualVideoError] = useState('')
@@ -203,7 +209,8 @@ export default function RightSidebar() {
     if (mode === 'waves') return <Waves isPlaying={isPlaying} width={320} height={180} strength={1.1} opacity={0.8} className={className} />
     if (mode === 'lightning') return <Lightning isPlaying={isPlaying} strength={1.1} opacity={0.85} className={className} />
     if (mode === 'anomaly') return <Anomaly sensitivity={5} size={1.15} color="accent" className={className} />
-    return <PowerCircle className={className} background={fx ? '#050505' : 'rgb(var(--surface-rgb))'} />
+    // 'power-circle' (the default) was the first round one; MilkDrop took its place.
+    return <MilkDrop className={className} isPlaying={isPlaying} trackId={currentTrack?.id} />
   })()
 
   // The cover's Lyrics button is shown when lyrics are available. The lookup
@@ -336,6 +343,25 @@ export default function RightSidebar() {
 
   const artSrc = trackArtURL(currentTrack)
 
+  const doubleClickLike = async event => {
+    if (!currentTrack || isStationTrack(currentTrack) || likeBusy.current || event.target.closest?.('button, a, input, [role="slider"]')) return
+    likeBusy.current = true
+    const liked = likedIds.has(currentTrack.id)
+    setBurst({ id: Date.now(), trackId: currentTrack.id, kind: liked ? 'unlike' : 'like' })
+    clearTimeout(burstTimer.current)
+    burstTimer.current = setTimeout(() => setBurst(null), 1200)
+    try {
+      const result = await api.toggleLike(currentTrack.id, user?.id, currentTrack)
+      if (result?.error) throw new Error(result.error)
+      if (useAppStore.getState().user?.id === user?.id) setLiked(currentTrack.id, typeof result === 'boolean' ? result : !!result?.liked)
+    } catch (error) {
+      setBurst(null)
+      showToast(error.message || 'Could not update this song’s like.')
+    } finally {
+      likeBusy.current = false
+    }
+  }
+
   const openCurrentTrackFolder = async () => {
     const root = peekSettings()?.music_folder || (await api.getSettings())?.music_folder
     const relativePath = folderPathForTrack(currentTrack?.file_path, root)
@@ -404,6 +430,12 @@ export default function RightSidebar() {
       )}
     </div>
   ) : null
+  // A radio song: its album, found online (the playing song's lookup).
+  const stationSongKnown = isStationTrack(currentTrack) && !!currentTrack?.song_key
+  const openStationAlbum = async () => {
+    const found = await resolveStationSong(currentTrack)
+    if (!found || !navigateToTrackAlbum(nav, found)) showToast(t("Couldn't find this song's album"))
+  }
   const hasAlbumLink = !isStationTrack(currentTrack) && (!!currentTrack?.album || (isStreamed(currentTrack) && !!(currentTrack?.source_album_id || currentTrack?.sourceAlbumId || currentTrack?.albumId)))
   const trackFilePath = currentTrack?.file_path && !String(currentTrack.file_path).startsWith('ghost://')
     ? currentTrack.file_path
@@ -493,6 +525,8 @@ export default function RightSidebar() {
               {fx && <ArtworkBackdrop trackId={currentTrack?.id} seam={artSrc ? heroHeight : 0} />}
               <div className={`relative flex-1 overflow-y-auto ${fx ? '' : 'p-4'} pb-[calc(var(--player-space,0px)+1rem)]`}>
                 <motion.div
+                  onDoubleClick={doubleClickLike}
+                  title={t("Double-click to like or unlike this song")}
                   className={fx ? 'relative w-full overflow-hidden' : 'relative w-full rounded-xl overflow-hidden bg-card border border-border/50'}
                   style={{
                     // Square cover normally; a tall canvas grows it to ~60% of the panel.
@@ -516,8 +550,9 @@ export default function RightSidebar() {
                   ) : (
                     <div className={`absolute inset-0 flex items-center justify-center ${fx ? 'text-white/25' : 'text-subtle'}`}><Music size={52} /></div>
                   )}
+                  {burst && burst.trackId === currentTrack?.id && <LikeBurst key={burst.id} kind={burst.kind} />}
                   {currentTrack && (
-                    <div className="group/lyrics absolute left-0 top-0 z-10 h-1/3 w-1/2 p-2" onMouseEnter={() => lookUpLyrics()}>
+                    <div className="group/lyrics absolute left-0 top-0 z-10 h-1/3 w-1/2 p-2" onMouseEnter={() => lookUpLyrics()} onDoubleClick={e => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => {
@@ -539,11 +574,11 @@ export default function RightSidebar() {
 
                   {/* In at once, fading: never waiting on the old title's way out (see PlayerBar). */}
                     <motion.div key={currentTrack?.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-                      {!isStationTrack(currentTrack) && (currentTrack?.album || (isOnlineTrack(currentTrack) && (currentTrack?.source_album_id || currentTrack?.sourceAlbumId || currentTrack?.albumId))) ? (
+                      {stationSongKnown || (!isStationTrack(currentTrack) && (currentTrack?.album || (isOnlineTrack(currentTrack) && (currentTrack?.source_album_id || currentTrack?.sourceAlbumId || currentTrack?.albumId)))) ? (
                         <button
-                          onClick={() => navigateToTrackAlbum(nav, currentTrack)}
+                          onClick={stationSongKnown ? openStationAlbum : () => navigateToTrackAlbum(nav, currentTrack)}
                           onContextMenu={openTrackMenu}
-                          title={currentTrack.album ? t('Go to album: {album}', { album: currentTrack.album }) : t('Go to album')}
+                          title={currentTrack.album && !stationSongKnown ? t('Go to album: {album}', { album: currentTrack.album }) : t('Go to album')}
                           className={fx ? 'text-lg font-semibold text-white leading-tight text-left hover:underline transition-colors max-w-full block drop-shadow-[0_1px_8px_rgba(0,0,0,0.45)]' : 'font-display text-white text-sm leading-tight text-left hover:text-accent hover:underline transition-colors truncate max-w-full block'}>
                           {currentTrack?.title || 'Nothing playing'}
                         </button>

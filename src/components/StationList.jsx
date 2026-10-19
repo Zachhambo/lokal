@@ -24,11 +24,32 @@ let revealedAtLaunch = false
 
 const isLink = value => /^https?:\/\/\S+$/i.test(String(value || '').trim())
 
+const STATION_POLL_MS = 30000
+
 export default function StationList({ catalog, configUrl = '', toolbarStart = null, stickyBleed = '0.5rem' }) {
   const { t } = useTranslation()
   const stations = catalog?.stations || []
   const { currentTrack, isPlaying, isBuffering, playTrack, togglePlay } = usePlayerStore(useShallow(({ currentTrack, isPlaying, isBuffering, playTrack, togglePlay }) => ({ currentTrack, isPlaying, isBuffering, playTrack, togglePlay })))
   const streamInfo = useRadioStore(s => s.streamInfo)
+  const songsByStation = useRadioStore(s => s.nowPlaying)
+  // Every station that has an API shows its song, not only the one playing:
+  // asked when the list opens and every STATION_POLL_MS while it's open.
+  const withApi = stations.filter(station => station.api).map(station => `${station.id}`).join('|')
+  useEffect(() => {
+    if (!withApi) return undefined
+    let live = true
+    const refresh = () => {
+      for (const station of stations) {
+        if (!station.api || !api.radioNowPlaying) continue
+        Promise.resolve(api.radioNowPlaying(station.api)).then(info => {
+          if (live && info?.title) useRadioStore.getState().setNowPlaying(station.id, { artist: info.artist || '', title: info.title, ...(info.cover ? { cover: info.cover } : {}) })
+        }).catch(() => {})
+      }
+    }
+    refresh()
+    const timer = setInterval(refresh, STATION_POLL_MS)
+    return () => { live = false; clearInterval(timer) }
+  }, [withApi]) // eslint-disable-line react-hooks/exhaustive-deps
   const catalogUrl = useRadioStore(s => s.url)
   const catalogLoading = useRadioStore(s => s.loading)
   const loadCatalog = useRadioStore(s => s.loadCatalog)
@@ -153,7 +174,7 @@ export default function StationList({ catalog, configUrl = '', toolbarStart = nu
 
   return (
     <div ref={listRef} className="w-full min-w-0" style={{ '--st-columns': layout.template }}>
-      <div className={`sticky top-0 z-20 pt-2 ${glass ? 'backdrop-blur-lg backdrop-saturate-150' : ''}`}
+      <div className={`sticky top-0 z-20 pt-5 pb-1 ${glass ? 'backdrop-blur-lg backdrop-saturate-150' : ''}`}
         style={{ marginInline: `calc(-1 * ${stickyBleed})`, paddingInline: stickyBleed, backgroundColor: glass ? `rgb(var(--surface-rgb) / ${(1 - glassTransparency / 100).toFixed(2)})` : 'rgb(var(--surface-rgb))' }}>
         <div className="mb-1 flex items-center justify-between gap-3 px-2">
           {toolbarStart || <span />}
@@ -194,7 +215,8 @@ export default function StationList({ catalog, configUrl = '', toolbarStart = nu
           const isCurrent = currentTrack?.id === station.id
           const playingHere = isCurrent && isPlaying
           const info = streamInfo[station.id]
-          const song = isCurrent && currentTrack.song_key ? [currentTrack.artist, currentTrack.title].filter(Boolean).join(' - ') : ''
+          const listed = songsByStation[station.id]
+          const song = isCurrent && currentTrack.song_key ? [currentTrack.artist, currentTrack.title].filter(Boolean).join(' - ') : [listed?.artist, listed?.title].filter(Boolean).join(' - ')
           const playButton = (
             <button onClick={e => play(station, e)} aria-label={t(playingHere ? 'Pause {title}' : 'Play {title}', { title: station.title })}
               className={isCurrent ? 'text-accent' : 'text-white'}>
@@ -248,7 +270,7 @@ export default function StationList({ catalog, configUrl = '', toolbarStart = nu
                     : <p key={key} className="truncate text-xs text-muted" title={station.description || undefined}>{station.description || ''}</p>
                   case 'history': return isLink(station.history)
                     ? <button key={key} type="button" onClick={e => { e.stopPropagation(); api.openExternal(station.history.trim()) }}
-                        title={station.history} className="min-w-0 truncate text-left text-xs text-muted hover:text-accent hover:underline">{station.history}</button>
+                        title={station.history} className="min-w-0 truncate text-left text-xs text-muted hover:text-accent hover:underline">{t('History')}</button>
                     : <p key={key} className="truncate text-xs text-muted" title={station.history || undefined}>{station.history || ''}</p>
                   case 'nowPlaying': return <p key={key} className={`truncate text-xs ${isCurrent ? 'text-text' : 'text-muted'}`} title={song || undefined}>{song}</p>
                   case 'stream': return (

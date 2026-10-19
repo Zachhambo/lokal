@@ -1,4 +1,5 @@
 import OutputPrecisionSettings from '../components/OutputPrecisionSettings'
+import { KEYBOARD_SHORTCUTS } from '../useKeyboardShortcuts'
 import SplitWordsSettings from '../components/SplitWordsSettings'
 import { collectLocalPrefs, restoreLocalPrefs } from '../localPrefsBackup'
 import AppTabsSettings from '../components/AppTabsSettings'
@@ -1197,6 +1198,16 @@ activeCategory === 'data' ? usersTried
               <FolderOpen size={14} /> Show Logs
             </button>
           </Row>
+          <Row label={t("Keyboard shortcuts")} desc={t("Not while typing in a search or text box. Esc closes what's open.")} stacked>
+            <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+              {KEYBOARD_SHORTCUTS.map(({ keys, label }) => (
+                <div key={label} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted">{t(label)}</span>
+                  <span className="flex gap-1">{keys.map(key => <kbd key={key} className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] text-text">{t(key)}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+          </Row>
           <Row label={t("Hardware Acceleration")} desc={perfSaveError?.key === 'hardwareAcceleration' ? `${t("Couldn't save")} (${perfSaveError.message})` : perfRestartNeeded ? t('Restart Lokal to apply this change') : t('Use the graphics card to draw the app. Turn off if the window flickers or shows glitches.')}>
             <div className="flex items-center gap-3">
               {perfRestartNeeded && (
@@ -1320,7 +1331,7 @@ activeCategory === 'data' ? usersTried
             {settings.clean_download_metadata !== '0' ? t('On') : t('Off')}
           </button>
         </Row>
-        {api.isElectron && <Row label={t("Sync Linked Playlists at Launch")} desc={t("Playlists linked to one on Spotify, Tidal, Apple Music or Qobuz get the songs added there since the last sync each time Lokal starts, downloaded through your sources. Otherwise use Sync on the playlist.")}>
+        {api.isElectron && <Row label={t("Sync Linked Playlists at Launch")} desc={t("Playlists linked to one on Spotify, Tidal, Apple Music, Qobuz or YouTube Music get the songs added there since the last sync each time Lokal starts, downloaded through your sources. Otherwise use Sync on the playlist.")}>
           <button
             onClick={() => set('playlist_sync_on_launch', settings.playlist_sync_on_launch === '1' ? '0' : '1')}
             className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.playlist_sync_on_launch === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
@@ -1999,41 +2010,6 @@ activeCategory === 'data' ? usersTried
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="pt-4 mt-4 border-t border-border">
-            <Row
-              label={t("Tint App Logo")}
-              desc={t("Tint the logo with the theme's accent colour.")}
-            >
-              <button
-                onClick={async () => {
-                  const enabled = parseFloat(themeOverrides['--logo-mask-opacity'] || '0') > 0.05
-                  if (enabled) {
-                    await saveOverrides({
-                      '--logo-image-filter': 'none',
-                      '--logo-image-opacity': '1',
-                      '--logo-mask-opacity': '0',
-                      '--logo-wrap-bg': 'transparent',
-                      '--logo-wrap-shadow': 'none',
-                      '--logo-wrap-border': '1px solid transparent',
-                    })
-                  } else {
-                    await saveOverrides({
-                      '--logo-image-filter': 'grayscale(1) brightness(1.02) contrast(1.06)',
-                      '--logo-image-opacity': '1',
-                      '--logo-mask-opacity': '0.38',
-                      '--logo-wrap-bg': 'rgba(var(--accent-rgb), 0.1)',
-                      '--logo-wrap-shadow': '0 0 12px rgba(var(--accent-rgb), 0.1)',
-                      '--logo-wrap-border': '1px solid rgba(var(--accent-rgb), 0.2)',
-                    })
-                  }
-                }}
-                className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${parseFloat(themeOverrides['--logo-mask-opacity'] || '0') > 0.05 ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}
-              >
-                {parseFloat(themeOverrides['--logo-mask-opacity'] || '0') > 0.05 ? t('On') : t('Off')}
-              </button>
-            </Row>
           </div>
 
           <button

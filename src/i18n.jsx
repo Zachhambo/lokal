@@ -629,8 +629,6 @@ const ROWS = Object.assign({
   "RESET LOKAL": ["RÉINITIALISER LOKAL","LOKAL ZURÜCKSETZEN","RESTABLECER LOKAL","RIPRISTINA LOKAL","REPOR O LOKAL","LOKAL TERUGZETTEN","PRZYWRÓĆ LOKAL","ÅTERSTÄLL LOKAL"],
   "Clear Everything": ["Tout effacer","Alles löschen","Borrar todo","Cancella tutto","Limpar tudo","Alles wissen","Wyczyść wszystko","Rensa allt"],
   "Show Lokal": ["Afficher Lokal","Lokal anzeigen","Mostrar Lokal","Mostra Lokal","Mostrar Lokal","Lokal tonen","Pokaż Lokal","Visa Lokal"],
-  "Tint App Logo": ["Teinter le logo de l’application","App-Logo einfärben","Teñir el logotipo de la aplicación","Colora il logo dell’app","Colorir o logótipo da aplicação","App-logo kleuren","Zabarw logo aplikacji","Färga applogotypen"],
-  "Tint the logo with the theme's accent colour.": ["Teinte le logo avec la couleur d’accentuation du thème.","Färbt das Logo mit der Akzentfarbe des Designs.","Tiñe el logotipo con el color de acento del tema.","Colora il logo con il colore di accento del tema.","Colore o logótipo com a cor de destaque do tema.","Kleurt het logo met de accentkleur van het thema.","Barwi logo kolorem akcentu motywu.","Färgar logotypen med temats accentfärg."],
   "Background Fade / Overlay": ["Fondu / superposition d’arrière-plan","Hintergrundüberblendung","Fundido / superposición de fondo","Dissolvenza / sovrapposizione sfondo","Transição / sobreposição do fundo","Achtergrondverloop / overlay","Przenikanie / nakładka tła","Bakgrundsövertoning / överlägg"],
   "Background Blur": ["Flou d’arrière-plan","Hintergrundunschärfe","Desenfoque de fondo","Sfocatura sfondo","Desfoque do fundo","Achtergrondvervaging","Rozmycie tła","Bakgrundsoskärpa"],
   "Cover (Fill)": ["Pochette (remplir)","Cover (ausfüllen)","Portada (rellenar)","Copertina (riempi)","Capa (preencher)","Omslag (vullen)","Okładka (wypełnij)","Omslag (fyll)"],
@@ -2079,7 +2077,11 @@ export function LanguageProvider({ children }) {
     if (typeof phrase !== 'string') return phrase
     const translated = language === 'en' ? phrase : (TRANSLATIONS[phrase]?.[language] || phrase)
     if (!values || typeof values !== 'object') return translated
-    return translated.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match)
+    // "{n} station|{n} stations": two forms, the first for one (`count`, else `n`).
+    const count = Number(values.count ?? values.n)
+    const forms = translated.includes('|') && Number.isFinite(count) ? translated.split('|') : null
+    const chosen = forms && forms.length === 2 ? forms[count === 1 ? 0 : 1] : translated
+    return chosen.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match)
   }, [language])
 
   return <LanguageContext.Provider value={{ language, setLanguage, t }}>{children}</LanguageContext.Provider>
