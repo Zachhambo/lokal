@@ -1,6 +1,8 @@
 const { registerNativeOutput, closeNativeOutput } = require('./audio/output')
 const { app, BrowserWindow, ipcMain, shell, globalShortcut, screen, protocol, net, powerSaveBlocker, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
+const { configureMprisIdentity } = require('./mpris')
+configureMprisIdentity(app)
 // Keep the renderer at normal priority on Windows while minimized so the
 // AudioWorklet/native output path is not starved by backgrounding.
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-renderer-backgrounding')
@@ -595,15 +597,15 @@ app.whenReady().then(() => {
   try { registerFlowHandlers(ipcMain) } catch (e) { console.error('registerFlowHandlers:', e.message) }
   try { registerCastHandlers(ipcMain, { getWindow: () => mainWindow, powerSaveBlocker }) } catch (e) { console.error('registerCastHandlers:', e.message) }
   try { registerStreamProtocol(protocol, net) } catch (e) { console.error('registerStreamProtocol:', e.message) }
-  // SpotiFLAC repositories are refreshed at every launch (in the background,
+  // Mornye repositories are refreshed at every launch (in the background,
   // once the window has had time to open), so updates and new sources show
   // without visiting Settings first.
   setTimeout(() => {
     try {
-      const packages = require('./spotiflac/packages').service(getDB())
-      // Only for people using SpotiFLAC sources: nothing is fetched otherwise.
-      if (packages.list().length || packages.repos().length > 1) packages.refreshDue(0).catch(e => console.error('SpotiFLAC repository refresh:', e.message))
-    } catch (e) { console.error('SpotiFLAC repository refresh:', e.message) }
+      const packages = require('./mornye/packages').service(getDB())
+      // Only for people using Mornye sources: nothing is fetched otherwise.
+      if (packages.list().length || packages.repos().length > 1) packages.refreshDue(0).catch(e => console.error('Mornye repository refresh:', e.message))
+    } catch (e) { console.error('Mornye repository refresh:', e.message) }
   }, 8000).unref?.()
 
 
@@ -737,6 +739,25 @@ app.whenReady().then(() => {
   }
 });
 
+  
+ipcMain.handle('tv:setFullscreen', (_, enabled) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  mainWindow.setFullScreen(!!enabled)
+  return true
+})
+
+ipcMain.handle('tv:setZoom', (_, factor) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+
+  const zoom = Number(factor)
+  if (!Number.isFinite(zoom)) return false
+
+  mainWindow.webContents.setZoomFactor(
+    Math.max(0.5, Math.min(2, zoom))
+  )
+  return true
+})
+
 ipcMain.handle('window:minimize', () => mainWindow?.minimize())
 // Whether the window is minimized or hidden now, for a page that subscribes
 // to 'window:visibility' after the last change was sent.
@@ -866,6 +887,16 @@ if (bootFilePath) {
 }
 
 ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))
+ipcMain.handle('shell:showItemInFolder', (_, filePath) => {
+  try {
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return { ok: false, error: 'Invalid file path' }
+    if (!fs.statSync(filePath).isFile()) return { ok: false, error: 'Not a file' }
+    shell.showItemInFolder(filePath)
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'File not found' }
+  }
+})
 ipcMain.on('open-logs', () => {
   const logFile = log.transports.file.getFile().path;
   const logDir = path.dirname(logFile);
@@ -920,6 +951,9 @@ ipcMain.handle('updater:install', () => {
     console.log('[updater] skipping in dev mode')
   } else if (IS_NIGHTLY) {
     console.log(`[updater] nightly build (${app.getVersion()}): not checking for stable updates`)
+  } else if ((() => { try { return require('./ipc/db').getDB().prepare("SELECT value FROM settings WHERE key = 'auto_update'").get()?.value === '0' } catch { return false } })()) {
+    // Settings > About > Automatic Updates off: only "Check for updates" looks.
+    console.log('[updater] automatic update checks are off')
   } else {
     setTimeout(() => {
       autoUpdater.checkForUpdates().catch(err => {
@@ -942,7 +976,7 @@ app.on('will-quit', () => {
   try { require('./online/poToken').reset() } catch {}
   for (const window of BrowserWindow.getAllWindows()) { try { if (!window.isDestroyed()) window.destroy() } catch {} }
   try { shutdownActiveDownloads() } catch {}
-  try { require('./spotiflac/packages').shutdown(require('./ipc/db').getDB()) } catch {}
+  try { require('./mornye/packages').shutdown(require('./ipc/db').getDB()) } catch {}
   unregisterMediaShortcuts()
   try { stopSmtcBridge() } catch {}
 })

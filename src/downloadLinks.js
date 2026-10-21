@@ -131,7 +131,7 @@ export function displayTitle(item, fallback = 'Download') {
   return inferTitleFromUrl(item.url, fallback)
 }
 
-/** An artist search's channels and playlists, without duplicates. */
+/** Stable identity for an artist-search result, including the canonical URL. */
 export function artistResultKey(item) {
   return JSON.stringify([item?.type || 'item', item?.id || item?.url || '', item?.url || ''])
 }

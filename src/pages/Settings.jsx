@@ -1,9 +1,11 @@
 import OutputPrecisionSettings from '../components/OutputPrecisionSettings'
+import { usePanelWidths } from '../panelWidths.jsx'
 import { KEYBOARD_SHORTCUTS } from '../useKeyboardShortcuts'
 import SplitWordsSettings from '../components/SplitWordsSettings'
 import { collectLocalPrefs, restoreLocalPrefs } from '../localPrefsBackup'
 import AppTabsSettings from '../components/AppTabsSettings'
 import { APP_LANGUAGES, useTranslation } from '../i18n'
+import TvModeSettings from '../tv/TvModeSettings'
 ﻿import React, { useEffect, useLayoutEffect, useState, useRef, createContext, useContext } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -26,7 +28,9 @@ import { ARTIST_SOURCES } from '../artistSources'
 import { repairMissingTracks } from '../ghostDownloads'
 import { plural } from '../plural'
 import { readCrossfadeSettings, CROSSFADE_MIN_S } from '../audio/crossfade'
+import { SPEED_MAX, SPEED_MIN, SPEED_STEP, usePlaybackSpeed } from '../playbackSpeed.mjs'
 import SoulseekSignIn from '../components/SoulseekSignIn'
+import { loadMilkDropPresetNames, normalizeEnabledMilkDropPresets } from '../visualizers/milkDropPresets.mjs'
 
 const EQ_BANDS = ['31Hz', '62Hz', '125Hz', '250Hz', '500Hz', '1kHz', '2kHz', '4kHz', '8kHz', '16kHz']
 const EQ_PRESETS = {
@@ -259,7 +263,11 @@ export default function Settings() {
   const location = useLocation()
   const navigate = useNavigate()
   const { t, language, setLanguage } = useTranslation()
+  const panelFreeform = usePanelWidths(s => s.freeform)
+  const setPanelFreeform = (freeform) => usePanelWidths.getState().set({ freeform })
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
+  const playbackSpeed = usePlaybackSpeed(s => s.speed)
+  const setPlaybackSpeed = usePlaybackSpeed(s => s.setSpeed)
   // Seeded from the settings already read (and the version / tools found on
   // the last visit), so the first frame already has the real values: rows
   // used to appear, change text and push everything below them down.
@@ -291,6 +299,36 @@ export default function Settings() {
     }
   }, [])
   const [scanning, setScanning] = useState(false)
+  const [showVisualizerMenu, setShowVisualizerMenu] = useState(false)
+  const [milkDropPresetNames, setMilkDropPresetNames] = useState([])
+  const [milkDropPresetsLoading, setMilkDropPresetsLoading] = useState(false)
+  const [milkDropPresetLoadStarted, setMilkDropPresetLoadStarted] = useState(false)
+  const [milkDropPresetLoadError, setMilkDropPresetLoadError] = useState('')
+  const [milkDropPresetSearch, setMilkDropPresetSearch] = useState('')
+  const visualizerMenuRef = useRef(null)
+  useEffect(() => {
+    const closeOutside = event => {
+      if (!visualizerMenuRef.current?.contains(event.target)) setShowVisualizerMenu(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [])
+
+  useEffect(() => {
+    if (!showVisualizerMenu || milkDropPresetLoadStarted) return
+    setMilkDropPresetLoadStarted(true)
+    setMilkDropPresetsLoading(true)
+    loadMilkDropPresetNames()
+      .then(names => {
+        setMilkDropPresetNames(names)
+        setMilkDropPresetLoadError('')
+      })
+      .catch(error => {
+        console.warn('[settings] Could not load MilkDrop presets:', error)
+        setMilkDropPresetLoadError('Could not load MilkDrop presets.')
+      })
+      .finally(() => setMilkDropPresetsLoading(false))
+  }, [showVisualizerMenu, milkDropPresetLoadStarted])
   const [showGenreModal, setShowGenreModal] = useState(false)
   const [eqGains, setEqGains] = useState(EQ_PRESETS[DEFAULT_EQ_PRESET].gains)
   const [eqPreset, setEqPreset] = useState(DEFAULT_EQ_PRESET)
@@ -655,6 +693,13 @@ export default function Settings() {
     if (k === 'replaygain_mode') usePlayerStore.getState().setReplayGainMode(v)
   }
   const crossfade = readCrossfadeSettings(settings)
+  const enabledMilkDropPresets = normalizeEnabledMilkDropPresets(
+    settings.fullscreen_milkdrop_presets,
+    milkDropPresetNames,
+  )
+  const filteredMilkDropPresetNames = milkDropPresetNames.filter(name =>
+    name.toLowerCase().includes(milkDropPresetSearch.trim().toLowerCase()),
+  )
 
   const applyEqGains = (nextGains, presetKey = getEqPresetKey(nextGains)) => {
     const normalized = normalizeEqGains(nextGains)
@@ -1190,6 +1235,14 @@ activeCategory === 'data' ? usersTried
               )}
             </div>
           </Row>
+          <Row label={t("Automatic Updates")} desc={t("Off: Lokal no longer looks for a new version when it starts. Check for updates above still works.")}>
+            <button
+              onClick={() => set('auto_update', settings.auto_update === '0' ? '1' : '0')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.auto_update !== '0' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}
+            >
+              {settings.auto_update !== '0' ? t('On') : t('Off')}
+            </button>
+          </Row>
           <Row label={t("Debug Logs")} desc={t("Open the folder with Lokal's logs, to attach to a bug report.")}>
             <button 
               onClick={() => api.openLogs?.()}
@@ -1301,6 +1354,11 @@ activeCategory === 'data' ? usersTried
               </select>
             )}
           </div>
+        </Row>
+        <Row label={t("Download Folder")} desc={t("Optional folder inside your music library. Downloads are moved there and numbered in that folder; leave blank to keep the usual artist/album layout.")}>
+          <input type="text" value={settings.download_folder || ''} onChange={e => set('download_folder', e.target.value)}
+            placeholder={t("e.g. Downloads")} aria-label={t("Download Folder")}
+            className="w-52 max-w-full bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-accent/50" />
         </Row>
         <Row label={t("Simultaneous Downloads")} desc={t("How many downloads run at once; the rest wait. A playlist counts as one.")}>
           <select
@@ -1511,6 +1569,25 @@ activeCategory === 'data' ? usersTried
             <option value="album">{t('Album gain')}</option>
             <option value="smart">{t('Smart gain')}</option>
           </select>
+        </Row>
+        <Row label={t("Playback speed")} desc={t("Adjusts the speed of the music and keeps music videos in sync.")}>
+          <div className="flex items-center gap-3">
+            <input type="range" min={SPEED_MIN} max={SPEED_MAX} step={SPEED_STEP} value={playbackSpeed}
+              onChange={e => setPlaybackSpeed(parseFloat(e.target.value))}
+              aria-label={t("Playback speed")}
+              className="w-32 accent-accent cursor-pointer" />
+            <span className="w-12 text-right text-xs font-display tabular-nums text-white">{playbackSpeed.toFixed(2)}×</span>
+            <button type="button" onClick={() => setPlaybackSpeed(1)} disabled={playbackSpeed === 1}
+              className="text-xs text-muted hover:text-white transition-colors disabled:opacity-40">{t("Reset")}</button>
+          </div>
+        </Row>
+        <Row label={t("Fetch Lyrics Automatically")} desc={t("Off: songs only show the lyrics they carry themselves (in their tags or a .lrc next to them). Looking again from the lyrics panel still searches online.")}>
+          <button
+            onClick={() => set('lyrics_auto_fetch', settings.lyrics_auto_fetch === '0' ? '1' : '0')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.lyrics_auto_fetch !== '0' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}
+          >
+            {settings.lyrics_auto_fetch !== '0' ? t('On') : t('Off')}
+          </button>
         </Row>
         <Row label={t("Song Transitions")} desc={crossfade.mode === 'automix'
           ? t('AutoMix listens to both songs and blends them like a DJ: on the beat when their tempos are close (the next one sped up or slowed a touch, pitch kept), on the song\'s own fade-out otherwise, with silence at either end cut. Albums play as made.')
@@ -2046,7 +2123,12 @@ activeCategory === 'data' ? usersTried
         </div>
       </Section>
       )}
-
+      {inCategory('appearance') && (
+        <Section title="TV Mode">
+          <TvModeSettings />
+        </Section>
+      )}
+        
       {inCategory('appearance') && (
       <Section title={t("Now Playing")}>
         <Row label={t("Colour Background")} desc={t("Colour the side panel and full screen player from the album cover. Off: a dark background.")}>
@@ -2147,6 +2229,81 @@ activeCategory === 'data' ? usersTried
       )}
 
       {inCategory('appearance') && (
+      <Section title={t("Visualizer")}>
+        <Row label={t("MilkDrop presets")} desc={t("Choose which MilkDrop presets are available to switch between in full-screen mode.")}>
+          <div className="relative" ref={visualizerMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowVisualizerMenu(value => !value)}
+              aria-haspopup="true"
+              aria-expanded={showVisualizerMenu}
+              title={t("Choose which MilkDrop presets appear in full-screen mode")}
+              className="flex min-w-44 items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-white transition hover:border-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              <span>{t("Choose presets")}</span>
+              <span className="flex items-center gap-2 text-muted">
+                {milkDropPresetNames.length ? `${enabledMilkDropPresets.length}/${milkDropPresetNames.length}` : '—'}
+                <ChevronDown size={13} className={showVisualizerMenu ? 'rotate-180 transition-transform' : 'transition-transform'} />
+              </span>
+            </button>
+            {showVisualizerMenu && (
+              <div role="group" aria-label={t("Available MilkDrop presets")}
+                className="absolute right-0 top-full z-40 mt-2 w-72 max-w-[80vw] rounded-xl border border-border bg-elevated p-2 shadow-2xl">
+                <p className="px-2 pb-2 pt-1 text-[10px] uppercase tracking-widest text-muted">{t("Included in full-screen mode")}</p>
+                <input
+                  type="search"
+                  value={milkDropPresetSearch}
+                  onChange={event => setMilkDropPresetSearch(event.target.value)}
+                  placeholder={t("Search presets")}
+                  aria-label={t("Search presets")}
+                  className="mb-2 w-full rounded-lg border border-border bg-card px-2.5 py-2 text-xs text-white outline-none placeholder:text-muted focus:border-accent/60"
+                />
+                <div className="max-h-64 overflow-y-auto overscroll-contain">
+                  {milkDropPresetsLoading && <p className="px-2 py-3 text-xs text-muted">{t("Loading MilkDrop presets…")}</p>}
+                  {!milkDropPresetsLoading && milkDropPresetLoadError && (
+                    <div className="px-2 py-3 text-xs text-muted">
+                      <p>{t(milkDropPresetLoadError)}</p>
+                      <button
+                        type="button"
+                        className="mt-2 text-accent hover:underline"
+                        onClick={() => { setMilkDropPresetLoadStarted(false); setMilkDropPresetLoadError('') }}
+                      >{t("Retry")}</button>
+                    </div>
+                  )}
+                  {!milkDropPresetsLoading && !milkDropPresetLoadError && filteredMilkDropPresetNames.length === 0 && (
+                    <p className="px-2 py-3 text-xs text-muted">{t("No presets match this search.")}</p>
+                  )}
+                  {!milkDropPresetsLoading && !milkDropPresetLoadError && filteredMilkDropPresetNames.map(name => {
+                    const checked = enabledMilkDropPresets.includes(name)
+                    return (
+                      <label key={name} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-white transition hover:bg-card">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={checked && enabledMilkDropPresets.length === 1}
+                          onChange={() => {
+                            const next = checked
+                              ? enabledMilkDropPresets.filter(value => value !== name)
+                              : [...enabledMilkDropPresets, name]
+                            if (next.length) set('fullscreen_milkdrop_presets', JSON.stringify(next))
+                          }}
+                          className="h-3.5 w-3.5 accent-accent disabled:opacity-50"
+                        />
+                        <span className="flex-1 break-words">{name}</span>
+                        {checked && <span className="text-[10px] text-accent">{t("On")}</span>}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="border-t border-border/60 px-2 pb-1 pt-2 text-[10px] text-muted">{t("{count} selected", { count: enabledMilkDropPresets.length })}</p>
+              </div>
+            )}
+          </div>
+        </Row>
+      </Section>
+      )}
+
+      {inCategory('appearance') && (
       <Section title={t("Navigation")}>
         <Row stacked label={t("Sidebar order")} desc={t("Drag items to reorder the sidebar. Move items below the divider to group them under More.")}>
           <AppTabsSettings value={settings.sidebar_nav || ''} onChange={value => set('sidebar_nav', value)} />
@@ -2156,6 +2313,16 @@ activeCategory === 'data' ? usersTried
 
       {inCategory('appearance') && (
       <Section title={t("Layout")}>
+        <Row label={t("Panel Width")} desc={t("Freeform: drag the inner edge of the sidebar or the side panel to make it wider or narrower (double-click the edge to reset).")}>
+          <div className="flex gap-0.5 p-0.5 bg-card rounded-lg border border-border/50">
+            {[[false, 'Fixed'], [true, 'Freeform']].map(([value, label]) => (
+              <button key={label} onClick={() => setPanelFreeform(value)}
+                className={`px-3 py-1 rounded-md text-xs font-display uppercase tracking-wider transition-colors ${panelFreeform === value ? 'bg-accent/20 text-accent' : 'text-muted hover:text-white'}`}>
+                {t(label)}
+              </button>
+            ))}
+          </div>
+        </Row>
         <Row
           label={t("Side Panels")}
           desc={t("Merged: Queue and Lyrics open as tabs in the side panel. Independent: each opens in its own panel next to it.")}

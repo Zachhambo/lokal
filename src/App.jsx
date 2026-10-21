@@ -18,6 +18,7 @@ import TitleBar from './components/TitleBar'
 import { usePageWidth } from './pageWidth'
 import RightSidebar from './components/RightSidebar'
 import FullscreenPlayer from './components/FullscreenPlayer'
+import FullscreenVisualizer from './components/FullscreenVisualizer'
 import MusicVideoPlayer from './components/MusicVideoPlayer'
 import QueuePanel from './components/QueuePanel'
 import LyricsSidePanel from './components/LyricsSidePanel'
@@ -63,6 +64,8 @@ import ReleaseRefreshBanner from './components/ReleaseRefreshBanner'
 import { PageReadyContext, PageShownContext, PAGE_READY_TIMEOUT_MS } from './pageCache'
 import { audioSrcFor, isAddonProvider, providerLabel, streamRef } from './onlineTracks'
 import { playbackLog } from './playbackLog'
+import TvController from './tv/TvController'
+
 
 // An addon refusing because its access isn't set up (or has lapsed).
 const ADDON_ACCESS_ERROR = /VERIFY_REQUIRED|verif|log\s*in|sign\s*in|unauthori[sz]ed|not authenticated/i
@@ -79,6 +82,7 @@ import { usePerformanceMode } from './performanceMode'
 import { isWindowHidden, onWindowVisibility } from './windowVisibility'
 import { startSpotifyLikesSync } from './spotifyLikes'
 import { continueFlow, flowNeedsMore } from './flow/session'
+import { playbackSpeed, usePlaybackSpeed } from './playbackSpeed.mjs'
 import { useCastPlayback, takeResumePosition } from './cast/useCastPlayback'
 
 async function addonStreamTrackHash(id) {
@@ -525,6 +529,26 @@ export default function App() {
   const nativeAudioRef = useRef(null)
   const analyserRef = useRef(null)
   const isCrossfadingRef = useRef(false)
+  // Keep both audio decks at the user's speed. During AutoMix, leave the
+  // beat-matched rate alone until its normal glide at the end of the transition.
+  useEffect(() => {
+    const apply = speed => {
+      for (const el of [audioRef.current, cfAudioRef.current]) {
+        if (!el) continue
+        try {
+          el.defaultPlaybackRate = speed
+          if (!isCrossfadingRef.current) {
+            clearInterval(rateGlideRef.current)
+            el.playbackRate = speed
+          }
+        } catch {}
+      }
+    }
+    apply(playbackSpeed())
+    return usePlaybackSpeed.subscribe((state, previous) => {
+      if (state.speed !== previous.speed) apply(state.speed)
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const audioSourcesInitializedRef = useRef(false)
   const playSecsRef = useRef(0)
   const playTimerRef = useRef(null)
@@ -1312,18 +1336,34 @@ export default function App() {
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
-    if (!currentTrack) return
 
+    const actions = ['play', 'pause', 'seekto', 'previoustrack', 'nexttrack']
+    if (!currentTrack) {
+      // Chromium's Linux MPRIS session otherwise retains the previous song
+      // and its handlers after the queue stops or is cleared.
+      try {
+        navigator.mediaSession.metadata = null
+        navigator.mediaSession.playbackState = 'none'
+        navigator.mediaSession.setPositionState?.()
+      } catch {}
+      for (const action of actions) {
+        try { navigator.mediaSession.setActionHandler(action, null) } catch {}
+      }
+      return
+    }
+
+    let current = true
     const updateMetadata = async () => {
       let artworkSrc = 'fallback_nopfp.png'
       if (currentTrack.artwork_path) {
         const dataUrl = await getArtworkDataURL(currentTrack.artwork_path)
-        if (dataUrl) {
-          artworkSrc = dataUrl
-        }
+        if (dataUrl) artworkSrc = dataUrl
       } else if (currentTrack.artwork_url) {
         artworkSrc = currentTrack.artwork_url
       }
+      // A slower artwork read for the previous song must not replace the
+      // metadata for the current one in Linux MPRIS or other Media Session UIs.
+      if (!current) return
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: currentTrack.title || '',
         artist: currentTrack.artist || '',
@@ -1332,11 +1372,11 @@ export default function App() {
       })
     }
 
-    updateMetadata()
+    updateMetadata().catch(() => {})
     try {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
     } catch {}
-    
+
     const getActiveAudio = () => {
       const state = usePlayerStore.getState()
       return state.activeAudioElement === 'primary' ? audioRef.current : cfAudioRef.current
@@ -1352,25 +1392,29 @@ export default function App() {
       } catch {}
     }
     navigator.mediaSession.setActionHandler('play', () => {
-      const player = usePlayerStore.getState()
-      if (!player.isPlaying) player.togglePlay()
+      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(true); return }
+      const activeEl = getActiveAudio()
+      activeEl?.play()
     })
     navigator.mediaSession.setActionHandler('pause', () => {
-      const player = usePlayerStore.getState()
-      if (player.isPlaying) player.togglePlay()
+      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(false); return }
+      const activeEl = getActiveAudio()
+      activeEl?.pause()
+      // Record explicit pauses even when a source is failing or being swapped.
+      usePlayerStore.getState().setIsPlaying(false)
     })
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (isStationTrack(usePlayerStore.getState().currentTrack)) return
-      if (usePlayerStore.getState().castActive) { if (typeof details.seekTime === 'number') usePlayerStore.getState().setProgressWithAudioUpdate(details.seekTime); return }
+      if (usePlayerStore.getState().castActive) {
+        if (typeof details.seekTime === 'number') usePlayerStore.getState().setProgressWithAudioUpdate(details.seekTime)
+        return
+      }
       const activeEl = getActiveAudio()
       if (activeEl && typeof details.seekTime === 'number') activeEl.currentTime = details.seekTime
     })
-    navigator.mediaSession.setActionHandler('previoustrack', () => {
-      usePlayerStore.getState().prev()
-    })
-    navigator.mediaSession.setActionHandler('nexttrack', () => {
-      usePlayerStore.getState().next()
-    })
+    navigator.mediaSession.setActionHandler('previoustrack', () => usePlayerStore.getState().prev())
+    navigator.mediaSession.setActionHandler('nexttrack', () => usePlayerStore.getState().next())
+    return () => { current = false }
   }, [currentTrack, isPlaying])
 
   useEffect(() => {
@@ -1650,7 +1694,7 @@ export default function App() {
     return playedSeconds >= Math.min(durationSeconds / 2, 240)
   }, [getLastfmTrackDuration])
 
-  // A SpotiFLAC song playing while it downloads: a seek finishes once the
+  // A Mornye song playing while it downloads: a seek finishes once the
   // song is complete (src/liveSeek.js).
   const onAudioSeeking = useCallback((event) => handleLiveSeek(event.currentTarget, {
     currentTrack: () => usePlayerStore.getState().currentTrack,
@@ -1723,11 +1767,13 @@ export default function App() {
     const pending = addonVerificationRetryRef.current
     if (!pending || pending.key !== key || pending.retrying) return
     if (typeof pending.retry === 'function') {
-      // The popup may be completed both by its immediate response and by the
-      // auth-window event. Guard the retry and close only once it has started.
+      // The verification popup represents missing access, not playback
+      // resolution. Close it as soon as authentication is confirmed; Mornye
+      // updates may return a different shape from the interrupted retry.
       pending.retrying = true
+      setAddonVerificationPrompt(current => current?.key === key ? null : current)
+      setAddonVerificationMessage('')
       setAddonVerificationBusy(true)
-      setAddonVerificationMessage('Access verified. Starting the selected song…')
       return Promise.resolve().then(async () => {
         let result = await pending.retry()
         if (addonVerificationRetryRef.current !== pending) return
@@ -2125,7 +2171,7 @@ export default function App() {
     // An AutoMix transition called off: filters open, both songs at their own speed.
     openMixFilters()
     clearInterval(rateGlideRef.current)
-    for (const el of [audioRef.current, cfAudioRef.current]) { try { if (el && el.playbackRate !== 1) el.playbackRate = 1 } catch {} }
+    for (const el of [audioRef.current, cfAudioRef.current]) { try { if (el && el.playbackRate !== playbackSpeed()) el.playbackRate = playbackSpeed() } catch {} }
     if (usePlayerStore.getState().mixing) usePlayerStore.setState({ mixing: null })
   }, [openMixFilters])
 
@@ -2267,7 +2313,7 @@ export default function App() {
         // AutoMix: the next song waits, ready, at its entry point, until the
         // playing one reaches the transition (it was loaded ahead of it).
         try { fadeInEl.currentTime = plan.inOffset || 0 } catch {}
-        try { fadeInEl.playbackRate = plan.rate || 1 } catch {}
+        try { fadeInEl.playbackRate = (plan.rate || 1) * playbackSpeed() } catch {}
         const waitForStart = () => {
           if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
           const left = plan.start - fadeOutEl.currentTime
@@ -2372,7 +2418,7 @@ export default function App() {
         openMixFilters()
         usePlayerStore.setState({ mixing: null })
         // A beat-matched song back to its own tempo, gently (8 s).
-        if (plan && fadeInEl.playbackRate !== 1) {
+        if (plan && fadeInEl.playbackRate !== playbackSpeed()) {
           clearInterval(rateGlideRef.current)
           const from = fadeInEl.playbackRate
           const began = Date.now()
@@ -2380,9 +2426,10 @@ export default function App() {
           // audio (costly on Linux): a few coarse steps, not 80 tiny ones.
           rateGlideRef.current = setInterval(() => {
             const part = Math.min(1, (Date.now() - began) / 8000)
-            const rate = from + (1 - from) * part
-            try { fadeInEl.playbackRate = Math.abs(rate - 1) < 0.004 ? 1 : Math.round(rate * 1000) / 1000 } catch {}
-            if (part >= 1 || fadeInEl.playbackRate === 1) clearInterval(rateGlideRef.current)
+            const target = playbackSpeed()
+            const rate = from + (target - from) * part
+            try { fadeInEl.playbackRate = Math.abs(rate - target) < 0.004 ? target : Math.round(rate * 1000) / 1000 } catch {}
+            if (part >= 1 || fadeInEl.playbackRate === playbackSpeed()) clearInterval(rateGlideRef.current)
           }, 500)
         }
 
@@ -3048,8 +3095,9 @@ export default function App() {
 
   return (
     <Router>
-      <NativeHistoryNavigation />
-      <KeyboardShortcuts />
+  <NativeHistoryNavigation />
+  <KeyboardShortcuts />
+  <TvController />
       <div className="relative flex flex-col h-screen bg-transparent overflow-hidden" onClick={initAudioCtx} style={showMiniPlayer || !glassPlayerBar ? undefined : { '--player-space': '104px' }}>
         {/* Covers the window (overlays included) while it switches to or from
             the mini player: the window is resized behind it, so neither view
@@ -3089,6 +3137,7 @@ export default function App() {
             <PlayerBar />
             {/* Also full-screen lyrics: one overlay, two layouts. */}
             <FullscreenPlayer />
+            <FullscreenVisualizer />
             <MusicVideoPlayer />
             <AuthModal />
             <ProfileModal />

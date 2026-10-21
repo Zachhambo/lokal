@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, Music, Maximize2, Mic2, Disc3, Radio, Clapperboard, Gem, ImageOff, ImagePlay, FolderOpen, Info, AudioWaveform } from 'lucide-react'
+import { ChevronRight, Music, Maximize2, Mic2, Disc3, Radio, Clapperboard, Gem, ImageOff, ImagePlay, FolderOpen, Info, Gamepad2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -88,18 +89,19 @@ function streamQualityLabel(track) {
 
 export default function RightSidebar() {
   const { t } = useTranslation()
+  const panelWidth = usePanelWidth('right')
   const { user } = useAppStore()
   const {
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
-    toggleFullscreen, toggleLyricsFullscreen, playbackContext,
+    toggleFullscreen, toggleLyricsFullscreen, playbackContext, showFullscreenVisualizer, setShowFullscreenVisualizer,
     sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   } = usePlayerStore(useShallow(({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
-    toggleFullscreen, toggleLyricsFullscreen, playbackContext,
+    toggleFullscreen, toggleLyricsFullscreen, playbackContext, showFullscreenVisualizer, setShowFullscreenVisualizer,
     sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   }) => ({
     showRightSidebar, toggleRightSidebar, currentTrack, isPlaying, progress,
-    toggleFullscreen, toggleLyricsFullscreen, playbackContext,
+    toggleFullscreen, toggleLyricsFullscreen, playbackContext, showFullscreenVisualizer, setShowFullscreenVisualizer,
     sidePanelView, setSidePanelView, toggleQueueButton, exclusiveSidePanels, likedIds, setLiked,
   })))
   // Back from the mini player: the Lyrics and Queue overlays start over.
@@ -372,6 +374,7 @@ export default function RightSidebar() {
   const openTrackMenu = (event) => {
     if (!currentTrack) return
     menu.open(event, [
+      !isStationTrack(currentTrack) && !isStreamed(currentTrack) && api.isElectron && currentTrack.file_path && !String(currentTrack.file_path).startsWith('ghost://') && { label: t('Open in file manager'), icon: FolderOpen, onSelect: () => api.showItemInFolder(currentTrack.file_path) },
       !isStationTrack(currentTrack) && currentTrack.file_path && !String(currentTrack.file_path).startsWith('ghost://') && { label: t('Open folder in Library'), icon: FolderOpen, onSelect: openCurrentTrackFolder },
       !isStationTrack(currentTrack) && { label: 'Set YouTube music video…', icon: Clapperboard, onSelect: () => {
         setManualVideoLink('')
@@ -479,11 +482,11 @@ export default function RightSidebar() {
         // I can verify without a live browser.
         <motion.aside
           initial={{ width: 0 }}
-          animate={{ width: 300 }}
+          animate={{ width: panelWidth }}
           transition={{ type: 'spring', stiffness: 320, damping: 32 }}
           aria-label={t("Now Playing")}
           className="overflow-hidden flex-shrink-0"
-          style={{ minWidth: 300 }}
+          style={{ minWidth: panelWidth }}
         >
           {/* Fixed width, slides via transform instead of the width above --
               keeping backdrop-filter/background off the width-animating
@@ -492,12 +495,13 @@ export default function RightSidebar() {
               flash. This element's own width never changes; sliding is
               purely x, and closing is instant along with the parent. */}
           <motion.div
-            initial={{ x: 300 }}
+            initial={{ x: panelWidth }}
             animate={{ x: 0 }}
             transition={{ type: 'spring', stiffness: 320, damping: 32 }}
-            className="h-full flex flex-col border-l border-border"
-            style={{ width: 300, backgroundColor: 'rgba(var(--surface-rgb), 0.85)' }}
+            className="relative h-full flex flex-col border-l border-border"
+            style={{ width: panelWidth, backgroundColor: 'rgba(var(--surface-rgb), 0.85)' }}
           >
+          <PanelResizeHandle side="right" />
           <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0 border-b border-border">
             <div className="flex gap-0.5 p-0.5 bg-card rounded-lg border border-border/50">
               {[['info', 'Details'], ['lyrics', 'Lyrics'], ['queue', 'Queue']].map(([id, label]) => (
@@ -563,7 +567,7 @@ export default function RightSidebar() {
                         aria-pressed={infoCardView !== 'info'}
                         title={t(infoCardView === 'info' ? 'Show lyrics' : infoCardView === 'lyrics' ? 'Show visualization' : 'Show details')}
                         className={`flex h-8 w-8 items-center justify-center rounded-full opacity-0 backdrop-blur-sm transition-opacity focus-visible:opacity-100 group-hover/lyrics:opacity-100 ${infoCardView !== 'info' ? 'bg-white/85 text-black hover:bg-white' : 'bg-black/55 text-white hover:bg-black/70'}`}>
-                        {infoCardView === 'info' ? <Info size={15} /> : infoCardView === 'lyrics' ? <Mic2 size={15} /> : <AudioWaveform size={15} />}
+                        {infoCardView === 'info' ? <Info size={15} /> : infoCardView === 'lyrics' ? <Mic2 size={15} /> : <Gamepad2 size={15} />}
                       </button>
                     </div>
                   )}
@@ -673,8 +677,13 @@ export default function RightSidebar() {
                         </section>
                       )}
                       {infoCardView === 'visualization' && (
-                        <div className={`relative mt-4 h-[clamp(140px,24vh,210px)] min-h-[140px] max-h-[210px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
-                          {sideVisualizer || <p className="absolute inset-0 flex items-center justify-center text-sm text-muted">{t('Visualization is off')}</p>}
+                        <div className={`group/fullscreen-visualizer relative mt-4 h-[clamp(160px,26vh,230px)] min-h-[160px] max-h-[230px] overflow-hidden rounded-xl border ${fx ? 'border-white/10 bg-black/25' : 'border-border bg-card'}`}>
+                          {showFullscreenVisualizer ? null : sideVisualizer || <p className="absolute inset-0 flex items-center justify-center text-sm text-muted">{t('Visualization is off')}</p>}
+                        <button type="button" onClick={() => setShowFullscreenVisualizer(true)}
+                          title={t('Open full-screen visualizer')} aria-label={t('Open full-screen visualizer')}
+                          className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/55 text-white/75 opacity-0 shadow-lg backdrop-blur-sm transition hover:bg-black/80 hover:text-white group-hover/fullscreen-visualizer:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+                          <Maximize2 size={14} />
+                        </button>
                         </div>
                       )}
                     </>

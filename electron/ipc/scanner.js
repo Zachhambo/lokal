@@ -4,8 +4,11 @@ const fs = require('fs-extra')
 const crypto = require('crypto')
 const https = require('https')
 const http = require('http')
+const { downloadImageWithTimeout } = require('../artworkDownload')
+const artistRoles = require('../artistRoles')
 const mm = require('../musicMetadata')
 const quality = require('../quality')
+const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
 const { findFolderArtwork, getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
@@ -19,6 +22,7 @@ const { deduplicatePlaylist } = require('../playlists/deduplicate')
 const { fetchCoverData } = require('../playlists/remoteCover')
 const { cacheArtistMetadata, refreshArtistMetadata, startRefreshAll, refreshAllStatus, cancelRefreshAll, searchArtistMetadataCandidates, applyArtistMetadataSelection, clearArtistImageOverride } = require('./artistMetadata')
 const { recordListeningEvent } = require('./recaps')
+const { normalizeArtwork, writeEmbeddedArtwork } = require('../fileArtwork')
 const { artistIdFromName, findArtistById, migrateUnknownArtist, resolveArtistId, trackArtistLinks } = require('../artistId')
 
 const DEFAULT_MUSIC_PATH = 'C:\\Users\\sipbuu\\Music'
@@ -190,12 +194,9 @@ function relinkArtistsIfNeeded(db = getDB()) {
 async function extractArtwork(metadata, trackId, fallbackArtwork = null) {
   const pic = metadata.common.picture?.[0]
   if (pic) {
-    const artPath = path.join(getStorageDir(), 'artwork', `${trackId}.jpg`)
-    if (!fs.existsSync(artPath)) {
-      await fs.ensureDir(path.dirname(artPath))
-      await fs.writeFile(artPath, pic.data)
-    }
-    return artPath
+    // Lists and player controls use small WebP thumbnails. Fullscreen views
+    // read the embedded original from the audio file only when needed.
+    return require('../artwork/thumb').writeCover(path.join(getStorageDir(), 'artwork'), trackId, pic.data)
   }
   return fallbackArtwork || null
 }
@@ -479,6 +480,7 @@ async function scanFolder(folderPath, {
       } else {
         insertTrack.run(params)
       }
+      addedDate.applyToRow(db, trackId, item.added)
       if (item.quality) quality.saveFields(db, trackId, item.quality, { fileChanged: true })
       db.prepare('DELETE FROM artist_track_links WHERE track_id = ?').run(trackId)
       unlockArtistLinks(db, trackId)
@@ -497,6 +499,13 @@ async function scanFolder(folderPath, {
   })
   const insertBatch = async (items) => {
     insertBatchTransaction(items)
+    // New entries without a LOKAL_ADDED tag take the library's date and write
+    // it into the file. Existing entries are deliberately not re-dated.
+    const toStamp = items.filter(item => item.isNew && item.added == null).map(item => item.file_path)
+    if (toStamp.length) {
+      const stamped = await addedDate.stampAddedDates(db, toStamp)
+      if (stamped.failed) console.warn(`[scanFolder] Date-added tag write failed for ${stamped.failed} file(s)`)
+    }
     // Run hook calls together for this bounded DB batch, rather than making
     // each indexed track wait for the previous plugin round-trip.
     await Promise.all(items.map(item => emitPluginHook('onTrackIndexed', {
@@ -555,7 +564,7 @@ async function scanFolder(folderPath, {
       if (getSkipDrumKit() && isDrumKit(title, c.album, c.genre?.[0])) { console.log(`[scanFolder] Skipped: ${filePath} - Drumkit pattern detected`); scanStatus.skipped++; scanStatus.done++; emitProgress(); continue }
       const artwork = await extractArtwork(meta, trackId, folderArtwork)
       const replaygain = c.replaygain_track_gain || null
-      batch.push({ id: trackId, file_path: filePath, file_hash: trackId, title, artist, album: c.album?.trim() || 'Unknown Album', album_artist: c.albumartist?.trim() || null, track_num: c.track?.no || null, year: c.year || null, genre: c.genre?.[0] || null, duration, artwork_path: artwork, bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : null, last_modified: stat.mtimeMs, replaygain, quality: quality.qualityFields(meta) })
+      batch.push({ id: trackId, file_path: filePath, file_hash: trackId, title, artist, album: c.album?.trim() || 'Unknown Album', album_artist: c.albumartist?.trim() || null, track_num: c.track?.no || null, year: c.year || null, genre: c.genre?.[0] || null, duration, artwork_path: artwork, bitrate: meta.format.bitrate ? Math.round(meta.format.bitrate / 1000) : null, last_modified: stat.mtimeMs, replaygain, quality: quality.qualityFields(meta), added: addedDate.fromMeta(meta), isNew: !existing })
       if (batch.length >= BATCH) { await insertBatch(batch); batch = [] }
     } catch { scanStatus.errors++ }
     scanStatus.done++; emitProgress()
@@ -705,6 +714,7 @@ function getArtistsPage(db, opts = {}) {
   const offset = Math.max(0, parseInt(opts.offset, 10) || 0)
   const rawSearch = typeof opts.search === 'string' ? opts.search.trim() : ''
   const sort = opts.sort === 'tracks' ? 'tracks' : 'name'
+  const mainOnly = opts.mainOnly === true || opts.mainOnly === '1'
   const params = []
   const conditions = []
   const groupBy = 'GROUP BY a.id'
@@ -713,48 +723,46 @@ function getArtistsPage(db, opts = {}) {
 
   if (rawSearch) {
     conditions.push('a.name LIKE ?')
-    params.push(`%${rawSearch}%`)
+    params.push('%' + rawSearch + '%')
   }
-  // Artists → Followed: only the artists you follow.
   if (opts.followed === true || opts.followed === '1') {
     const followed = require('../followedArtistIds').followedCondition(db)
     conditions.push(followed.sql)
     params.push(followed.param)
   }
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
+  const baseSql = [
+    'FROM artists a',
+    'LEFT JOIN artist_track_links atl ON atl.artist_id = a.id',
+    "LEFT JOIN tracks t ON t.id = atl.track_id AND t.file_path NOT LIKE 'ghost://%'",
+  ].join('\n')
+  const selectSql = [
+    'SELECT a.*, COUNT(DISTINCT t.id) as track_count',
+    baseSql, where, groupBy, having, orderBy,
+  ].filter(Boolean).join('\n')
 
-  // Songs in the library only (not streamed ones), as on the artist's page.
-  const baseSql = `
-    FROM artists a
-    LEFT JOIN artist_track_links atl ON atl.artist_id = a.id
-    LEFT JOIN tracks t ON t.id = atl.track_id AND t.file_path NOT LIKE 'ghost://%'
-  `
-  const rows = db.prepare(`
-    SELECT a.*, COUNT(DISTINCT t.id) as track_count
-    ${baseSql}
-    ${where}
-    ${groupBy}
-    ${having}
-    ${orderBy}
-    LIMIT ? OFFSET ?
-  `).all(...params, limit, offset)
-  const totalRow = db.prepare(`
-    SELECT COUNT(*) as total
-    FROM (
-      SELECT a.id
-      ${baseSql}
-      ${where}
-      ${groupBy}
-      ${having}
-    ) grouped_artists
-  `).get(...params)
+  let rows
+  let total
+  if (mainOnly) {
+    const mainIds = artistRoles.mainOnlyArtistIds(db)
+    const eligible = db.prepare(selectSql).all(...params).filter(artist => mainIds.has(String(artist.id)))
+    total = eligible.length
+    rows = eligible.slice(offset, offset + limit)
+  } else {
+    rows = db.prepare(selectSql + '\nLIMIT ? OFFSET ?').all(...params, limit, offset)
+    total = db.prepare([
+      'SELECT COUNT(*) as total FROM (',
+      'SELECT a.id', baseSql, where, groupBy, having,
+      ') grouped_artists',
+    ].filter(Boolean).join('\n')).get(...params)?.total || 0
+  }
 
   return {
     items: rows.map(artist => addArtistFallback(db, artist)),
-    total: totalRow?.total || 0,
+    total,
     limit,
     offset,
-    hasMore: offset + rows.length < (totalRow?.total || 0),
+    hasMore: offset + rows.length < total,
   }
 }
 
@@ -842,7 +850,7 @@ function scoreRelatedTrack(baseTrack, candidate) {
 }
 
 function classifyAlbumRow(row) {
-  const trackCount = Number(row?.track_count || 0)
+  const trackCount = Number(row?.release_track_count ?? row?.track_count ?? 0)
   if (trackCount <= 1) return 'single'
   if (trackCount <= 6) return 'ep'
   return 'album'
@@ -1110,14 +1118,15 @@ async function applyBatchTrackUpdates(db, trackIds = [], operations = {}) {
   const tracks = ids.map(id => db.prepare('SELECT * FROM tracks WHERE id = ?').get(id)).filter(Boolean)
   if (!tracks.length) return []
 
-  let artworkPath = null
   const artworkOp = operations.artwork
+  const artworkPaths = new Map()
   if (artworkOp?.mode === 'replace' && artworkOp?.value) {
-    const base64 = String(artworkOp.value).split(',')[1] || ''
-    artworkPath = '__pending__'
+    const normalized = await normalizeArtwork(artworkOp.value)
     for (const track of tracks) {
-      const nextArtPath = path.join(getStorageDir(), 'artwork', `${track.id}.jpg`)
-      await fs.writeFile(nextArtPath, Buffer.from(base64, 'base64'))
+      const nextArtPath = await require('../artwork/thumb').writeCover(
+        path.join(getStorageDir(), 'artwork'), String(track.id), normalized, { overwrite: true }
+      )
+      artworkPaths.set(track.id, nextArtPath)
     }
   }
 
@@ -1160,7 +1169,7 @@ async function applyBatchTrackUpdates(db, trackIds = [], operations = {}) {
         params.push(null)
       } else if (artworkOp?.mode === 'replace' && artworkOp?.value) {
         updates.push('artwork_path = ?')
-        params.push(path.join(getStorageDir(), 'artwork', `${track.id}.jpg`))
+        params.push(artworkPaths.get(track.id) || path.join(getStorageDir(), 'artwork', `${track.id}.jpg`))
       }
       if (!updates.length) continue
       params.push(track.id)
@@ -1246,6 +1255,14 @@ function registerScannerHandlers(ipcMain) {
   ipcMain.handle('scanner:scan', async (e, folder) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolder(folder || DEFAULT_MUSIC_PATH) })
   ipcMain.handle('scanner:scanFolders', async (e, folders) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolders(folders) })
   ipcMain.handle('scanner:status', () => scanStatus)
+  ipcMain.handle('scanner:getTrackFileSize', (_, trackId) => {
+    const filePath = getDB().prepare('SELECT file_path FROM tracks WHERE id = ?').get(String(trackId || ''))?.file_path
+    if (!filePath || String(filePath).startsWith('ghost://')) return { bytes: null }
+    try {
+      const stat = fs.statSync(filePath)
+      return { bytes: stat.isFile() ? stat.size : null }
+    } catch { return { bytes: null } }
+  })
   ipcMain.handle('scanner:getLibraryFolders', (_, relativePath, search, rootPath) => getLibraryFolders(getDB(), relativePath, search, rootPath))
 
   ipcMain.handle('scanner:renameLibraryFolders', (e, changes, rootPath) => {
@@ -1391,6 +1408,10 @@ function registerScannerHandlers(ipcMain) {
         t.year,
         t.artwork_path,
         COUNT(*) as track_count,
+        (SELECT COUNT(*) FROM tracks full_release
+          WHERE LOWER(full_release.album) = LOWER(t.album)
+            AND LOWER(COALESCE(NULLIF(full_release.album_artist, ''), full_release.artist)) = LOWER(COALESCE(NULLIF(t.album_artist, ''), t.artist))
+            AND full_release.file_path NOT LIKE 'ghost://%') as release_track_count,
         GROUP_CONCAT(DISTINCT t.artist) as artists
       FROM tracks t
       JOIN artist_track_links atl ON atl.track_id = t.id
@@ -1399,7 +1420,7 @@ function registerScannerHandlers(ipcMain) {
         AND t.album IS NOT NULL
       GROUP BY LOWER(t.album), LOWER(COALESCE(NULLIF(t.album_artist, ''), t.artist))
       ORDER BY t.year DESC, t.album ASC
-    `).all(artist.id))
+    `).all(artist.id)).map(album => ({ ...album, is_main_artist: artistRoles.isMainArtistRelease(artist.name, album, tracks, db) }))
     const artistWithFallback = addArtistFallback(db, artist)
     return { ...artistWithFallback, tracks, topTracks, albums }
   })
@@ -1585,12 +1606,27 @@ function registerScannerHandlers(ipcMain) {
   });
   ipcMain.handle('artist:delete', (_, artistId) => { const db = getDB(); lockArtistLinks(db, artistId); db.prepare('DELETE FROM artist_track_links WHERE artist_id = ?').run(artistId); db.prepare('DELETE FROM artists WHERE id = ?').run(artistId) })
   ipcMain.handle('track:setArtwork', async (_, trackId, imageData) => {
-    const buf = Buffer.from(imageData.split(',')[1], 'base64')
-    const artPath = path.join(getStorageDir(), 'artwork', `${trackId}.jpg`)
-    await fs.writeFile(artPath, buf)
     const db = getDB()
-    db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?').run(artPath, trackId)
-    return db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId) || null
+    const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(String(trackId || ''))
+    if (!track) return { error: 'Track not found' }
+    try {
+      const buf = await normalizeArtwork(imageData)
+      const filePath = String(track.file_path || '')
+      const hasLocalFile = path.isAbsolute(filePath) && !filePath.startsWith('ghost://')
+      if (hasLocalFile) {
+        if (!fs.existsSync(filePath)) return { error: 'The audio file is missing; artwork was not changed.' }
+        // Write the cover into the audio's own metadata, so other music players
+        // see the new image too. Don't report success if this step fails.
+        writeEmbeddedArtwork(filePath, buf)
+        require('../fileStamp').noteFileWritten(db, filePath)
+      }
+      const artPath = await require('../artwork/thumb').writeCover(path.join(getStorageDir(), 'artwork'), String(trackId), buf, { overwrite: true })
+      db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?').run(artPath, trackId)
+      return db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId) || null
+    } catch (error) {
+      console.error('[track:setArtwork] Could not replace artwork:', error)
+      return { error: error?.message || 'Could not replace artwork' }
+    }
   })
   ipcMain.handle('track:setGenre', (_, trackId, genre) => getDB().prepare('UPDATE tracks SET genre = ? WHERE id = ?').run(genre || null, trackId))
   ipcMain.handle('track:update', (_, trackId, data) => {
@@ -1672,6 +1708,19 @@ function registerScannerHandlers(ipcMain) {
     try {
       const result = await fetchExternalMetadata(title, artist, trackId)
       if (result?.artPath) {
+        const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(String(trackId || ''))
+        if (!track) return { success: false, error: 'Track not found' }
+        const filePath = String(track.file_path || '')
+        const hasLocalFile = path.isAbsolute(filePath) && !filePath.startsWith('ghost://')
+        if (hasLocalFile) {
+          if (!fs.existsSync(filePath)) return { success: false, error: 'The audio file is missing; artwork was not changed.' }
+          // iTunes/Cover Art Archive images need the same embedded-tag write as
+          // the manual picker. Otherwise the new cover appears only in Lokal.
+          const cover = await normalizeArtwork(await fs.readFile(result.artPath))
+          writeEmbeddedArtwork(filePath, cover)
+          await fs.writeFile(result.artPath, cover)
+          require('../fileStamp').noteFileWritten(db, filePath)
+        }
         db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?').run(result.artPath, trackId)
         return {
           success: true,
@@ -1682,7 +1731,7 @@ function registerScannerHandlers(ipcMain) {
       return { success: false, error: 'No artwork found' }
     } catch (err) {
       console.error('[track:fetchExternalArtwork]', err.message)
-      return { success: false, error: err.message }
+      return { success: false, error: err?.message || 'Could not replace artwork' }
     }
   })
   ipcMain.handle('scanner:getTopGenres', () => getDB().prepare(`SELECT genre, COUNT(*) as count FROM tracks WHERE genre IS NOT NULL GROUP BY genre ORDER BY count DESC LIMIT 10`).all())
@@ -1849,6 +1898,11 @@ function registerScannerHandlers(ipcMain) {
   })
 }
 
+function uniqueArtworkCachePath(trackId) {
+  const safeTrackId = String(trackId || 'track').replace(/[^a-z0-9_-]/gi, '_')
+  return path.join(getStorageDir(), 'artwork', safeTrackId + '-external-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.jpg')
+}
+
 async function fetchExternalMetadata(title, artist, trackId) {
   const db = getDB()
   try {
@@ -1873,7 +1927,7 @@ async function fetchExternalMetadata(title, artist, trackId) {
 
       if (artworkUrl) {
         artworkUrl = artworkUrl.replace('100x100bb', '600x600bb')
-        const artPath = path.join(getStorageDir(), 'artwork', `t-${trackId}.jpg`)
+        const artPath = uniqueArtworkCachePath(trackId)
         try {
           await downloadImageWithTimeout(artworkUrl, artPath, 5000)
           clearTimeout(timeout)
@@ -1906,7 +1960,7 @@ async function fetchExternalMetadata(title, artist, trackId) {
     if (recording?.releases?.[0]?.id) {
       const releaseId = recording.releases[0].id
       const coverUrl = `https://coverartarchive.org/release/${releaseId}/front-500`
-      const artPath = path.join(getStorageDir(), 'artwork', `t-${trackId}.jpg`)
+      const artPath = uniqueArtworkCachePath(trackId)
       try {
         await downloadImageWithTimeout(coverUrl, artPath, 5000)
         clearTimeout(timeout2)
@@ -1918,38 +1972,6 @@ async function fetchExternalMetadata(title, artist, trackId) {
 
   clearTimeout(timeout2)
   return null
-}
-
-function downloadImageWithTimeout(url, dest, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http
-    const timeout = setTimeout(() => { reject(new Error('Download timeout')) }, timeoutMs)
-    const file = fs.createWriteStream(dest)
-    client.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        file.close()
-        clearTimeout(timeout)
-        return downloadImageWithTimeout(res.headers.location, dest, timeoutMs).then(resolve).catch(reject)
-      }
-      if (res.statusCode !== 200) {
-        file.close()
-        clearTimeout(timeout)
-        fs.unlink(dest, () => {})
-        reject(new Error('HTTP ' + res.statusCode))
-        return
-      }
-      res.pipe(file)
-      file.on('finish', () => {
-        file.close()
-        clearTimeout(timeout)
-        resolve(dest)
-      })
-    }).on('error', (err) => {
-      clearTimeout(timeout)
-      fs.unlink(dest, () => {})
-      reject(err)
-    })
-  })
 }
 
 const ARTIST_CLEANUP_INTERVAL_MS = 60_000
@@ -2034,7 +2056,10 @@ async function indexSingleFile(filePath, opts = {}) {
         db.transaction(() => {
           db.prepare(`UPDATE tracks SET ${updates.join(', ')} WHERE id = ?`).run(...params)
           if (artistOverride && existing.artist !== artistOverride) updateTrackArtistLinks(db, existing.id, artistOverride)
-          if (currentMeta) quality.saveFields(db, existing.id, quality.qualityFields(currentMeta), { fileChanged: true })
+          if (currentMeta) {
+        quality.saveFields(db, existing.id, quality.qualityFields(currentMeta), { fileChanged: true })
+        addedDate.applyToRow(db, existing.id, addedDate.fromMeta(currentMeta))
+      }
         })()
       }
       return { skipped: true, id: existing.id, repaired: !!updates.length }
@@ -2050,6 +2075,7 @@ async function indexSingleFile(filePath, opts = {}) {
   } catch { return { error: 'Failed to parse metadata' } }
   finally { clearTimeout(parseTimeout) }
   const c = meta.common
+  const added = addedDate.fromMeta(meta)
   const rawTitle = c.title?.trim()
   const rawArtist = pickPreferredArtist(c)
   const requested = opts.metadata || {}
@@ -2074,7 +2100,7 @@ async function indexSingleFile(filePath, opts = {}) {
   const thumbnailUrl = opts.thumbnailUrl
   if (!artwork && thumbnailUrl) {
     try {
-      const artPath = path.join(getStorageDir(), 'artwork', `t-${trackId}.jpg`)
+      const artPath = uniqueArtworkCachePath(trackId)
       await downloadImageWithTimeout(thumbnailUrl, artPath, 5000)
       artwork = artPath
     } catch {}
@@ -2152,11 +2178,15 @@ async function indexSingleFile(filePath, opts = {}) {
         console.warn(`[indexSingleFile] Failed to link artist ${aid} to track ${trackId}:`, linkErr.message)
       }
     }
+    addedDate.applyToRow(db, trackId, added)
     applyPendingImportedMetadataToTrack(db, trackId)
     if (!opts.deferGhostResolution) resolveGhostsByIsrc(db, trackId)
   })
   
   insertTransaction()
+  if (added == null) {
+    try { await addedDate.stampAddedDates(db, [filePath]) } catch (error) { console.warn('[indexSingleFile] Date-added tag skipped:', error.message) }
+  }
   await emitPluginHook('onTrackIndexed', {
     id: trackId,
     title,

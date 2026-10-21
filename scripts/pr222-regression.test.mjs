@@ -59,13 +59,13 @@ test('RightSidebar opens an in-app dialog to enter a manual YouTube music video 
   assert.match(source, /onSubmit=\{saveManualVideo\}/)
 })
 
-test('player surfaces do not expose like interactions', () => {
+test('player surfaces expose liked-song interactions', () => {
   const playerBar = readFileSync(new URL('../src/components/PlayerBar.jsx', import.meta.url), 'utf8')
   const fullscreen = readFileSync(new URL('../src/components/FullscreenPlayer.jsx', import.meta.url), 'utf8')
   const rightSidebar = readFileSync(new URL('../src/components/RightSidebar.jsx', import.meta.url), 'utf8')
-  assert.doesNotMatch(playerBar, /toggleLike|likedIds|<Heart\b/)
-  assert.doesNotMatch(fullscreen, /doubleClickLike|onDoubleClick=|LikeBurst|toggleLike|likedIds/)
-  assert.doesNotMatch(rightSidebar, /doubleClickLike|onDoubleClick=|LikeBurst|toggleLike|likedIds/)
+  assert.match(playerBar, /toggleLike/)
+  assert.match(fullscreen, /toggleLike/)
+  assert.match(rightSidebar, /toggleLike/)
 })
 
 test('Library search is on the right of the track-count row in both modes', () => {

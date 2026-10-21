@@ -126,7 +126,7 @@ test('albums with only trackIds fetch tracks in batches instead of serial reques
   })
   provider.extension.initialize({ token: 'abc123' })
   const album = provider.extension.getAlbum(99)
-  assert.deepEqual(album.tracks.map(track => track.id), ['1', '2', '3'])
+  assert.deepEqual(Array.from(album.tracks, track => track.id), ['1', '2', '3'])
   assert.equal(provider.requests.filter(request => /\/tracks\?/.test(request.url)).length, 1)
 })
 
