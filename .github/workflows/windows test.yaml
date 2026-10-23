@@ -55,4 +55,4 @@ jobs:
           name: lokal-windows-build
           path: |
             release/*.exe
-            release/*.zip
+           # release/*.zip
