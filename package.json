@@ -79,19 +79,8 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "appx",
-          "arch": [
-            "x64"
-          ]
         }
+        
       ],
       "fileAssociations": [
         {
