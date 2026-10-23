@@ -158,12 +158,16 @@ function possibleDuplicateMatch(left, right) {
 
 function buildPossibleDuplicateGroups(tracks = []) {
   if (!Array.isArray(tracks) || tracks.length < 2) return []
-  const enriched = tracks.map((track, index) => {
+  // Ghosts retain streaming/history metadata, not another music file. They
+  // must not be offered as duplicate files or as suggested keep candidates.
+  const enriched = tracks.filter(track =>
+    typeof track?.file_path === 'string' && track.file_path.trim() &&
+    !/^ghost:\/\//i.test(track.file_path.trim())
+  ).map(track => {
     const titleTokens = tokenizeDuplicateText(track.title, 'title')
     const artistTokens = tokenizeDuplicateText(track.artist, 'artist')
     return {
       ...track,
-      index,
       qualityScore: scoreTrack(track),
       normalizedTitle: normalizeDuplicateText(track.title, 'title'),
       normalizedArtist: normalizeDuplicateText(track.artist, 'artist'),
@@ -173,6 +177,7 @@ function buildPossibleDuplicateGroups(tracks = []) {
       durationBucket: Math.round(Number(track.duration || 0) / 2),
     }
   }).filter(track => track.artistKey && track.titleTokens.length)
+    .map((track, index) => ({ ...track, index }))
 
   const buckets = new Map()
   for (const track of enriched) {
@@ -574,13 +579,23 @@ router.get('/missing', (req, res) => {
 
 router.get('/', (req, res) => {
   const db = getDB()
-  const { sort = 'added_at DESC', limit = 500, offset = 0, id, artistName, album, albumArtist, source, genre, quality, includeGhosts, problems, search, format } = req.query
+  const { sort = 'added_at DESC', limit = 500, offset = 0, id, artistName, artistId, album, albumArtist, source, genre, quality, includeGhosts, problems, search, format } = req.query
   if (album) {
     const params = [album]
     let sql = "SELECT * FROM tracks WHERE album = ? AND file_path NOT LIKE 'ghost://%'"
     if (albumArtist) {
       sql += " AND LOWER(COALESCE(NULLIF(album_artist, ''), artist)) = LOWER(?)"
       params.push(albumArtist)
+    }
+    // Album detail screens should follow the same device-first view as Songs.
+    const preference = require('../../electron/libraryDevicePreference')
+    // Only suppress a phone row when its desktop counterpart is also in this album view.
+    // Album-artist filtering can differ between synced metadata, so retain both there.
+    if (!albumArtist && preference.shouldPreferDesktop({ source, id, includeGhosts, problems })) {
+      sql += ' AND ' + preference.desktopPreferredLibraryClause().replace(
+        "AND desktop.title = tracks.title COLLATE NOCASE",
+        "AND desktop.album = tracks.album AND desktop.title = tracks.title COLLATE NOCASE"
+      )
     }
     const tracks = db.prepare(sql).all(...params)
     res.json(normalizeAlbumTracks(tracks).map(track => ({ ...track, missing: !fs.existsSync(track.file_path) })))
@@ -592,6 +607,7 @@ router.get('/', (req, res) => {
   const where = files ? [files] : []
   if (id) { where.push('id = ?'); params.push(id) }
   if (artistName) { where.push('artist = ?'); params.push(artistName) }
+  if (artistId) { where.push('id IN (SELECT track_id FROM artist_track_links WHERE artist_id = ?)'); params.push(artistId) }
   const sourceWhere = require('../../electron/ipc/scanner').sourceFilter(source)
   if (sourceWhere) { where.push(sourceWhere.sql); params.push(...sourceWhere.params) }
   const genreWhere = require('../../electron/ipc/scanner').genreFilter(typeof genre === 'string' ? genre : '')
@@ -608,7 +624,7 @@ router.get('/', (req, res) => {
     const searchWhere = wordsMatch(searchText, TRACK_COLUMNS)
     if (searchWhere) { where.push(searchWhere.sql); params.push(...searchWhere.params) }
   }
-  res.json(require('../../electron/trackErrors').listTracks(db, { sort, limit, offset, problems }, { where, params, exists: fs.existsSync }))
+  res.json(require('../../electron/trackErrors').listTracks(db, { sort, limit, offset, problems, source, id, includeGhosts, hasRestrictiveFilters: Boolean(artistName || artistId || genre || quality || format || searchText) }, { where, params, exists: fs.existsSync }))
 })
 
 router.post('/:id/error', (req, res) => res.json({ ok: require('../../electron/trackErrors').recordTrackError(getDB(), req.params.id, req.body?.message) }))
@@ -967,7 +983,7 @@ router.get('/duplicates', (req, res) => {
 })
 
 router.get('/possible-duplicates', (req, res) => {
-  const tracks = getDB().prepare('SELECT * FROM tracks ORDER BY artist, title').all()
+  const tracks = getDB().prepare("SELECT * FROM tracks WHERE file_path NOT LIKE 'ghost://%' ORDER BY artist, title").all()
   res.json(buildPossibleDuplicateGroups(tracks))
 })
 

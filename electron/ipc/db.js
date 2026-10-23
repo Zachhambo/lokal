@@ -28,6 +28,9 @@ function initDB() {
   ensureStorageDirs()
 
   db = new Database(path.join(_dataDir, 'lokal.db'))
+  // Capture functions are registered after migrations, before ordinary writes.
+  for (const {name} of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'link_*'").all()) db.exec('DROP TRIGGER IF EXISTS \"' + name.replace(/\"/g, '\"\"') + '\"')
+  db.function('link_track_key', (artist,title,duration) => require('../link/protocol').trackKey({artist,title,duration}))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
 
@@ -377,6 +380,22 @@ function initDB() {
       db.exec(m)
     } catch {}
   }
+
+  // Speed up desktop-vs-mobile recording checks for large linked libraries.
+  // The query compares titles case-insensitively before checking artist and
+  // duration, so a matching-title index prevents scanning the whole library.
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_tracks_title_nocase ON tracks(title COLLATE NOCASE)') } catch {}
+
+  // Older phone uploads predate source tracking; repair those identifiable
+  // imports once while keeping explicit addon/download origins intact.
+  try {
+    if (!db.prepare("SELECT 1 FROM settings WHERE key = 'mobile_sources_v1'").get()) {
+      db.transaction(() => {
+        require('../mobileSource').backfillMobileSources(db, getStorageDir())
+        db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('mobile_sources_v1','1')").run()
+      })()
+    }
+  } catch (error) { console.warn('mobile source migration:', error.message) }
 
   try {
     db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('lyrics_auto_translate', '0')").run()

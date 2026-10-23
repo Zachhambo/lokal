@@ -680,7 +680,7 @@ function searchLyricsEntries(db, query) {
 function sourceFilter(source) {
   if (source === 'local') return { sql: 'download_source IS NULL', params: [] }
   if (source === 'addon') return { sql: "download_source LIKE 'a-%'", params: [] }
-  if (['yt', 'sc', 'soulseek', 'web'].includes(source)) return { sql: 'download_source = ?', params: [source] }
+  if (['yt', 'sc', 'soulseek', 'web', 'mobile'].includes(source)) return { sql: 'download_source = ?', params: [source] }
   return null
 }
 
@@ -947,12 +947,16 @@ function possibleDuplicateMatch(left, right) {
 
 function buildPossibleDuplicateGroups(tracks = []) {
   if (!Array.isArray(tracks) || tracks.length < 2) return []
-  const enriched = tracks.map((track, index) => {
+  // Ghosts retain streaming/history metadata, not another music file. They
+  // must not be offered as duplicate files or as suggested keep candidates.
+  const enriched = tracks.filter(track =>
+    typeof track?.file_path === 'string' && track.file_path.trim() &&
+    !/^ghost:\/\//i.test(track.file_path.trim())
+  ).map(track => {
     const titleTokens = tokenizeDuplicateText(track.title, 'title')
     const artistTokens = tokenizeDuplicateText(track.artist, 'artist')
     return {
       ...track,
-      index,
       qualityScore: scoreTrack(track),
       normalizedTitle: normalizeDuplicateText(track.title, 'title'),
       normalizedArtist: normalizeDuplicateText(track.artist, 'artist'),
@@ -962,6 +966,7 @@ function buildPossibleDuplicateGroups(tracks = []) {
       durationBucket: Math.round(Number(track.duration || 0) / 2),
     }
   }).filter(track => track.artistKey && track.titleTokens.length)
+    .map((track, index) => ({ ...track, index }))
 
   const buckets = new Map()
   for (const track of enriched) {
@@ -1552,7 +1557,7 @@ function registerScannerHandlers(ipcMain) {
     const db = getDB()
     const playlist = db.prepare('SELECT user_id, smart_rules FROM playlists WHERE id = ?').get(plId)
     if (playlistRules(playlist)) return smartTracks(db, playlist.smart_rules, playlist.user_id)
-    return db.prepare(`SELECT t.*, pt.id as playlist_track_id, pt.added_by, pt.added_at FROM tracks t JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ? ORDER BY pt.position`).all(plId)
+    return db.prepare(`SELECT t.*, pt.id as playlist_track_id, pt.added_by, pt.added_at FROM tracks t JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ? ORDER BY pt.position, link_track_key(t.artist,t.title,t.duration)`).all(plId)
   })
   ipcMain.handle('playlist:smartPreview', (_, rules, userId) => {
     try { return smartPreview(getDB(), rules, userId) } catch (e) { return { error: e.message } }
@@ -1783,6 +1788,7 @@ function registerScannerHandlers(ipcMain) {
     if (overrides !== undefined) {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('theme_overrides', ?)").run(JSON.stringify(overrides))
     }
+    require('./remote').events.emit('theme')
   })
   ipcMain.handle('track:batchUpdate', async (_, trackIds, operations) => {
     const db = getDB()
@@ -2286,7 +2292,7 @@ function registerExtraHandlers(ipcMain) {
   ipcMain.handle('album:setImageUrl', async (_, albumTitle, url) => { const db = getDB(); const safeTitle = albumTitle.replace(/[^a-z0-9]+/gi, '-'); const imgPath = path.join(getStorageDir(), 'artwork', `album-${safeTitle}.jpg`); await downloadToFile(url, imgPath); db.prepare('UPDATE tracks SET artwork_path = ? WHERE album = ?').run(imgPath, albumTitle); return imgPath })
   ipcMain.handle('scanner:checkDuplicates', () => getDB().prepare(`SELECT title, artist, COUNT(*) as count, GROUP_CONCAT(id) as ids, GROUP_CONCAT(file_path) as paths FROM tracks GROUP BY LOWER(title), LOWER(artist) HAVING count > 1`).all())
   ipcMain.handle('scanner:checkPossibleDuplicates', () => {
-    const tracks = getDB().prepare('SELECT * FROM tracks ORDER BY artist, title').all()
+    const tracks = getDB().prepare("SELECT * FROM tracks WHERE file_path NOT LIKE 'ghost://%' ORDER BY artist, title").all()
     return buildPossibleDuplicateGroups(tracks)
   })
   ipcMain.handle('scanner:deleteTrack', async (_, trackId) => { const db = getDB(); const filePath = db.prepare('SELECT file_path FROM tracks WHERE id = ?').get(trackId)?.file_path; db.prepare('DELETE FROM artist_track_links WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM user_likes WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM play_history WHERE track_id = ?').run(trackId); try { db.prepare('DELETE FROM listening_events WHERE track_id = ?').run(trackId) } catch {}; db.prepare('DELETE FROM lyrics_cache WHERE track_id = ?').run(trackId); try { db.prepare('DELETE FROM lyrics_translations WHERE track_id = ?').run(trackId) } catch {}; db.prepare('DELETE FROM tracks WHERE id = ?').run(trackId); forgetDownloads([trackId]); return { success: true, files: await removeTrackFiles(db, [filePath]) } })

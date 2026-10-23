@@ -339,7 +339,11 @@ contextBridge.exposeInMainWorld('electron', {
   saveTheme: (theme, overrides) => invoke('settings:saveTheme', { theme, overrides }),
   getRemoteConnectionInfo: () => invoke('remote:getConnectionInfo'),
   reportRemoteState: (state) => ipcRenderer.send('remote:stateUpdate', state),
-  onRemoteCommand: (fn) => on('remote:command', (_, payload) => fn(payload)),
+  onRemoteCommand: (fn) => on('remote:command', (_, payload) => { Promise.resolve().then(() => fn(payload)).then(result => { if(payload?._requestId)ipcRenderer.send('remote:commandResult',payload._requestId,result || {ok:true}) }, () => { if(payload?._requestId)ipcRenderer.send('remote:commandResult',payload._requestId,{error:'The command could not be completed'}) }) }),
+  createLinkPairing: () => invoke('remote:createPairing'),
+  getLinkDevices: () => invoke('remote:listDevices'),
+  revokeLinkDevice: (id) => invoke('remote:revokeDevice',id),
+  commandLinkDevice: (id, command) => invoke('remote:commandDevice',{id,command}),
   onSmtcShuffleRequest: (fn) => on('smtc:shuffleRequested', (_, value) => fn(value)),
   onSmtcRepeatRequest: (fn) => on('smtc:repeatRequested', (_, mode) => fn(mode)),
 
@@ -393,6 +397,7 @@ contextBridge.exposeInMainWorld('electron', {
   updaterInstall: () => invoke('updater:install'),
   updaterCheck: () => invoke('updater:check'),
   getVersion: () => invoke('app:getVersion'),
+  isWindowsStore: () => invoke('app:isWindowsStore'),
   onUpdaterEvent: (cb) => {
     ipcRenderer.on('updater:available', (_, info) => cb('available', info))
     ipcRenderer.on('updater:progress', (_, p) => cb('progress', p))

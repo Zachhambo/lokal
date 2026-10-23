@@ -168,6 +168,9 @@ autoUpdater.allowPrerelease = false
 // it, and being offered the stable release (older in features once the
 // nightly moves on) makes no sense. New nightlies come from GitHub Releases.
 const IS_NIGHTLY = /-nightly\./i.test(app.getVersion())
+// The Microsoft Store (MSIX) build is updated by the Store itself; an
+// electron-updater install would fail inside the package anyway.
+const IS_WINDOWS_STORE = process.windowsStore === true
 
 autoUpdater.on('update-available', (info) => {
   if (mainWindow) {
@@ -502,7 +505,7 @@ function createWindow() {
   })
   
   mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow.webContents.send('perf-settings', perfSettings)
+    mainWindow.webContents.send('perf-settings', loadPerformanceSettings())
     if (pendingLastfmAuthToken) {
       mainWindow.webContents.send('lastfm:auth-token', pendingLastfmAuthToken)
       pendingLastfmAuthToken = ''
@@ -694,13 +697,26 @@ app.whenReady().then(() => {
       return { ...fallback, serverReachable: false, error: e?.message || 'Could not reach the remote server', platform: process.platform }
     }
   })
-  setRemoteCommandHandler(async (command) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return { error: 'Main window unavailable' }
-    }
-    mainWindow.webContents.send('remote:command', command || {})
-    return { ok: true }
+  require('./ipc/remote').events.on('library', detail => { if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('library:changed',detail) })
+  const linkRequests = new Map()
+  ipcMain.on('remote:commandResult', (event, id, result) => {
+    if (event.sender !== mainWindow?.webContents) return
+    const pending = linkRequests.get(id)
+    if (pending) { clearTimeout(pending.timer); linkRequests.delete(id); pending.resolve(result) }
   })
+  setRemoteCommandHandler(command => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { error: 'Main window unavailable' }
+    const id = require('crypto').randomUUID()
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { linkRequests.delete(id); resolve({error:'The desktop player did not respond.'}) }, 6000)
+      linkRequests.set(id,{resolve,timer})
+      mainWindow.webContents.send('remote:command',{...command,_requestId:id})
+    })
+  })
+  ipcMain.handle('remote:createPairing', () => require('./link').getLink()?.createPairing())
+  ipcMain.handle('remote:listDevices', () => require('./link').getLink()?.devices() || [])
+  ipcMain.handle('remote:revokeDevice', (_, id) => require('./link').getLink()?.revoke(String(id)))
+  ipcMain.handle('remote:commandDevice', (_, {id,command}) => require('./link').getLink()?.commandDevice(String(id),command))
   ipcMain.handle('dialog:openFolder', async () => {
     const r = await require('electron').dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
     return r.filePaths[0] || null
@@ -916,6 +932,7 @@ ipcMain.handle('updater:install', () => {
   }, 500);
 });
   ipcMain.handle('updater:check', () => {
+    if (IS_WINDOWS_STORE) return { store: true, version: app.getVersion() }
     if (IS_NIGHTLY) return { nightly: true, version: app.getVersion() }
     autoUpdater.checkForUpdates()
     return { checking: true }
@@ -923,6 +940,7 @@ ipcMain.handle('updater:install', () => {
   ipcMain.handle('app:getVersion', () => {
     return app.getVersion()
   })
+  ipcMain.handle('app:isWindowsStore', () => IS_WINDOWS_STORE)
 
   // macOS: its window back from the Dock (hidden helper windows don't count).
   app.on('activate', () => {
@@ -949,6 +967,8 @@ ipcMain.handle('updater:install', () => {
 
   if (!app.isPackaged) {
     console.log('[updater] skipping in dev mode')
+  } else if (IS_WINDOWS_STORE) {
+    console.log('[updater] Microsoft Store build: updates come from the Store')
   } else if (IS_NIGHTLY) {
     console.log(`[updater] nightly build (${app.getVersion()}): not checking for stable updates`)
   } else if ((() => { try { return require('./ipc/db').getDB().prepare("SELECT value FROM settings WHERE key = 'auto_update'").get()?.value === '0' } catch { return false } })()) {
