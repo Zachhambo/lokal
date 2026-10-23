@@ -99,7 +99,60 @@ router.post('/library/lyrics', async (req, res) => {
 
 router.get('/files', (req, res) => {
   if (!pairedUser(req, res)) return
-  res.json({ originalFiles: true })
+  res.json({ originalFiles: true, contentMatching: true, sizeMatching: true })
+})
+
+// A blocked filesystem or disconnected phone must not leave a preview running
+// indefinitely. Checks also stop further stat/hash work after the response ends.
+async function boundedFileCheck(res, work, milliseconds) {
+  let expired = false
+  const check = () => {
+    if (expired || res.destroyed) throw new Error('File comparison stopped')
+  }
+  let timer
+  try {
+    return await Promise.race([
+      work(check),
+      new Promise((_, reject) => { timer = setTimeout(() => {
+        expired = true
+        reject(new Error('File comparison timed out'))
+      }, milliseconds) }),
+    ])
+  } finally { clearTimeout(timer) }
+}
+
+router.post('/files/sizes', async (req, res) => {
+  if (!pairedUser(req, res)) return
+  const sizes = req.body?.sizes
+  if (!Array.isArray(sizes) || sizes.length > 2048 || sizes.some(size =>
+    !Number.isSafeInteger(size) || size <= 0 || size > 1024 * 1024 * 1024)) {
+    return res.status(400).json({ error: 'Expected up to 2048 file sizes' })
+  }
+  try {
+    const { candidateOriginalSizes } = require('../phoneFileMatch')
+    const candidates = await boundedFileCheck(res, check => candidateOriginalSizes(getDB(), sizes, { check }), 15000)
+    if (!res.destroyed) res.set('Cache-Control', 'private, no-store').json({ sizes: candidates })
+  } catch {
+    if (!res.destroyed) res.status(503).json({ error: 'Desktop file-size check did not finish. Reconnect and retry.' })
+  }
+})
+
+router.post('/files/match', async (req, res) => {
+  if (!pairedUser(req, res)) return
+  const items = req.body?.items
+  if (!Array.isArray(items) || items.length > 32 || items.some(item =>
+    !item || !Number.isSafeInteger(item.size) || item.size <= 0 || item.size > 1024 * 1024 * 1024 ||
+    typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(item.sha256))) {
+    return res.status(400).json({ error: 'Expected up to 32 audio fingerprints' })
+  }
+  try {
+    const { resolvePhoneFiles } = require('../phoneFileMatch')
+    const matches = await boundedFileCheck(res, check => resolvePhoneFiles(getDB(), items, { check }), 25000)
+    // Preview must not probe metadata or rebuild artwork before responding.
+    if (!res.destroyed) res.set('Cache-Control', 'private, no-store').json({ matches })
+  } catch {
+    if (!res.destroyed) res.status(503).json({ error: 'Desktop content check did not finish. Reconnect and retry.' })
+  }
 })
 
 router.get('/files/:trackId', (req, res) => {
