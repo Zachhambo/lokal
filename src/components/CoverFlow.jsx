@@ -1,10 +1,10 @@
 // Desktop port of Lokal Mobile's iTunes-style Cover Flow.
 // Inner-edge hinges, outer-edge-forward panels, tight stacking and smooth dragging.
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { animate, motion, useMotionValue, useMotionValueEvent, useReducedMotion, useTransform } from 'framer-motion'
+import { animate, motion, useMotionValue, useMotionValueEvent, useTransform } from 'framer-motion'
 import { trackArtURL, trackFullArtURL } from '../onlineTracks'
 import { usePerformanceMode } from '../performanceMode'
-import { clampIndex, flowCoverGeometry, flowIndexAt, flowDrag, flowCoastPlan, flowEaseOut, flowPixelsPerCover, flowReleaseVelocity, flowVisibleRange } from '../coverFlowGeometry.mjs'
+import { clampIndex, flowCoverGeometry, flowIndexAt, flowDrag, flowCoastPlan, flowEaseOut, flowPixelsPerCover, flowReleaseVelocity, flowVisibleRange, FLOW_PERSPECTIVE, FLOW_VANISH_Y } from '../coverFlowGeometry.mjs'
 
 const MAX_SIZE = 320 // 45% larger than the original 220px covers; still responsive
 const DRAG_THRESHOLD = 6
@@ -50,8 +50,14 @@ const FlowCover = React.memo(function FlowCover({
 }) {
   const geometry = useTransform(position, p => flowCoverGeometry(index - p, size, reduced))
   const transform = useTransform([geometry, flip], ([g, f]) =>
-    'translate3d(' + g.x + 'px,0,0) perspective(' + (size * 5) +
-    'px) translateZ(' + g.depth + 'px) rotateY(' + (g.angle + (flipTarget ? f * 180 : 0)) + 'deg)')
+    // The translated 3D panel must be INSIDE perspective division; otherwise
+    // the outer and inner edges cannot reproduce the tapered iTunes triangles.
+    // Shifting the vanishing point slightly below center produces the
+    // reference's unequal top/bottom diagonal slopes.
+    'translateY(' + (size * FLOW_VANISH_Y) + 'px) perspective(' +
+    (size * FLOW_PERSPECTIVE) + 'px) translate3d(' + g.x + 'px,' +
+    (-size * FLOW_VANISH_Y) + 'px,' + g.depth + 'px) rotateY(' +
+    (g.angle + (flipTarget ? f * 180 : 0)) + 'deg)')
   const origin = useTransform(geometry, g => g.pivot + '% 50%')
   const opacity = useTransform(geometry, g => g.opacity)
   const zIndex = useTransform(position, p => 100 - Math.round(Math.abs(index - p) * 10))
@@ -66,13 +72,7 @@ const FlowCover = React.memo(function FlowCover({
       onContextMenu={e => onContextMenu?.(e, pick.track)}
       aria-label={'Play ' + pick.track.title + ' by ' + pick.track.artist}
       className="absolute inset-0 overflow-hidden rounded-md bg-card outline-none shadow-[0_18px_40px_rgba(0,0,0,0.45)] focus-visible:ring-2 focus-visible:ring-accent"
-      style={{
-        backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-        // Chromium/Electron creates this reflection from the same GPU layer,
-        // rather than decoding/masking a second image for each visible cover.
-        WebkitBoxReflect: reduced || !artwork ? 'unset'
-          : 'below ' + (size * 0.005) + 'px linear-gradient(to bottom,rgba(0,0,0,.42),transparent 88%)',
-      }}>
+      style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
       {artwork ? <FlowArtwork track={pick.track} highRes={highRes} /> :
         <span className="flex h-full w-full items-center justify-center text-5xl text-muted">♪</span>}
     </button>
@@ -92,9 +92,9 @@ const FlowCover = React.memo(function FlowCover({
 })
 
 export default function CoverFlow({ picks, onPlay, onContextMenu }) {
-  const reduceMotion = !!useReducedMotion()
-  const performanceMode = usePerformanceMode()
-  const reduced = reduceMotion || performanceMode
+  // Home presentation is chosen explicitly in Lokal Appearance settings.
+  // The OS reduced-motion preference never silently disables 3D Cover Flow.
+  const reduced = usePerformanceMode()
   const count = picks.length
   // Start in the middle of the shelf, including on its first painted frame.
   const middleIndex = Math.floor(count / 2)
@@ -119,7 +119,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
   const [flipped, setFlipped] = useState(false)
   const current = picks[clampIndex(activeIndex, count)] || picks[0]
   // Move the render window only every few covers; avoids repeatedly mounting
-  // new image/reflection trees while a fling crosses each item boundary.
+  // artwork trees while a fling crosses each item boundary.
   const visible = flowVisibleRange(renderCenter, count)
   const handlers = useRef(null)
   const warmed = useRef(new Map())
@@ -338,8 +338,10 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
         const rect = e.currentTarget.getBoundingClientRect()
         select(flowIndexAt(e.clientX - rect.left, rect.width, size, position.get(), count, reduced))
       }}
+      // Leave equal vertical clearance for the perspective-rotated covers,
+      // without a large unused area below the stage.
       className="relative isolate cursor-grab select-none overflow-hidden bg-black outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-accent/40"
-      style={{ height: size * 1.54, marginLeft: -bleed.left, marginRight: -bleed.right, touchAction: 'pan-y' }}>
+      style={{ height: size * 1.36, marginLeft: -bleed.left, marginRight: -bleed.right, touchAction: 'pan-y' }}>
       {picks.slice(visible.start, visible.end).map((pick, offset) => {
         const index = visible.start + offset
         return <FlowCover key={pick.track.id}
