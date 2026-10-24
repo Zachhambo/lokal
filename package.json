@@ -1,13 +1,13 @@
 {
   "name": "lokal-music",
-  "version": "10.0.2",
+  "version": "11.1.1",
   "description": "Local-first music player built w/ Electron and React. Designed for people with large local music libraries who'd like a modern listening experience w/o the burdens of streaming subscriptions.",
   "author": "sipbuu <97703296+sipbuu@users.noreply.github.com>",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "dev:web": "concurrently \"vite\" \"node server/start.js\"",
-    "build": "vite build && npm run native:prepare && electron-builder",
+    "dev": "npm run gen:icons && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:web": "npm run gen:icons && concurrently \"vite\" \"node server/start.js\"",
+    "build": "npm run gen:icons && vite build && npm run native:prepare && electron-builder",
     "server": "node server/start.js",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "rebuild:electron": "electron-rebuild",
@@ -15,15 +15,23 @@
     "postinstall": "electron-builder install-app-deps && npm run native:prepare",
     "native:prepare": "node scripts/prepare-native.js",
     "test:home-greeting": "node --test scripts/home-greeting.test.mjs",
+    "test:home-cover-flow": "node --test scripts/cover-flow.test.mjs",
     "test:artwork-download": "node --test scripts/artwork-download.test.mjs",
     "test:artist-roles": "node --test scripts/artist-roles.test.mjs",
     "test:artist-search-keys": "node --test scripts/artist-search-result-keys.test.mjs",
-    "test:ported": "node --test scripts/artist-metadata-rescan.test.mjs scripts/artist-split.test.mjs scripts/cover-mix.test.mjs scripts/download-addon-pacing.test.mjs scripts/genre-cleanup.test.mjs scripts/genre-playlist.test.mjs scripts/file-tags.test.mjs scripts/library-folder-view.test.mjs scripts/library-folder-operations.test.mjs scripts/library-watch.test.mjs scripts/video-section-dedupe.test.mjs scripts/pr222-regression.test.mjs scripts/online-browse.test.mjs scripts/release-types.test.mjs scripts/replaygain.test.mjs scripts/review-fixes.test.mjs scripts/yandex-music-package.test.mjs scripts/issue-458-regression.test.mjs scripts/mpris-config.test.mjs scripts/file-artwork.test.mjs scripts/artwork-download.test.mjs scripts/artist-roles.test.mjs scripts/fullscreen-visualizer-settings.test.mjs",
+    "test:ported": "node --test scripts/artist-metadata-rescan.test.mjs scripts/artist-split.test.mjs scripts/cover-mix.test.mjs scripts/download-addon-pacing.test.mjs scripts/genre-cleanup.test.mjs scripts/genre-playlist.test.mjs scripts/file-tags.test.mjs scripts/library-folder-view.test.mjs scripts/library-folder-operations.test.mjs scripts/library-watch.test.mjs scripts/video-section-dedupe.test.mjs scripts/pr222-regression.test.mjs scripts/online-browse.test.mjs scripts/release-types.test.mjs scripts/replaygain.test.mjs scripts/review-fixes.test.mjs scripts/yandex-music-package.test.mjs scripts/issue-458-regression.test.mjs scripts/mpris-config.test.mjs scripts/file-artwork.test.mjs scripts/artwork-download.test.mjs scripts/artist-roles.test.mjs scripts/fullscreen-visualizer-settings.test.mjs scripts/fullscreen-appearance.test.mjs scripts/fullscreen-lyrics-layout.test.mjs scripts/cover-flow.test.mjs",
+    "test:phone-copy": "node --test scripts/phone-file-naming.test.mjs scripts/phone-file-legacy-migration.test.mjs scripts/phone-copy-integrity.test.mjs",
+    "test:atmos": "node --test scripts/tidal-atmos-metadata.test.mjs scripts/atmos-output.test.mjs scripts/atmos-transfer-progress.test.mjs scripts/atmos-library-quality.test.mjs",
+    "test:loading-toasts": "node --test scripts/loading-toast-progress.test.mjs scripts/stream-buffer-progress.test.mjs scripts/recommendations.test.mjs scripts/recommendation-downloads.test.mjs scripts/ghost-downloads.test.mjs",
+    "test:catalogue-quality": "node --test scripts/catalogue-quality.test.mjs",
     "test:mpris": "node --test scripts/mpris-config.test.mjs",
     "test:added-date": "node --test scripts/added-date.test.mjs",
     "test:download-folder": "node --test scripts/download-folder.test.mjs",
     "test:visualizer-analyser-startup": "node --test scripts/visualizer-analyser-startup.test.mjs",
-    "test:fullscreen-visualizer-settings": "node --test scripts/fullscreen-visualizer-settings.test.mjs"
+    "test:fullscreen-visualizer-settings": "node --test scripts/fullscreen-visualizer-settings.test.mjs",
+    "test:fullscreen-appearance": "node --test scripts/fullscreen-appearance.test.mjs scripts/fullscreen-lyrics-layout.test.mjs",
+    "gen:icons": "node scripts/generate-brand-icons.cjs",
+    "test:brand-icons": "node --test scripts/brand-icons.test.cjs"
   },
   "build": {
     "appId": "com.lokal.music",
@@ -37,7 +45,8 @@
       "public/remote.html",
       "public/remote-manifest.json",
       "public/remote-sw.js",
-      "public/lokal-icon.png"
+      "public/lokal-icon.png",
+      "public/lokal-icon-rounded.png"
     ],
     "extraResources": [
       {
@@ -128,7 +137,7 @@
       ]
     },
     "mac": {
-      "icon": "public/lokal-icon.png",
+      "icon": "public/lokal-icon-rounded.png",
       "target": [
         "dmg",
         "zip"
@@ -136,7 +145,7 @@
       "category": "public.app-category-music"
     },
     "linux": {
-      "icon": "public/lokal-icon.png",
+      "icon": "public/lokal-icon-rounded.png",
       "target": [
         "AppImage",
         "deb"

@@ -41,6 +41,7 @@ const { setRemoteState, setRemoteCommandHandler, getRemoteConnectionInfo } = req
 const { updateThumbarButtons, registerThumbarHandlers } = require('./ipc/thumbar')
 const { registerSmtcHandlers, updateSmtcState, stopSmtcBridge } = require('./ipc/smtc')
 const { registerOnlineHandlers, registerStreamScheme, registerStreamProtocol } = require('./ipc/online')
+const { registerAtmosHandlers } = require('./audio/atmos')
 const { registerSpotifyLikesHandlers } = require('./ipc/spotifyLikes')
 const { registerAutomixHandlers } = require('./ipc/automix')
 const { registerFlowHandlers } = require('./ipc/flow')
@@ -333,8 +334,8 @@ const trayImage = image => image.resize(process.platform === 'win32' ? { width: 
 function loadTrayIcon() {
   if (accentIcon) return accentIcon
   const filenames = process.platform === 'win32'
-    ? ['lokal-icon.ico', 'lokal-icon.png']
-    : ['lokal-icon.png', 'lokal-icon.ico']
+    ? ['lokal-icon.ico', 'lokal-icon-rounded.png']
+    : ['lokal-icon-rounded.png', 'lokal-icon.ico']
   const roots = app.isPackaged
     ? [path.join(app.getAppPath(), 'dist'), path.join(process.resourcesPath, 'app.asar', 'dist')]
     : [path.join(__dirname, '../public'), path.join(app.getAppPath(), 'dist')]
@@ -447,7 +448,7 @@ function setPreferredMediaKeys(enabled) {
 function createWindow() {
   const saved = loadWindowState()
   mainWindow = new BrowserWindow({
-    icon: path.join(__dirname, process.platform === 'win32' ? '../public/lokal-icon.ico' : '../public/lokal-icon.png'),
+    icon: path.join(__dirname, process.platform === 'win32' ? '../public/lokal-icon.ico' : '../public/lokal-icon-rounded.png'),
     ...(saved?.bounds || { width: 1400, height: 860 }), minWidth: NORMAL_MIN_WIDTH, minHeight: NORMAL_MIN_HEIGHT,
     useContentSize: true,
     resizable: true,
@@ -595,6 +596,16 @@ app.whenReady().then(() => {
   try { registerFollowedArtistsHandlers(ipcMain) } catch (e) { console.error('registerFollowedArtistsHandlers:', e.message) }
   try { registerCacheHandlers(ipcMain) } catch (e) { console.error('registerCacheHandlers:', e.message) }
   try { registerOnlineHandlers(ipcMain) } catch (e) { console.error('registerOnlineHandlers:', e.message) }
+  try {
+    registerAtmosHandlers(ipcMain, {
+      getDB,
+      broadcast: (channel, payload) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send(channel, payload)
+        }
+      },
+    })
+  } catch (e) { console.error('registerAtmosHandlers:', e.message) }
   try { registerSpotifyLikesHandlers(ipcMain) } catch (e) { console.error('registerSpotifyLikesHandlers:', e.message) }
   try { registerAutomixHandlers(ipcMain) } catch (e) { console.error('registerAutomixHandlers:', e.message) }
   try { registerFlowHandlers(ipcMain) } catch (e) { console.error('registerFlowHandlers:', e.message) }

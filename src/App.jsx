@@ -14,6 +14,7 @@ import { MemoryRouter as Router, Routes, Route, Navigate, useLocation, useNaviga
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import Sidebar from './components/Sidebar'
 import PlayerBar from './components/PlayerBar'
+import AtmosTransport from './components/AtmosTransport'
 import TitleBar from './components/TitleBar'
 import { usePageWidth } from './pageWidth'
 import RightSidebar from './components/RightSidebar'
@@ -60,6 +61,7 @@ import { handleStationTitle, resetStationDisplay } from './radio/radioNowPlaying
 import { radioBufferSeconds, useRadioStore } from './store/radio'
 import { createDiscordPublisher } from './discord'
 import Toaster, { showLoadingToast, showToast } from './components/Toaster'
+import StreamLoadingToast from './components/StreamLoadingToast'
 import ReleaseRefreshBanner from './components/ReleaseRefreshBanner'
 import { PageReadyContext, PageShownContext, PAGE_READY_TIMEOUT_MS } from './pageCache'
 import { audioSrcFor, isAddonProvider, providerLabel, streamRef } from './onlineTracks'
@@ -405,6 +407,7 @@ export default function App() {
     recovery.pending = true
     recovery.failed.push(failedRef.provider)
     el.dataset.fallbackPending = '1'
+    el.dataset.fallbackRecoveryPending = '1'
     clearInterval(playTimerRef.current)
     playTimerRef.current = null
     el.pause()
@@ -440,6 +443,7 @@ export default function App() {
       toast.close()
       recovery.pending = false
       el.dataset.fallbackPending = ''
+      el.dataset.fallbackRecoveryPending = ''
     }
   }, [reportPlaybackError])
 
@@ -510,7 +514,8 @@ export default function App() {
   // own pauses go through the store, not through these events.
   // Online radio: the radio player pauses the element itself while it
   // reconnects; a real pause goes through the store (play/pause, media keys).
-  const ignoreElementPause = (el) => !!el?.error || el?.readyState === 0 || el?.dataset.fallbackPending === '1' || isStationTrack(usePlayerStore.getState().currentTrack)
+  const ignoreElementPause = (el) => !!el?.error || el?.readyState === 0 || el?.dataset.fallbackPending === '1' ||
+    usePlayerStore.getState().currentTrack?.atmosNative || isStationTrack(usePlayerStore.getState().currentTrack)
   const smtcKeepAliveRef = useRef(null)
   const gainNodeRef = useRef(null)
   const cfGainNodeRef = useRef(null)
@@ -1392,16 +1397,26 @@ export default function App() {
       } catch {}
     }
     navigator.mediaSession.setActionHandler('play', () => {
-      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(true); return }
+      const state = usePlayerStore.getState()
+      if (state.currentTrack?.atmosNative) {
+        if (!state.isPlaying) state.togglePlay()
+        return
+      }
+      if (state.castActive) { state.setIsPlaying(true); return }
       const activeEl = getActiveAudio()
       activeEl?.play()
     })
     navigator.mediaSession.setActionHandler('pause', () => {
-      if (usePlayerStore.getState().castActive) { usePlayerStore.getState().setIsPlaying(false); return }
+      const state = usePlayerStore.getState()
+      if (state.currentTrack?.atmosNative) {
+        if (state.isPlaying) state.togglePlay()
+        return
+      }
+      if (state.castActive) { state.setIsPlaying(false); return }
       const activeEl = getActiveAudio()
       activeEl?.pause()
       // Record explicit pauses even when a source is failing or being swapped.
-      usePlayerStore.getState().setIsPlaying(false)
+      state.setIsPlaying(false)
     })
     navigator.mediaSession.setActionHandler('seekto', (details) => {
       if (isStationTrack(usePlayerStore.getState().currentTrack)) return
@@ -1790,6 +1805,7 @@ export default function App() {
         el.dataset.fallbackFor = ''
         el.dataset.fallbackSrc = ''
         el.dataset.fallbackPending = ''
+        el.dataset.fallbackRecoveryPending = ''
       }
       const retryQueue = Array.isArray(queue) && queue.some(item => item?.id === retryTrack.id)
         ? queue.map(item => item?.id === retryTrack.id ? retryTrack : item)
@@ -2491,6 +2507,17 @@ export default function App() {
       else return
     }
 
+    if (currentTrack?.atmosNative) {
+      // Native Dolby playback owns the output. The regular React player still
+      // owns the queue/UI, but Chromium must never decode these JOC frames
+      // into PCM or play a second track over the exclusive HDMI endpoint.
+      for (const element of [audioRef.current, cfAudioRef.current]) {
+        if (!element) continue
+        try { element.pause(); element.removeAttribute('src'); element.load() } catch {}
+      }
+      return
+    }
+
     if (castActive) {
       // Casting: the TV plays. Both players are parked, so nothing here makes
       // a sound (a stray play() has no source to play).
@@ -2652,7 +2679,7 @@ export default function App() {
     }
     start()
     return () => { cancelled = true; el.dataset.fallbackPending = ''; el.dataset.lokalTrackPending = '' }
-  }, [currentTrack?.id, currentTrack?.file_path, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
+  }, [currentTrack?.id, currentTrack?.file_path, currentTrack?.atmosNative, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
 
   useEffect(() => {
     if (!api.isElectron) return
@@ -2670,6 +2697,7 @@ export default function App() {
   useEffect(() => {
     if (isCrossfadingRef.current) return
     if (!audioRef.current || !cfAudioRef.current) return
+    if (usePlayerStore.getState().currentTrack?.atmosNative) return // native Atmos owns output
     if (usePlayerStore.getState().castActive) return // the TV plays (src/cast/useCastPlayback.js)
     
     const activeSide = usePlayerStore.getState().activeAudioElement
@@ -3176,6 +3204,7 @@ export default function App() {
               {!exclusiveSidePanels && <LyricsSidePanel />}
             </div>
             <PlayerBar />
+            <AtmosTransport />
             {/* Also full-screen lyrics: one overlay, two layouts. */}
             <FullscreenPlayer />
             <FullscreenVisualizer />
@@ -3205,6 +3234,7 @@ export default function App() {
             {renderYtDlpNotice()}
             {renderUpdateToast()}
             <Toaster />
+            <StreamLoadingToast />
             <AnimatePresence>
               {addonVerificationPrompt && (
                 <motion.div

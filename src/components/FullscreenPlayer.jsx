@@ -22,6 +22,8 @@ import { contextLabel, isContextNavigable, navigateToContext } from '../playback
 import { trackArtURL, trackFullArtURL } from '../onlineTracks'
 import { useVolumeWheel } from '../volumeWheel'
 import { usePerformanceMode } from '../performanceMode'
+import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
+import { computeFullscreenLyricsExpansion } from '../fullscreenLyricsLayout.mjs'
 
 // The cover's size (square), and the lyrics/queue panel's width beside it.
 const COVER_SIZE = 'min(60rem, 78vh, calc(100vw - 8rem), calc(110vh - 25rem))'
@@ -230,6 +232,17 @@ function SearchDrawer({ track, onClose, onSelect }) {
   )
 }
 
+// React owns the fallback so a same-ID artwork update can retry the original.
+function FullscreenStillArtwork({ track }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [track])
+  const full = trackFullArtURL(track) || trackArtURL(track)
+  const fallback = trackArtURL(track)
+  return <img src={failed ? fallback : full}
+    onError={() => { if (!failed && fallback && fallback !== full) setFailed(true) }}
+    className="absolute inset-0 w-full h-full object-cover" alt="" />
+}
+
 export default function FullscreenPlayer() {
   const performanceMode = usePerformanceMode()
   const { t } = useTranslation()
@@ -272,6 +285,9 @@ export default function FullscreenPlayer() {
   const [bgLoaded, setBgLoaded] = useState(false)
   const backdropFx = useArtworkBackdropEnabled()
   const [fsCanvas, setFsCanvas] = useState(false)
+  const [squareMotionActive, setSquareMotionActive] = useState(false)
+  const [windowHidden, setWindowHidden] = useState(isWindowHidden)
+  useEffect(() => onWindowVisibility(setWindowHidden), [])
   // Turned off for this song from the side panel.
   const [coverOff, setCoverOff] = useMotionCoverOff(currentTrack)
   // Whether the song has a Canvas / moving cover (asked even while it's
@@ -306,8 +322,63 @@ export default function FullscreenPlayer() {
   const lyricsMode = showLyricsFullscreen
   // Reduced motion: the views just crossfade (the cover doesn't fly).
   const reduceMotion = useReducedMotion()
+  const rotatingCd = settings.fullscreen_rotating_cd === '1' && !performanceMode && !reduceMotion
+  // A playing Canvas or animated album clip always takes priority over spinning artwork.
+  const spinCd = rotatingCd && !fsCanvas && !squareMotionActive
+  const animationRunning = showFullscreen && !lyricsMode && isPlaying && !windowHidden
   const playerLayerRef = useRef(null)
   const coverRef = useRef(null)
+  const coverStageRef = useRef(null)
+  const lyricsPanelRef = useRef(null)
+  const [lyricsLeftExpansion, setLyricsLeftExpansion] = useState(0)
+
+  // The previous 18–32px negative margin barely affected the real artwork-to-
+  // lyrics gap, and LyricsPanel's centred max-width cancelled part of it.
+  // Measure the *untransformed* square artwork's right edge and the panel's
+  // fixed left edge, then extend just the lyrics content 40% into that gap.
+  // A separate width option in LyricsPanel removes the internal max-width;
+  // no textScale, cover position or panel right edge is changed.
+  useLayoutEffect(() => {
+    if (!showFullscreen || fullscreenPanel !== 'lyrics') {
+      setLyricsLeftExpansion(value => value === 0 ? value : 0)
+      return undefined
+    }
+    const stage = coverStageRef.current
+    const cover = coverRef.current
+    const panel = lyricsPanelRef.current
+    if (!stage || !cover || !panel) return undefined
+
+    const measure = () => {
+      // offsetLeft/offsetWidth ignore the cover's entrance and pointer-tilt
+      // transforms; its bounding rect would otherwise make the text jitter.
+      const coverRight = stage.getBoundingClientRect().left + cover.offsetLeft + cover.offsetWidth
+      const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16
+      const lyricRow = panel.querySelector('[data-lyrics-auto-follow] [data-row] > div')
+      const rowPadding = lyricRow && Number.parseFloat(window.getComputedStyle(lyricRow).paddingLeft)
+      // LyricsPanel uses px-6 (1.5rem); the rows add their own inset.
+      const textInset = rootFontSize * 1.5 + (Number.isFinite(rowPadding) ? rowPadding : rootFontSize * 0.83)
+      const next = computeFullscreenLyricsExpansion({
+        panelLeft: panel.getBoundingClientRect().left,
+        coverRight,
+        textInset,
+      })
+      setLyricsLeftExpansion(value => value === next ? value : next)
+    }
+
+    let frame = 0
+    const scheduleMeasure = () => {
+      if (!frame) frame = window.requestAnimationFrame(() => { frame = 0; measure() })
+    }
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleMeasure) : null
+    for (const node of [stage, cover, panel]) observer?.observe(node)
+    window.addEventListener('resize', scheduleMeasure)
+    measure()
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', scheduleMeasure)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [showFullscreen, fullscreenPanel, currentTrack?.id])
   useEffect(() => {
     if (playerLayerRef.current) playerLayerRef.current.inert = lyricsMode
   }, [lyricsMode, open])
@@ -315,8 +386,8 @@ export default function FullscreenPlayer() {
   // coverFlight): a copy of it moves while the real ones stay hidden until it
   // lands. With a canvas playing, the copy keeps playing it and turns into
   // the cover on the way (the header shows the cover), without stretching
-  // from the card's 9:16 into the square. Both views are always laid out
-  // (just faded), so both ends can be measured right away.
+  // between aspect ratios: Spotify Canvas is cropped to the square card.
+  // Both views are always laid out (just faded) for correct measurements.
   const flightRef = useRef(null)
   const prevModeRef = useRef(null)
   useLayoutEffect(() => {
@@ -378,8 +449,12 @@ export default function FullscreenPlayer() {
   // and lyrics kept using whatever value was cached at launch. Re-fetching
   // whenever the overlay actually opens picks up the current saved value.
   useEffect(() => {
-    if (!showFullscreen) return
-    api.getSettings().then(s => setSettings(s || {}))
+    if (!showFullscreen) return undefined
+    let active = true
+    const refresh = () => api.getSettings().then(s => { if (active) setSettings(s || {}) }).catch(() => {})
+    refresh()
+    window.addEventListener('lokal:settings-saved', refresh)
+    return () => { active = false; window.removeEventListener('lokal:settings-saved', refresh) }
   }, [showFullscreen])
 
   // Leaving fullscreen only fades the *outer* overlay out over its own
@@ -756,7 +831,7 @@ export default function FullscreenPlayer() {
           {/* The cover, with the controls over it (shown while the pointer is
               on it), then the progress, the title and the artist. Clear of
               the header, so a tall canvas doesn't run into "Playing from". */}
-          <div className={`relative z-10 flex flex-col items-center justify-center flex-1 min-w-0 px-12 pt-24 pb-12 ${showFullscreen ? 'transition-all duration-500' : ''}`}>
+          <div ref={coverStageRef} className={`relative z-10 flex flex-col items-center justify-center flex-1 min-w-0 px-12 pt-24 pb-12 ${showFullscreen ? 'transition-all duration-500' : ''}`}>
             {/* One card for every song (never swapped, so never waiting on an
                 exit while the window is minimized): the artwork changes inside
                 it (MixCovers: AutoMix's cloudy dissolve, else a short fade). */}
@@ -804,21 +879,27 @@ export default function FullscreenPlayer() {
                     </div>
                   )}
                   <div
-                    className="fullscreen-cover-surface relative flex flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-[0_32px_80px_rgba(0,0,0,0.8)]"
+                    className={`fullscreen-cover-surface relative flex flex-shrink-0 items-center justify-center overflow-hidden ${spinCd ? 'rounded-full border border-transparent bg-transparent shadow-none' : 'rounded-2xl border border-white/10 bg-white/5 shadow-[0_32px_80px_rgba(0,0,0,0.8)]'}`}
                     style={fsCanvas
                       ? { height: 'min(38rem, 62vh)', aspectRatio: '9 / 16', transition: 'height 420ms ease' }
                       : { width: coverSize, height: coverSize }}
                   >
-                    {artSrc
-                      ? <MixCovers track={currentTrack} render={(track, { top }) => (
-                          <>
-                            <img src={trackArtURL(track)} className="absolute inset-0 w-full h-full object-cover" alt="" />
-                            <MotionCover trackId={track?.id} only="square" off={coverOff} />
-                            <MotionCover trackId={track?.id} only="tall" onActive={top ? setFsCanvas : undefined} off={coverOff} />
-                          </>
-                        )} />
-                      : <span className="text-white/10 text-7xl">♪</span>
-                    }
+                    <div className={spinCd ? 'absolute inset-0 fullscreen-cd-disc' : 'absolute inset-0'}
+                      style={spinCd ? { animationPlayState: animationRunning ? 'running' : 'paused' } : undefined}>
+                      <div className={spinCd ? 'fullscreen-cd-artwork absolute inset-0' : 'absolute inset-0'}>
+                        {artSrc
+                          ? <MixCovers track={currentTrack} render={(track, { top }) => (
+                              <>
+                                <FullscreenStillArtwork track={track} />
+                                {top && <MotionCover trackId={track?.id} only="square" onActive={setSquareMotionActive} off={coverOff} />}
+                                {top && <MotionCover trackId={track?.id} only="tall" onActive={setFsCanvas} off={coverOff} />}
+                              </>
+                            )} />
+                          : <span className="absolute inset-0 flex items-center justify-center text-white/10 text-7xl">♪</span>
+                        }
+                      </div>
+                      {spinCd && <div className="fullscreen-cd-hole-outline" aria-hidden="true" />}
+                    </div>
                     <div className="fullscreen-cover-highlight absolute inset-0 pointer-events-none" />
                     {currentTrack && (
                       <div className={`absolute right-4 top-1/2 z-10 -translate-y-1/2 ${COVER_FADE}`}>
@@ -872,7 +953,8 @@ export default function FullscreenPlayer() {
               // happen to exist; with lyrics missing, the panel shows its own
               // "no lyrics" state and search, same as windowed mode.
               <div
-                className={`relative z-10 flex flex-col overflow-hidden pt-24 pb-10 ${showFullscreen ? 'transition-all duration-500' : ''} ${isPanelVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                ref={lyricsPanelRef}
+                className={`relative z-10 flex flex-col ${isPanelVisible && fullscreenPanel === 'lyrics' ? 'overflow-visible' : 'overflow-hidden'} pt-24 pb-10 ${showFullscreen ? 'transition-all duration-500' : ''} ${isPanelVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
                 style={{ width: isPanelVisible ? PANEL_WIDTH : '0px' }}
               >
                 {(fullscreenPanel !== 'none' ? fullscreenPanel : lastPanelRef.current) === 'queue' ? (
@@ -887,7 +969,7 @@ export default function FullscreenPlayer() {
                         <Search size={15} />
                       </button>
                     </div>
-                    <div className="flex-1 min-h-0 pr-6">
+                    <div className="flex-1 min-h-0 pr-6" style={{ marginLeft: -lyricsLeftExpansion, width: `calc(100% + ${lyricsLeftExpansion}px)` }}>
                       <LyricsPanel
                         key={`${currentTrack?.id}-${refreshKey}`}
                         track={currentTrack}
@@ -897,6 +979,7 @@ export default function FullscreenPlayer() {
                         wordSync={wordSync}
                         onSearchRequest={() => setShowSearch(true)}
                         textScale={1.6}
+                        stretchFullscreenWidth
                         toolbarHidden={chromeHidden}
                         isAutoSynced={isAutoSynced}
                       />

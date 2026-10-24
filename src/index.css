@@ -395,3 +395,47 @@ html.performance-mode *::after {
   -webkit-backdrop-filter: none !important;
   filter: none !important;
 }
+
+
+/* Fullscreen CD details follow the reference: hairline white outer rim,
+   white label ring and a real see-through spindle opening. */
+@keyframes fullscreen-cd-rotation { to { transform: rotate(360deg); } }
+.fullscreen-cd-disc {
+  border-radius: 50%;
+  animation: fullscreen-cd-rotation 24s linear infinite;
+}
+.fullscreen-cd-artwork {
+  border-radius: 50%;
+  overflow: hidden;
+  /* Remove the center of the art, so the backdrop shows through like a CD hole. */
+  -webkit-mask-image: radial-gradient(circle at center, transparent 0 6.4%, #000 6.7% 100%);
+  mask-image: radial-gradient(circle at center, transparent 0 6.4%, #000 6.7% 100%);
+}
+.fullscreen-cd-disc::before,
+.fullscreen-cd-disc::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 50%;
+}
+.fullscreen-cd-disc::before {
+  inset: 0.5px;
+  border: 1.35px solid rgb(255 255 255 / 0.85);
+}
+.fullscreen-cd-disc::after {
+  inset: 38.2%;
+  border: 1.5px solid rgb(255 255 255 / 0.82);
+}
+.fullscreen-cd-hole-outline {
+  position: absolute;
+  inset: 43.2%;
+  z-index: 6;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fullscreen-cd-disc { animation: none !important; }
+}
