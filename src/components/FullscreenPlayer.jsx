@@ -1,7 +1,7 @@
 import { useTranslation } from '../i18n'
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Volume2, Film, Clapperboard, Gamepad2, Image as ImageIcon } from 'lucide-react'
+import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Film, Clapperboard, Gamepad2, Image as ImageIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -20,7 +20,6 @@ import LyricsFullscreen, { FULLSCREEN_SWITCH, FULLSCREEN_IN, FULLSCREEN_OUT } fr
 import { api, wordSyncEnabled } from '../api'
 import { contextLabel, isContextNavigable, navigateToContext } from '../playbackContext'
 import { trackArtURL, trackFullArtURL } from '../onlineTracks'
-import { useVolumeWheel } from '../volumeWheel'
 import { usePerformanceMode } from '../performanceMode'
 import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
 import { computeFullscreenLyricsExpansion } from '../fullscreenLyricsLayout.mjs'
@@ -62,46 +61,6 @@ function CoverIcon({ onClick, label, pressed, dim = false, children }) {
       className={`flex items-center justify-center transition-[color,transform] hover:scale-105 active:scale-95 drop-shadow-[0_2px_8px_rgba(0,0,0,0.45)] ${dim ? 'text-white/60 hover:text-white' : 'text-white/90 hover:text-white'}`}>
       {children}
     </button>
-  )
-}
-
-/** Volume as a slim glass pill up the cover's edge: drag (or click) along it. */
-function VolumePill({ volume, onChange }) {
-  const { t } = useTranslation()
-  const ref = useRef(null)
-  const volumeWheelRef = useVolumeWheel(volume, onChange)
-  const attachRef = useCallback(element => {
-    ref.current = element
-    volumeWheelRef(element)
-  }, [volumeWheelRef])
-  const setFrom = (clientY) => {
-    const r = ref.current?.getBoundingClientRect()
-    if (!r) return
-    onChange(Math.max(0, Math.min(1, (r.bottom - clientY) / r.height)))
-  }
-  const start = (event) => {
-    event.preventDefault()
-    setFrom(event.clientY)
-    const move = e => setFrom(e.clientY)
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-  const keys = (event) => {
-    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(1, volume + 0.05)) }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') { event.preventDefault(); onChange(Math.max(0, volume - 0.05)) }
-  }
-  // The speaker sits inside the pill, at its foot: dark over the white fill,
-  // light over the glass.
-  const covered = volume > 0.12
-  return (
-    <div ref={attachRef} role="slider" tabIndex={0} aria-label={t("Volume")} aria-orientation="vertical"
-      aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(volume * 100)} title={`Volume ${Math.round(volume * 100)}%`}
-      onPointerDown={start} onKeyDown={keys}
-      className={`relative h-44 w-7 cursor-pointer overflow-hidden rounded-full border border-white/[0.14] bg-white/[0.06] backdrop-blur-[2px] drop-shadow-[0_1px_4px_rgba(0,0,0,0.3)] outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${COVER_FADE}`}>
-      <div className="absolute inset-x-0 bottom-0 bg-white/60" style={{ height: `${Math.round(volume * 100)}%` }} />
-      <Volume2 size={13} className={`pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 ${covered ? 'text-black/55' : 'text-white/80'}`} />
-    </div>
   )
 }
 
@@ -249,30 +208,30 @@ export default function FullscreenPlayer() {
   const {
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
     showFullscreenVisualizer, setShowFullscreenVisualizer,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
     likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    playbackContext,
   } = usePlayerStore(useShallow(({
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
     showFullscreenVisualizer, setShowFullscreenVisualizer,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
     likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    playbackContext,
   }) => ({
     showFullscreen, toggleFullscreen, currentTrack, isPlaying,
     showFullscreenVisualizer, setShowFullscreenVisualizer,
-    progress, duration, volume, shuffle, repeat,
+    progress, duration, shuffle, repeat,
     showLyricsFullscreen, toggleLyricsFullscreen, switchFullscreenView,
     togglePlay, next, prev, setProgress, toggleShuffle, toggleRepeat,
     likedIds, setLiked,
     audioRef, cfAudioRef, activeAudioElement,
-    playbackContext, setVolume,
+    playbackContext,
   })))
   const { user, openAddToPlaylist } = useAppStore()
   const nav = useNavigate()
@@ -901,11 +860,6 @@ export default function FullscreenPlayer() {
                       {spinCd && <div className="fullscreen-cd-hole-outline" aria-hidden="true" />}
                     </div>
                     <div className="fullscreen-cover-highlight absolute inset-0 pointer-events-none" />
-                    {currentTrack && (
-                      <div className={`absolute right-4 top-1/2 z-10 -translate-y-1/2 ${COVER_FADE}`}>
-                        <VolumePill volume={volume} onChange={setVolume} />
-                      </div>
-                    )}
                   </div>
                   <div className={`flex items-center justify-center gap-8 pt-3 ${COVER_FADE}`}>
                     <CoverIcon onClick={toggleShuffle} label={t("Shuffle")} pressed={shuffle} dim={!shuffle}>
