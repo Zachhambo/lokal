@@ -266,6 +266,9 @@ export default function Settings() {
   const panelFreeform = usePanelWidths(s => s.freeform)
   const setPanelFreeform = (freeform) => usePanelWidths.getState().set({ freeform })
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
+  const [autoplayEnabled, setAutoplayEnabled] = useState(() => {
+    try { return localStorage.getItem('lokal-autoplay') !== '0' } catch { return true }
+  })
   const playbackSpeed = usePlaybackSpeed(s => s.speed)
   const setPlaybackSpeed = usePlaybackSpeed(s => s.setSpeed)
   // Seeded from the settings already read (and the version / tools found on
@@ -1061,12 +1064,27 @@ export default function Settings() {
     else if (toolsErrorTool === 'ffmpeg') downloadFfmpegTool()
   }
 
-  const setCustomToolPath = async (tool) => {
-    const fp = await api.openFile()
-    if (fp) {
-      await api.setCustomToolPath(tool, fp)
-      api.getToolsStatus().then(setToolsStatus)
-    }
+  const setCustomToolPath = async (tool, reset = false) => {
+    if (toolsLoading) return
+    // The general image picker excludes executable files by default.
+    const fp = reset ? '' : await api.openFile({
+      filters: [{ name: 'Executables', extensions: ['exe', 'bin', 'sh', 'AppImage'] }, { name: 'All Files', extensions: ['*'] }],
+    })
+    if (!reset && !fp) return
+    setToolsLoading(true)
+    setToolsError('')
+    setToolsErrorTool(null)
+    try {
+      const result = await api.setCustomToolPath(tool, fp)
+      if (result?.error) {
+        setToolsError(`${tool}: ${result.error}`)
+        return
+      }
+      const status = await api.getToolsStatus()
+      if (status && !status.error) setToolsStatus(status)
+    } catch (error) {
+      setToolsError(`${tool}: ${error?.message || 'Could not select this executable'}`)
+    } finally { setToolsLoading(false) }
   }
 
   const handlePlatformFileSelect = async () => {
@@ -1602,6 +1620,15 @@ activeCategory === 'data' ? usersTried
 
       {inCategory('playback') && (
       <Section title={t("Playback")}>
+        <Row label={t("Autoplay")} desc={t("Play the next song automatically. Turn off to stop when the current song ends.")}>
+          <button type="button" aria-pressed={autoplayEnabled} onClick={() => {
+            const enabled = !autoplayEnabled
+            setAutoplayEnabled(enabled)
+            try { localStorage.setItem('lokal-autoplay', enabled ? '1' : '0') } catch {}
+          }} className="px-4 py-1.5 rounded-lg text-xs border border-border">
+            {autoplayEnabled ? t("On") : t("Off")}
+          </button>
+        </Row>
         <OutputPrecisionSettings />
         <Row label={t("ReplayGain")} desc={t("Use embedded ReplayGain tags to bring tracks closer in loudness. Smart gain uses album tags for album queues and track tags otherwise. Peak tags limit boosts; tracks without tags are unchanged.")}>
           <select aria-label={t("ReplayGain mode")} value={settings.replaygain_mode ?? replayGainMode ?? 'off'} onChange={e => set('replaygain_mode', e.target.value)}
@@ -1905,7 +1932,10 @@ activeCategory === 'data' ? usersTried
                 <button onClick={() => downloadYtDlpTool()} disabled={toolsLoading} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">
                   {toolsLoading ? progressLabel('yt-dlp') : toolsStatus?.ytdlp?.found ? t('Update / Re-download') : t('Download')}
                 </button>
-                <button onClick={() => setCustomToolPath('yt-dlp')} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white">{t("Custom Path")}</button>
+                <button onClick={() => setCustomToolPath('yt-dlp')} disabled={toolsLoading} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">{t("Custom Path")}</button>
+                {toolsStatus?.ytdlp?.customPath && (
+                  <button onClick={() => setCustomToolPath('yt-dlp', true)} disabled={toolsLoading} className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">{t("Automatic")}</button>
+                )}
               </div>
             </div>
             {toolsStatus?.ytdlp?.path && (
@@ -1924,7 +1954,10 @@ activeCategory === 'data' ? usersTried
                 <button onClick={() => downloadFfmpegTool()} disabled={toolsLoading} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">
                   {toolsLoading ? progressLabel('ffmpeg') : toolsStatus?.ffmpeg?.found ? t('Re-download') : t('Download')}
                 </button>
-                <button onClick={() => setCustomToolPath('ffmpeg')} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white">{t("Custom Path")}</button>
+                <button onClick={() => setCustomToolPath('ffmpeg')} disabled={toolsLoading} className="px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">{t("Custom Path")}</button>
+                {toolsStatus?.ffmpeg?.customPath && (
+                  <button onClick={() => setCustomToolPath('ffmpeg', true)} disabled={toolsLoading} className="px-2 py-1.5 bg-card border border-border rounded-lg text-xs text-muted hover:text-white disabled:opacity-40">{t("Automatic")}</button>
+                )}
               </div>
             </div>
             {toolsStatus?.ffmpeg?.path && (

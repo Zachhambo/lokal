@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { animate, motion, useMotionValue, useMotionValueEvent, useTransform } from 'framer-motion'
 import { trackArtURL, trackFullArtURL } from '../onlineTracks'
 import { usePerformanceMode } from '../performanceMode'
-import { clampIndex, flowCoverGeometry, flowIndexAt, flowDrag, flowCoastPlan, flowEaseOut, flowPixelsPerCover, flowReleaseVelocity, flowVisibleRange, FLOW_PERSPECTIVE, FLOW_VANISH_Y } from '../coverFlowGeometry.mjs'
+import { clampIndex, flowCoverGeometry, flowIndexAt, flowDrag, flowCoastPlan, flowEaseOut, flowPixelsPerCover, flowReleaseVelocity, flowVisibleRange, flowResponsiveSpread, flowWheelPixels, flowWheelTarget, flowWheelEase, FLOW_PERSPECTIVE, FLOW_VANISH_Y } from '../coverFlowGeometry.mjs'
 
 const MAX_SIZE = 320 // 45% larger than the original 220px covers; still responsive
 const DRAG_THRESHOLD = 6
@@ -46,9 +46,10 @@ function FlowArtwork({ track, highRes }) {
 // transforms subscribe directly to the animation MotionValue on the compositor.
 const FlowCover = React.memo(function FlowCover({
   pick, index, position, flip, flipTarget, highRes, backVisible,
-  size, reduced, onSelect, onPlay, onContextMenu,
+  size, reduced, spreadValue, onSelect, onPlay, onContextMenu,
 }) {
-  const geometry = useTransform(position, p => flowCoverGeometry(index - p, size, reduced))
+  const geometry = useTransform([position, spreadValue], ([p, spread]) =>
+    flowCoverGeometry(index - p, size, reduced, spread))
   const transform = useTransform([geometry, flip], ([g, f]) =>
     // The translated 3D panel must be INSIDE perspective division; otherwise
     // the outer and inner edges cannot reproduce the tapered iTunes triangles.
@@ -100,14 +101,25 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
   const middleIndex = Math.floor(count / 2)
   const position = useMotionValue(middleIndex)
   const flip = useMotionValue(0)
+  const spreadValue = useMotionValue(1)
   const stageRef = useRef(null)
   const motion = useRef(null)
   const flipSpring = useRef(null)
   const gesture = useRef(null)
   const pressTimer = useRef(null)
   const wheelTimer = useRef(null)
+  const wheelFrame = useRef(null)
+  const wheelStamp = useRef(null)
+  const wheelGoal = useRef(null)
+  const wheelSnapping = useRef(false)
+  const wheelHandler = useRef(null)
   const suppressClick = useRef(false)
   const [size, setSize] = useState(MAX_SIZE)
+  const [stageWidth, setStageWidth] = useState(0)
+  const spread = flowResponsiveSpread(stageWidth, size, count, reduced)
+  // Width changes (including animated sidebar collapse) update existing
+  // cover transforms, without remounting image elements or 3D layers.
+  useLayoutEffect(() => { spreadValue.set(spread) }, [spread, spreadValue])
   const pixelsPerCover = flowPixelsPerCover(size, reduced)
   const [bleed, setBleed] = useState({ left: 0, right: 0 })
   const [activeIndex, setActiveIndex] = useState(middleIndex)
@@ -189,8 +201,16 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     const { target, duration } = flowCoastPlan(position.get(), velocity, count)
     moveTo(target, duration)
   }
-  const step = by => {
+  const stopWheel = () => {
     clearTimeout(wheelTimer.current)
+    if (wheelFrame.current !== null) cancelAnimationFrame(wheelFrame.current)
+    wheelFrame.current = null
+    wheelStamp.current = null
+    wheelGoal.current = null
+    wheelSnapping.current = false
+  }
+  const step = by => {
+    stopWheel()
     rotateBack(false)
     settle(Math.round(position.get()) + by)
   }
@@ -206,6 +226,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     }
   })
   useEffect(() => {
+    stopWheel()
     motion.current?.stop()
     flipSpring.current?.stop()
     position.set(middleIndex)
@@ -222,7 +243,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     motion.current?.stop()
     flipSpring.current?.stop()
     clearTimeout(pressTimer.current)
-    clearTimeout(wheelTimer.current)
+    stopWheel()
   }, [])
 
   useLayoutEffect(() => {
@@ -231,7 +252,9 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     if (!stage || !host) return undefined
     const page = stage.closest('main')
     const measure = () => {
-      const next = Math.min(MAX_SIZE, stage.clientWidth * 0.52)
+      const width = stage.clientWidth
+      if (width > 0) setStageWidth(old => Math.abs(old - width) < 1 ? old : width)
+      const next = Math.min(MAX_SIZE, width * 0.52)
       setSize(old => Math.abs(old - next) < 0.5 ? old : next)
       if (!page) return
       const area = page.getBoundingClientRect()
@@ -249,7 +272,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
   const down = e => {
     if (e.button !== 0) return
     motion.current?.stop()
-    clearTimeout(wheelTimer.current)
+    stopWheel()
     suppressClick.current = false
     gesture.current = { id: e.pointerId, start: e.clientX, last: e.clientX,
       moved: false, samples: [{ x: e.clientX, t: performance.now() }] }
@@ -259,7 +282,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     // pressed cover; use the geometry only for gaps in the stage.
     const pressedCover = e.target.closest?.('[data-cover-flow-item]')
     const touched = pressedCover ? Number(pressedCover.dataset.coverFlowItem)
-      : flowIndexAt(e.clientX - rect.left, rect.width, size, position.get(), count, reduced)
+      : flowIndexAt(e.clientX - rect.left, rect.width, size, position.get(), count, reduced, spread)
     if (touched === activeIndex) pressTimer.current = setTimeout(() => {
       if (!gesture.current?.moved) {
         suppressClick.current = true
@@ -297,18 +320,59 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     }
     gesture.current = null
   }
-  const wheel = e => {
-    const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0
-    if (!dx) return
-    e.preventDefault()
-    stopPress()
-    rotateBack(false)
-    setSettled(false)
-    motion.current?.stop()
-    position.set(Math.max(-0.35, Math.min(count - 0.65, position.get() + dx / pixelsPerCover)))
-    clearTimeout(wheelTimer.current)
-    wheelTimer.current = setTimeout(() => settle(position.get()), 170)
+  // Wheel and trackpad events update one destination. A single RAF follower
+  // eases the rendered cover toward it, avoiding jumps on coarse wheel ticks.
+  const followWheel = now => {
+    wheelFrame.current = null
+    const target = wheelGoal.current
+    if (target === null) return
+    const elapsed = wheelStamp.current === null ? 16.7 : now - wheelStamp.current
+    wheelStamp.current = now
+    const next = flowWheelEase(position.get(), target, elapsed)
+    position.set(next)
+    if (Math.abs(target - next) > 0.001) {
+      wheelFrame.current = requestAnimationFrame(followWheel)
+    } else {
+      position.set(target)
+      if (wheelSnapping.current) {
+        stopWheel()
+        setSettled(true)
+      }
+    }
   }
+  const wheel = e => {
+    // React's delegated wheel listeners may be passive in Chromium; this
+    // handler is attached natively with { passive: false } below.
+    if (e.ctrlKey || e.metaKey || count < 2) return
+    const delta = flowWheelPixels(e.deltaX, e.deltaY, e.deltaMode, stageRef.current?.clientHeight || size * 1.36)
+    if (!delta) return
+    e.preventDefault()
+    if (wheelGoal.current === null) {
+      stopPress()
+      rotateBack(false)
+      setSettled(false)
+      motion.current?.stop()
+    }
+    wheelSnapping.current = false
+    wheelGoal.current = flowWheelTarget(position.get(), wheelGoal.current, delta, pixelsPerCover, count)
+    if (wheelFrame.current === null) wheelFrame.current = requestAnimationFrame(followWheel)
+    clearTimeout(wheelTimer.current)
+    wheelTimer.current = setTimeout(() => {
+      // Snap with the SAME interpolation, rather than switching to a new
+      // tween that can abruptly change speed at the gesture's end.
+      wheelSnapping.current = true
+      wheelGoal.current = clampIndex(Math.round(wheelGoal.current), count)
+      if (wheelFrame.current === null) wheelFrame.current = requestAnimationFrame(followWheel)
+    }, 180)
+  }
+  wheelHandler.current = wheel
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return undefined
+    const handleWheel = event => wheelHandler.current?.(event)
+    stage.addEventListener('wheel', handleWheel, { passive: false })
+    return () => stage.removeEventListener('wheel', handleWheel)
+  }, [count])
   const select = index => {
     if (suppressClick.current) { suppressClick.current = false; return }
     rotateBack(false)
@@ -329,14 +393,13 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
       }}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       onDragStart={e => e.preventDefault()}
-      onWheel={wheel}
       onClickCapture={e => {
         if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false }
       }}
       onClick={e => {
         if (e.target.closest('[data-cover-flow-item]')) return
         const rect = e.currentTarget.getBoundingClientRect()
-        select(flowIndexAt(e.clientX - rect.left, rect.width, size, position.get(), count, reduced))
+        select(flowIndexAt(e.clientX - rect.left, rect.width, size, position.get(), count, reduced, spread))
       }}
       // Leave equal vertical clearance for the perspective-rotated covers,
       // without a large unused area below the stage.
@@ -348,7 +411,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
           pick={pick} index={index} position={position} flip={flip}
           flipTarget={index === flipIndex} backVisible={flipped && index === flipIndex}
           highRes={settled && index === activeIndex}
-          size={size} reduced={reduced}
+          size={size} reduced={reduced} spreadValue={spreadValue}
           onSelect={handleSelect} onPlay={handlePlay} onContextMenu={handleMenu} />
       })}
     </div>
