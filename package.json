@@ -77,7 +77,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "sipbuu",
+      "owner": "lokal-music",
       "repo": "lokal"
     },
     "directories": {

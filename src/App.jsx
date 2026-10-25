@@ -819,7 +819,7 @@ export default function App() {
     if (!api.isElectron) return;
     setLoadingChangelog(true);
     try {
-      const response = await fetch('https://api.github.com/repos/sipbuu/lokal/releases/latest');
+      const response = await fetch('https://api.github.com/repos/lokal-music/lokal/releases/latest');
       if (!response.ok) throw new Error('Failed to fetch release info');
       const data = await response.json();
       const fullBody = data.body || '';
