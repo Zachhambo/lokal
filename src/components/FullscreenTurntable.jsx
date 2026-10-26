@@ -3,6 +3,18 @@ import { trackArtURL, trackFullArtURL } from '../onlineTracks'
 
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=2873513347'
 
+// Full-resolution artwork occasionally fails (especially provider URLs). Retry
+// the thumbnail instead of leaving a broken image on the original LP sleeve.
+function CoverImage({ track, className, style }) {
+  const [useFallback, setUseFallback] = useState(false)
+  const full = trackFullArtURL(track) || trackArtURL(track) || ''
+  const fallback = trackArtURL(track) || ''
+  useEffect(() => setUseFallback(false), [track])
+  return <img src={useFallback ? fallback : full} alt="" draggable={false}
+    className={className} style={style}
+    onError={() => { if (!useFallback && fallback && fallback !== full) setUseFallback(true) }} />
+}
+
 // Wallpaper Engine's original composition is rendered from the user's own
 // Workshop scene.pkg. No replacement artwork, custom room, or copyrighted
 // textures are bundled with Lokal.
@@ -12,9 +24,23 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   const commandsRef = useRef({ onNext, onPrevious, onPlayPause })
   commandsRef.current = { onNext, onPrevious, onPlayPause }
   const mediaRef = useRef(null)
+  const snapshotRef = useRef(null)
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
+
+  const artwork = trackFullArtURL(track) || trackArtURL(track) || ''
+  snapshotRef.current = {
+    hasMedia: !!track,
+    title: track?.title || '',
+    artist: track?.artist || '',
+    album: track?.album || '',
+    playing,
+    position: Number(progress) || 0,
+    duration: Number(duration) || 0,
+    thumbnail: artwork,
+    hasThumbnail: !!artwork,
+  }
 
   // Initial media object is created once per mount. Subsequent song switches
   // update the original scene's media listeners without remounting WebGL.
@@ -37,16 +63,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
         }
         const { mount, bytesSource, createMediaSource } = await import('webwallgl')
         if (cancelled) return
-        const media = createMediaSource({
-          hasMedia: !!track,
-          title: track?.title || '',
-          artist: track?.artist || '',
-          album: track?.album || '',
-          playing,
-          position: Number(progress) || 0,
-          duration: Number(duration) || 0,
-          thumbnail: trackFullArtURL(track) || trackArtURL(track) || '',
-        }, {
+        const media = createMediaSource(snapshotRef.current, {
           skipNext: () => commandsRef.current.onNext?.(),
           skipPrevious: () => commandsRef.current.onPrevious?.(),
           playPause: () => commandsRef.current.onPlayPause?.(),
@@ -61,10 +78,15 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
           renderDpr: 1,
           autoplay: true,
         })
-        if (cancelled) { scene.destroy(); return }
+        if (cancelled) { scene.destroy({ releasePkgCache: true }); return }
+        // A track may have changed while the original scene was mounting.
+        media.set(snapshotRef.current)
         sceneRef.current = scene
         setStatus('ready')
       } catch (cause) {
+        // WebWallGL includes its allocated instance on mount() failures.
+        // Destroy it explicitly; otherwise a failed import leaks WebGL state.
+        try { (scene || cause?.instance)?.destroy({ releasePkgCache: true }) } catch {}
         if (!cancelled) {
           setStatus('failed')
           setError(cause?.message || 'The scene could not be rendered.')
@@ -76,7 +98,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
       cancelled = true
       mediaRef.current = null
       sceneRef.current = null
-      try { scene?.destroy() } catch {}
+      try { scene?.destroy({ releasePkgCache: true }) } catch {}
     }
   // Mount on scene selection, not on changes in the song or progress.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,19 +120,8 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
     return () => observer.disconnect()
   }, [])
   const scale = Math.max(bounds.width / 1920, bounds.height / 1080)
-  const artwork = trackFullArtURL(track) || trackArtURL(track) || ''
   useEffect(() => {
-    mediaRef.current?.set({
-      hasMedia: !!track,
-      title: track?.title || '',
-      artist: track?.artist || '',
-      album: track?.album || '',
-      playing,
-      position: Number(progress) || 0,
-      duration: Number(duration) || 0,
-      thumbnail: artwork,
-      hasThumbnail: !!artwork,
-    })
+    mediaRef.current?.set(snapshotRef.current)
   }, [track, playing, progress, duration, artwork])
 
   // Keep the scene visible while paused: unlike pausing WebGL itself, the
@@ -130,7 +141,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
           {/* Perspective-correct replacement for the LP sleeve in the source scene.
               The surrounding blinds, lighting, turntable, dust cover and wood
               remain original pixels rendered from the Workshop package. */}
-          <img src={artwork} alt="" draggable={false}
+          <CoverImage track={track}
             className="absolute h-[512px] w-[512px] object-cover"
             style={{
               left: 0, top: 0,
@@ -146,7 +157,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
               transform: 'rotate(-7deg) scaleY(.53)',
               boxShadow: '0 0 0 3px rgba(0,0,0,.16), inset 0 0 15px rgba(0,0,0,.25)',
             }}>
-            <img src={artwork} alt="" draggable={false} className="h-full w-full rounded-full object-cover fullscreen-turntable-label"
+            <CoverImage track={track} className="h-full w-full rounded-full object-cover fullscreen-turntable-label"
               style={{ animationPlayState: playing ? 'running' : 'paused', filter: 'brightness(.84)' }}/>
             <span aria-hidden="true" className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#a4a09b] shadow-inner"/>
           </div>
