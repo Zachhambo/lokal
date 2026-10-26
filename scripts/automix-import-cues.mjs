@@ -103,15 +103,46 @@ export async function importCueReport({ song1, song2, reportPath, ffprobe = 'ffp
   }
 }
 
+/**
+ * Optional Demucs window preparation inside an externally managed upstream
+ * engine installation. The upstream stem renderer uses fixed root filenames:
+ * never replace them silently, and never publish mismatched stems as usable.
+ * Only preprocessing happens; Lokal's players do not yet render stem mixes.
+ */
+export async function prepareStemCache({ engine, song1, song2, python = 'python3' }) {
+  if (!engine) throw Error('--prepare-stems requires --engine')
+  const root = path.resolve(engine)
+  for (const [role, original] of [['song1',song1],['song2',song2]]) {
+    const prepared = path.join(root, `${role}.mp3`)
+    if (!existsSync(prepared) ||
+        await fileSha256(prepared) !== await fileSha256(original)) {
+      throw Error(`Upstream ${role}.mp3 must match the requested track exactly; refusing mismatched stem preparation`)
+    }
+  }
+  execFileSync(python, [path.join(root,'stem_transition.py'),'--prepare-only'], {
+    cwd: root, stdio: 'inherit', timeout: 3 * 60 * 60 * 1000,
+  })
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {
-  const args = Object.fromEntries(process.argv.slice(2).reduce((a,v,i,all)=>{
-    if (v.startsWith('--') && !all[i+1]?.startsWith('--')) a.push([v.slice(2),all[i+1]])
-    return a
-  },[]))
+  const args = {}
+  const argv = process.argv.slice(2)
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (!arg.startsWith('--')) continue
+    const name = arg.slice(2)
+    if (name === 'prepare-stems') { args[name] = true; continue }
+    if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
+      console.error('Missing value for --' + name)
+      process.exit(2)
+    }
+    args[name] = argv[++i]
+  }
   if (!args.song1 || !args.song2 || (!args.report && !args.engine)) {
     console.error('Usage: node scripts/automix-import-cues.mjs --song1 /path/a.mp3 --song2 /path/b.mp3 --report /path/cue_report.json [--ffprobe ffprobe]')
     console.error('Or: ... --engine /path/automix-engine [--python python3] (runs an installed CUE-DETR engine explicitly)')
+    console.error('Add --prepare-stems for optional upstream Demucs caching (requires engine-root song1.mp3/song2.mp3; Linux/WSL).')
     process.exitCode = 2
   } else {
     const temporaryDir = args.engine ? mkdtempSync(path.join(tmpdir(), 'lokal-automix-cues-')) : null
@@ -135,6 +166,13 @@ if (isMain) {
       await importCueReport({ song1:args.song1, song2:args.song2,
         reportPath, ffprobe:args.ffprobe || 'ffprobe' })
       console.log('Saved per-track AutoMix cue reports beside both audio files.')
+      if (args['prepare-stems']) {
+        await prepareStemCache({
+          engine:args.engine, song1:args.song1, song2:args.song2,
+          python:args.python || 'python3',
+        })
+        console.log('Prepared optional upstream Demucs window cache (not yet used in live Lokal audio mixing).')
+      }
     } catch (error) {
       console.error('AutoMix cue preparation failed:',error.message)
       process.exitCode = 1
