@@ -384,14 +384,6 @@ html.performance-mode *::after {
 }
 
 
-/* Original turntable's live record label: true 33⅓ RPM, paused at rest. */
-.fullscreen-turntable-label {
-  animation: fullscreen-cd-rotation 1.8s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .fullscreen-turntable-label { animation: none !important; }
-}
-
 /* Fullscreen CD details follow the reference: hairline white outer rim,
    white label ring and a real see-through spindle opening. */
 @keyframes fullscreen-cd-rotation { to { transform: rotate(360deg); } }
