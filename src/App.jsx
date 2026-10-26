@@ -2340,7 +2340,19 @@ export default function App() {
   const automixPlanFor = useCallback((outTrack, nextTrack, outDuration, out, next, sameAlbum) => {
     const plans = automixRef.current.plans || (automixRef.current.plans = new Map())
     const key = `${outTrack.id}>${nextTrack.id}|${sameAlbum ? 1 : 0}|${Math.round(outDuration)}`
-    const known = (analysis) => (analysis === undefined ? '?' : analysis ? 'a' : '-')
+    // A model report may be added after the ordinary PCM analysis has been
+    // cached. Include its cue revision/times in the plan cache identity so
+    // newly prepared 32-beat cues take effect without restarting the player.
+    const known = (analysis) => {
+      if (analysis === undefined) return '?'
+      if (!analysis) return '-'
+      if (!analysis.modelCueAnalysis) return 'a'
+      const cues = analysis.transitionCues || {}
+      return 'm:' + ['entrances', 'exits'].map(type =>
+        (cues[type] || []).filter(c => c.source === 'cue-detr')
+          .map(c => Number(c.time).toFixed(3)).join(','),
+      ).join('/')
+    }
     const inputs = known(out) + known(next)
     const cached = plans.get(key)
     if (cached && (cached.inputs === inputs || cached.plan === AUTOMIX_FALLBACK)) return cached.plan
