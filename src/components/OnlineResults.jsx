@@ -1,5 +1,5 @@
 // Online results: songs that aren't in the library, under the local results
-// on the Search page, from YouTube Music, SoundCloud, installed addons or
+// on the Search page, from YouTube Music, SoundCloud, Monochrome, installed addons or
 // Soulseek (switch in the section header, remembered). The streaming sources
 // play with the user's yt-dlp; + adds one to a playlist and ⬇ saves it to the
 // library (right-click ⬇ for Soulseek), both keeping it as a ghost track
@@ -219,7 +219,7 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
             ))}
           </div>
         </div>
-        <span className="min-w-0 text-[10px] text-muted/80 truncate">{t(soulseek ? 'Files people share, through slskd' : providers.find(p => p.id === provider)?.addon ? 'From an add-on you installed' : 'Streams with yt-dlp')}{showLibraryHint ? t(' · not in your library') : ''}</span>
+        <span className="min-w-0 text-[10px] text-muted/80 truncate">{t(soulseek ? 'Files people share, through slskd' : providers.find(p => p.id === provider)?.addon ? 'From an add-on you installed' : provider === 'mono' ? 'FLAC audio via Monochrome' : 'Streams with yt-dlp')}{showLibraryHint ? t(' · not in your library') : ''}</span>
       </div>
       <div className="mb-3 empty:hidden"><DownloadNotices youtube={provider === 'yt'} /></div>
       {!soulseek && <AddonSetupNotice source={providers.find(p => p.id === provider)} className="mb-3" />}
