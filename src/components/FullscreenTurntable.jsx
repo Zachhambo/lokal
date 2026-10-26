@@ -17,7 +17,8 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   const [retry, setRetry] = useState(0)
 
   const trackId = track?.id
-  const localArtwork = !!track?.artwork_path
+  const artworkPath = track?.artwork_path || ''
+  const localArtwork = !!artworkPath
   const onlineArtwork = track?.artwork_url || ''
 
   // WebWallGL's original scene binds live images to $mediaThumbnail.
@@ -35,7 +36,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
         .catch(() => {})
     }
     return () => { active = false }
-  }, [trackId, localArtwork, onlineArtwork])
+  }, [trackId, artworkPath, localArtwork, onlineArtwork])
 
   snapshotRef.current = {
     hasMedia: !!track,
@@ -83,7 +84,9 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
           fps: 60,
           fit: 'cover',
           volume: 0,
-          renderDpr: 1,
+          // Native display resolution (bounded by WebWallGL's 4096px cap).
+          // A fixed 1x DPR would visibly blur this 4K artwork on HiDPI screens.
+          renderDpr: 0,
           autoplay: true,
         })
         if (cancelled) { scene.destroy({ releasePkgCache: true }); return }
