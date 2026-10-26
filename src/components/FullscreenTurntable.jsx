@@ -1,35 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { trackArtURL, trackFullArtURL } from '../onlineTracks'
+import { api } from '../api'
 
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=2873513347'
 
-// Full-resolution artwork occasionally fails (especially provider URLs). Retry
-// the thumbnail instead of leaving a broken image on the original LP sleeve.
-function CoverImage({ track, className, style }) {
-  const [useFallback, setUseFallback] = useState(false)
-  const full = trackFullArtURL(track) || trackArtURL(track) || ''
-  const fallback = trackArtURL(track) || ''
-  useEffect(() => setUseFallback(false), [track])
-  return <img src={useFallback ? fallback : full} alt="" draggable={false}
-    className={className} style={style}
-    onError={() => { if (!useFallback && fallback && fallback !== full) setUseFallback(true) }} />
-}
-
-// Wallpaper Engine's original composition is rendered from the user's own
-// Workshop scene.pkg. No replacement artwork, custom room, or copyrighted
-// textures are bundled with Lokal.
+// This component mounts the creator's original Wallpaper Engine project. The
+// renderer binds $mediaThumbnail to the wallpaper's own sleeve and vinyl-label
+// materials; no second, perspective-guessed DOM artwork layer is necessary.
 export default function FullscreenTurntable({ track, playing, progress = 0, duration = 0, onNext, onPrevious, onPlayPause }) {
   const stageRef = useRef(null)
-  const sceneRef = useRef(null)
-  const commandsRef = useRef({ onNext, onPrevious, onPlayPause })
-  commandsRef.current = { onNext, onPrevious, onPlayPause }
   const mediaRef = useRef(null)
   const snapshotRef = useRef(null)
+  const commandsRef = useRef({ onNext, onPrevious, onPlayPause })
+  commandsRef.current = { onNext, onPrevious, onPlayPause }
+  const [artwork, setArtwork] = useState('')
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
 
-  const artwork = trackFullArtURL(track) || trackArtURL(track) || ''
+  const trackId = track?.id
+  const localArtwork = !!track?.artwork_path
+  const onlineArtwork = track?.artwork_url || ''
+
+  // WebWallGL uploads thumbnail pixels as the ORIGINAL scene's reserved
+  // $mediaThumbnail GL texture. For local files, Lokal's trusted artwork
+  // protocol serves the full embedded art. External providers often disallow
+  // browser fetch via CORS, so use the existing HTTPS-only cover fetcher in
+  // Electron to get a safe data URL instead.
+  useEffect(() => {
+    let active = true
+    if (trackId && localArtwork) {
+      setArtwork(api.fullArtworkURL(trackId))
+    } else {
+      setArtwork('')
+      if (onlineArtwork && window.electron?.wallpaperCoverData) {
+        Promise.resolve(window.electron.wallpaperCoverData(onlineArtwork))
+          .then(result => { if (active) setArtwork(result || '') })
+          .catch(() => {})
+      } else if (onlineArtwork) {
+        setArtwork(onlineArtwork)
+      }
+    }
+    return () => { active = false }
+  }, [trackId, localArtwork, onlineArtwork])
+
   snapshotRef.current = {
     hasMedia: !!track,
     title: track?.title || '',
@@ -42,8 +55,8 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
     hasThumbnail: !!artwork,
   }
 
-  // Initial media object is created once per mount. Subsequent song switches
-  // update the original scene's media listeners without remounting WebGL.
+  // Mount exactly once per chosen source; updating the song uses the media
+  // source's set() method rather than tearing down the WebGL scene.
   useEffect(() => {
     let cancelled = false
     let scene = null
@@ -59,6 +72,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
         if (cancelled) return
         if (!result?.bytes?.length) {
           setStatus('missing')
+          setError(result?.error || '')
           return
         }
         const { mount, bytesSource, createMediaSource } = await import('webwallgl')
@@ -79,17 +93,14 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
           autoplay: true,
         })
         if (cancelled) { scene.destroy({ releasePkgCache: true }); return }
-        // A track may have changed while the original scene was mounting.
+        // Album artwork may have loaded while the scene was initializing.
         media.set(snapshotRef.current)
-        sceneRef.current = scene
         setStatus('ready')
       } catch (cause) {
-        // WebWallGL includes its allocated instance on mount() failures.
-        // Destroy it explicitly; otherwise a failed import leaks WebGL state.
         try { (scene || cause?.instance)?.destroy({ releasePkgCache: true }) } catch {}
         if (!cancelled) {
           setStatus('failed')
-          setError(cause?.message || 'The scene could not be rendered.')
+          setError(cause?.message || 'The original scene could not be rendered.')
         }
       }
     }
@@ -97,72 +108,26 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
     return () => {
       cancelled = true
       mediaRef.current = null
-      sceneRef.current = null
       try { scene?.destroy({ releasePkgCache: true }) } catch {}
     }
-  // Mount on scene selection, not on changes in the song or progress.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retry])
 
-  // These measured coordinates correspond to the original 1920x1080 scene.
-  // The backdrop remains the creator's actual texture; only the media-driven
-  // sleeve and vinyl label are replaced with Lokal's high-resolution artwork.
-  const [bounds, setBounds] = useState({ width: 1920, height: 1080 })
-  useEffect(() => {
-    if (!stageRef.current) return undefined
-    const update = () => setBounds({
-      width: stageRef.current?.clientWidth || 1920,
-      height: stageRef.current?.clientHeight || 1080,
-    })
-    const observer = new ResizeObserver(update)
-    observer.observe(stageRef.current)
-    update()
-    return () => observer.disconnect()
-  }, [])
-  const scale = Math.max(bounds.width / 1920, bounds.height / 1080)
   useEffect(() => {
     mediaRef.current?.set(snapshotRef.current)
   }, [track, playing, progress, duration, artwork])
 
-  // Keep the scene visible while paused: unlike pausing WebGL itself, the
-  // wallpaper receives the PAUSED media state and can lift its tonearm,
-  // decelerate the platter and retain the original author animation.
+  // Keep rendering even when music is paused: the wallpaper's own playback
+  // event controls its tonearm, platter deceleration, and other authored motion.
   const selectOriginal = async () => {
     const result = await window.electron?.wallpaperWorkshopChoose?.()
     if (result?.installed) setRetry(v => v + 1)
     else if (result?.error) setError(result.error)
   }
+
   return (
     <div className="absolute inset-0 overflow-hidden" data-original-turntable="">
       <div ref={stageRef} className="absolute inset-0 pointer-events-none" />
-      {status === 'ready' && artwork && (
-        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[1]"
-          style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})`, transformOrigin: 'center' }}>
-          {/* Perspective-correct replacement for the LP sleeve in the source scene.
-              The surrounding blinds, lighting, turntable, dust cover and wood
-              remain original pixels rendered from the Workshop package. */}
-          <CoverImage track={track}
-            className="absolute h-[512px] w-[512px] object-cover"
-            style={{
-              left: 0, top: 0,
-              transformOrigin: '0 0',
-              transform: 'matrix3d(1.01199238,-0.08786886,0,0.00002078,0.13195849,1.01258253,0,0.00004894,0,0,1,0,160,236,0,1)',
-              filter: 'brightness(.88) saturate(.92)',
-            }} />
-          {/* The original disc remains physically present; its small printed
-              centre label reflects the same cover rather than a default logo. */}
-          <div className="absolute overflow-hidden rounded-full"
-            style={{
-              left: 1184, top: 570, width: 160, height: 160,
-              transform: 'rotate(-7deg) scaleY(.53)',
-              boxShadow: '0 0 0 3px rgba(0,0,0,.16), inset 0 0 15px rgba(0,0,0,.25)',
-            }}>
-            <CoverImage track={track} className="h-full w-full rounded-full object-cover fullscreen-turntable-label"
-              style={{ animationPlayState: playing ? 'running' : 'paused', filter: 'brightness(.84)' }}/>
-            <span aria-hidden="true" className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#a4a09b] shadow-inner"/>
-          </div>
-        </div>
-      )}
       {status !== 'ready' && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90 text-white">
           <div className="max-w-md rounded-xl border border-white/15 bg-neutral-900/95 p-6 text-center shadow-2xl">
