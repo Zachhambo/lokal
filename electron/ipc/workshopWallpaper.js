@@ -96,8 +96,21 @@ function registerWorkshopWallpaperHandlers(ipcMain) {
   // Same centralized SSRF/size/content-type checks used by playlist artwork.
   // Convert provider artwork to a data URL so WebWallGL's GL texture upload
   // does not depend on third-party image CORS response headers.
-  ipcMain.handle('wallpaper:coverData', async (_, url) =>
-    require('../playlists/remoteCover').fetchCoverData(url))
+  ipcMain.handle('wallpaper:coverData', async (_, { trackId, url } = {}) => {
+    if (trackId) {
+      // The same DB-validated full-cover lookup used by lokal-stream://cover.
+      // IPC returns a data URL because fetch(file://) is not reliable in
+      // Chromium and WebWallGL expects a browser-fetchable image.
+      const picture = await require('../artwork/fullCover').fullCoverForTrack(
+        require('./db').getDB(), String(trackId))
+      if (picture?.bytes?.length && picture.bytes.length <= 10 * 1024 * 1024 &&
+        /^image\/(?:jpeg|png|webp)$/.test(picture.mime || '')) {
+        return `data:${picture.mime};base64,${picture.bytes.toString('base64')}`
+      }
+    }
+    // Remote results run through the existing HTTPS-only image validator.
+    return require('../playlists/remoteCover').fetchCoverData(url)
+  })
   ipcMain.handle('wallpaper:workshopStatus', () => ({
     installed: !!preferredPackage(), workshopId: WORKSHOP_ID,
   }))
