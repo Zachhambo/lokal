@@ -30,6 +30,7 @@
     "test:mpris": "node --test scripts/mpris-config.test.mjs",
     "test:added-date": "node --test scripts/added-date.test.mjs",
     "test:download-folder": "node --test scripts/download-folder.test.mjs",
+    "test:lyrics-voice-prefix": "node --test scripts/lrc-voice-prefix.test.mjs",
     "test:visualizer-analyser-startup": "node --test scripts/visualizer-analyser-startup.test.mjs",
     "test:fullscreen-visualizer-settings": "node --test scripts/fullscreen-visualizer-settings.test.mjs",
     "test:fullscreen-appearance": "node --test scripts/fullscreen-appearance.test.mjs scripts/fullscreen-lyrics-layout.test.mjs",
