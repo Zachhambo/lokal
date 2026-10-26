@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { sidecarForRole, mergeReports } from './automix-import-cues.mjs'
+import { sidecarForRole, mergeReports, prepareStemCache } from './automix-import-cues.mjs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 const require = createRequire(import.meta.url)
 const { validateAdvancedReport, mergeAdvancedAnalysis } =
   require('../electron/automix/advanced-report.js')
@@ -58,4 +61,21 @@ test('repeated cue preparation merges different paired role timings', () => {
   assert.equal(combined.transitionCues.entrances.length,1)
   const replaced=mergeReports(combined,{...incoming(),source:{...source,sha256:SHA2}})
   assert.equal(replaced.transitionCues.exits.length,0)
+})
+
+test('stem preparation refuses mismatched fixed-role source files', async t => {
+  const root = mkdtempSync(join(tmpdir(),'lokal-automix-stem-check-'))
+  t.after(() => rmSync(root, {recursive:true,force:true}))
+  const engine = join(root,'external')
+  mkdirSync(engine)
+  const outgoing = join(root,'a.mp3')
+  const incoming = join(root,'b.mp3')
+  writeFileSync(outgoing,'a')
+  writeFileSync(incoming,'b')
+  writeFileSync(join(engine,'song1.mp3'),'a')
+  writeFileSync(join(engine,'song2.mp3'),'not the selected song')
+  await assert.rejects(
+    prepareStemCache({engine,song1:outgoing,song2:incoming}),
+    /must match the requested track exactly/,
+  )
 })
