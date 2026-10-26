@@ -16,7 +16,7 @@ jobs:
       - name: Download creator's published editor project
         run: |
           python -m pip install --quiet gdown
-          gdown --id 1ttlr5Njnquds4rphMHswB4cVPT6f2uAW -O /tmp/dynamic-record-player.zip
+          gdown 1ttlr5Njnquds4rphMHswB4cVPT6f2uAW -O /tmp/dynamic-record-player.zip
       - name: Print safe project resource inventory
         run: |
           python - <<'PY'
