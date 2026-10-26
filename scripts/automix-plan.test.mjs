@@ -64,6 +64,8 @@ test('short audible tails never produce an overlong AutoMix overlap', () => {
   const incoming = analysis({ bpm: 124 })
   const plan = planTransition({ out: outgoing, outTrack: {}, outDuration: 30, next: incoming, nextTrack: {} })
   assert.ok(plan)
+  assert.equal(plan.kind, 'smart', 'incomplete beat sequences fall back to a safe mix')
+  assert.equal(plan.rate, 1)
   assert.ok(plan.start + plan.length <= 23.001)
   assert.ok(plan.fadeIn <= plan.length)
   if (plan.bassSwap) assert.ok(plan.swapAt < plan.length - 0.1)
