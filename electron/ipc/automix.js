@@ -22,6 +22,7 @@ function registerAutomixHandlers(ipcMain) {
   const fs = require('fs')
   const { getDB } = require('./db')
   const { analysisFor } = require('../automix')
+  const { readAdvancedReport, mergeAdvancedAnalysis } = require('../automix/advanced-report')
   const log = message => { try { require('electron-log').info(message) } catch {} }
 
   ipcMain.handle('automix:analyze', async (_, track) => {
@@ -46,7 +47,7 @@ function registerAutomixHandlers(ipcMain) {
     if (!stat.isFile()) return null
     const key = automixFileCacheKey(track, stat)
     if (!key) return null
-    return analysisFor({
+    const base = await analysisFor({
       db, key, trackId: String(track.id), log,
       ffmpeg: () => require('./tools').findFfmpeg(),
       source: async () => {
@@ -60,6 +61,15 @@ function registerAutomixHandlers(ipcMain) {
         } catch { return null }
       },
     })
+    if (!base) return null
+    // Read a sidecar only when its current source stamp still agrees with
+    // the exact file revision used for the baseline waveform cache.
+    // Changes to the report do not force PCM decoding.
+    try {
+      const current = fs.statSync(file)
+      if (automixFileCacheKey(track, current) !== key) return null
+      return mergeAdvancedAnalysis(base, readAdvancedReport(file, current))
+    } catch { return base }
   })
 }
 
