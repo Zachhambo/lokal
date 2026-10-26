@@ -65,10 +65,10 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value))
  */
 export function cueNear(candidates, target, tolerance, min = 0, max = Infinity) {
   if (!Array.isArray(candidates) || !Number.isFinite(target) || tolerance <= 0) return null
-  const options = candidates.filter(({ time, confidence } = {}) =>
-    Number.isFinite(time) && Number.isFinite(confidence) &&
-    confidence >= 0.55 && time >= min && time <= max &&
-    Math.abs(time - target) <= tolerance)
+  const options = candidates.filter(item => item &&
+    Number.isFinite(item.time) && Number.isFinite(item.confidence) &&
+    item.confidence >= 0.55 && item.time >= min && item.time <= max &&
+    Math.abs(item.time - target) <= tolerance)
   options.sort((a, b) =>
     (Math.abs(a.time - target) / tolerance - a.confidence * 0.15) -
     (Math.abs(b.time - target) / tolerance - b.confidence * 0.15))
