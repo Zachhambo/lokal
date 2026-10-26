@@ -53,6 +53,7 @@ function normalizeTrack(raw) {
     // This provider serves FLAC; bit depth and sample rate remain unknown
     // until the stream is measured by the playback/audio-quality pipeline.
     format: 'FLAC',
+    quality: 'LOSSLESS',
   }
 }
 
