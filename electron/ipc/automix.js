@@ -1,6 +1,23 @@
 // AutoMix's analyses for the window (electron/automix): a song's, by its
 // library file or its online stream, analysed once and kept.
 
+/**
+ * Analyze each revision of a local recording independently. An ID-only key
+ * reuses the previous waveform after a user overwrites/retags the same path.
+ * Include the actual file stamp and CUE offsets so stale results cannot
+ * silently drive transition timing or library tempo.
+ */
+function automixFileCacheKey(track, stat) {
+  if (!track?.id || !stat || !Number.isFinite(stat.size) ||
+      !Number.isFinite(stat.mtimeMs)) return null
+  return [
+    'file-v2', String(track.id), Math.round(stat.size),
+    Math.round(stat.mtimeMs),
+    Number(track.start_offset_ms ?? track.startOffsetMs ?? 0),
+    Number(track.end_offset_ms ?? track.endOffsetMs ?? 0),
+  ].join(':')
+}
+
 function registerAutomixHandlers(ipcMain) {
   const fs = require('fs')
   const { getDB } = require('./db')
@@ -24,12 +41,26 @@ function registerAutomixHandlers(ipcMain) {
     }
     const file = String(track.file_path || '')
     if (!file || file.startsWith('ghost://')) return null
+    let stat
+    try { stat = fs.statSync(file) } catch { return null }
+    if (!stat.isFile()) return null
+    const key = automixFileCacheKey(track, stat)
+    if (!key) return null
     return analysisFor({
-      db, key: String(track.id), trackId: String(track.id), log,
+      db, key, trackId: String(track.id), log,
       ffmpeg: () => require('./tools').findFfmpeg(),
-      source: async () => (fs.existsSync(file) ? { file } : null),
+      source: async () => {
+        // Source may be replaced between cache lookup and ffmpeg decode.
+        // Discard this attempt rather than cache the new bytes under an old
+        // revision key.
+        try {
+          const current = fs.statSync(file)
+          return current.isFile() && automixFileCacheKey(track, current) === key
+            ? { file } : null
+        } catch { return null }
+      },
     })
   })
 }
 
-module.exports = { registerAutomixHandlers }
+module.exports = { registerAutomixHandlers, automixFileCacheKey }
