@@ -100,6 +100,7 @@ export default function Library() {
     ? (folderViewOverride?.path === folderPath ? folderViewOverride.view : 'list')
     : view
 
+  /** Update the shared view and preserve an explicit choice for the current folder. */
   const changeView = nextView => {
     setView(nextView)
     if (libraryMode === 'advanced') setFolderViewOverride({ path: folderPath, view: nextView })
