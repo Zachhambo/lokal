@@ -83,3 +83,25 @@ jobs:
             git commit -m "assets(fullscreen): import original record player scene textures"
             git push origin HEAD:feature/fullscreen-turntable-scene
           fi
+
+      - name: Emit small visual QA contact sheet for source layers
+        run: |
+          python - <<'PY'
+          import base64
+          from io import BytesIO
+          from pathlib import Path
+          from PIL import Image,ImageDraw
+          root=Path('public/fullscreen-turntable')
+          montage=Image.new('RGB',(1500,540),(44,44,44))
+          for key,x,w,h in [('background',0,960,540),('vinyl',960,270,270),('tonearm',1230,270,270)]:
+              im=Image.open(root/(key+'.webp'))
+              im.thumbnail((w,h),Image.Resampling.LANCZOS)
+              if im.mode=='RGBA': montage.paste(im,(x,35),im)
+              else: montage.paste(im,(x,0))
+              ImageDraw.Draw(montage).text((x+5,5),key,fill='white')
+          out=BytesIO()
+          montage.save(out,'JPEG',quality=72,optimize=True)
+          print('PREVIEW_B64_BEGIN')
+          print(base64.b64encode(out.getvalue()).decode())
+          print('PREVIEW_B64_END')
+          PY
