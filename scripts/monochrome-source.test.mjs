@@ -51,3 +51,17 @@ test('Monochrome search error does not fall through to YouTube', async () => {
     fetchImpl: async () => ({ ok:false, status: 503 })
   }), /HTTP 503/)
 })
+
+test('Monochrome retries an intermittent provider error only once', async () => {
+  let attempts = 0
+  const result = await mono.searchTracks('song', {
+    fetchImpl: async () => {
+      attempts++
+      return attempts === 1
+        ? { ok:false, status:503 }
+        : { ok:true, status:200, json:async () => ({ tracks: [] }) }
+    }
+  })
+  assert.deepEqual(result, [])
+  assert.equal(attempts, 2)
+})

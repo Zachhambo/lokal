@@ -72,12 +72,25 @@ async function searchTracks(query, { limit = 20, fetchImpl = fetch, signal } = {
   else signal?.addEventListener('abort', onAbort, { once: true })
   const timeout = setTimeout(() => controller.abort(), 12000)
   try {
-    const response = await fetchImpl(url.href, {
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-      redirect: 'error',
-    })
-    if (!response.ok) throw new Error(`Monochrome search returned HTTP ${response.status}`)
+    // The public instance occasionally answers 5xx. One short retry matches
+    // LunarTune's reliability approach without blocking another source for long.
+    let response
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await fetchImpl(url.href, {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+          redirect: 'error',
+        })
+        if (response.ok || attempt === 1 ||
+            (response.status !== 429 && response.status < 500)) break
+      } catch (error) {
+        if (controller.signal.aborted || attempt === 1) throw error
+      }
+      if (controller.signal.aborted) throw new Error('Monochrome search was cancelled')
+      await new Promise(resolve => setTimeout(resolve, 350))
+    }
+    if (!response?.ok) throw new Error(`Monochrome search returned HTTP ${response?.status || 503}`)
     const payload = await response.json()
     if (!Array.isArray(payload?.tracks)) throw new Error('Monochrome returned an unsupported catalogue response')
     const seen = new Set()
