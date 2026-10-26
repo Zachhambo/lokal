@@ -106,6 +106,7 @@ test('structural cue selection rejects malformed and low-confidence candidates',
   const { cueNear } = await import('../src/audio/automix.js')
   assert.equal(cueNear([{ time: 8, confidence: 0.2 }], 8, 2), null)
   assert.equal(cueNear([{ time: Infinity, confidence: 0.9 }], 8, 2), null)
+  assert.equal(cueNear([null, { time: 8, confidence: 0.9 }], 8, 2)?.time, 8)
   assert.equal(cueNear([{ time: 8, confidence: 0.9 }], 8, 2)?.time, 8)
   assert.equal(cueNear([{ time: 80, confidence: 0.9 }], 8, 2), null)
 })
