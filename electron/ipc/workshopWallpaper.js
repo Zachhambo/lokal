@@ -1,0 +1,98 @@
+// Load the exact Steam Workshop source scene from the user's own installation.
+// Never ship somebody else's Workshop textures or scene.pkg in Lokal.
+const fs = require('fs')
+const path = require('path')
+const os = require('os')
+const { app, dialog } = require('electron')
+
+const WORKSHOP_ID = '2873513347' // pupsi: Vinyl Record Player (for MusicBee)
+const APP_ID = '431960' // Wallpaper Engine
+const MAX_SCENE_BYTES = 100 * 1024 * 1024
+
+function validPackage(file) {
+  if (!file || path.basename(file).toLowerCase() !== 'scene.pkg') return false
+  try {
+    const stat = fs.statSync(file)
+    return stat.isFile() && stat.size > 0 && stat.size <= MAX_SCENE_BYTES
+  } catch { return false }
+}
+function steamRoots() {
+  const home = os.homedir()
+  const roots = [
+    process.env.STEAM_DIR,
+    process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Steam'),
+    process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'Steam'),
+    path.join(home, '.steam/steam'),
+    path.join(home, '.local/share/Steam'),
+    path.join(home, 'Library/Application Support/Steam'),
+  ].filter(Boolean)
+  const visited = new Set()
+  for (let i = 0; i < roots.length && i < 40; i++) {
+    const root = path.resolve(roots[i])
+    if (visited.has(root)) continue
+    visited.add(root)
+    try {
+      // Steam stores additional drive libraries in the root libraryfolders.vdf.
+      // Matches both the old and current VDF formats, not arbitrary user paths.
+      const vdf = fs.readFileSync(path.join(root, 'steamapps/libraryfolders.vdf'), 'utf8')
+      const rx = /"path"\s+"([^"]+)"/g
+      for (const match of vdf.matchAll(rx)) {
+        const library = match[1].replace(/\\\\/g, '\\')
+        if (path.isAbsolute(library) && !visited.has(library)) roots.push(library)
+      }
+    } catch {}
+  }
+  return [...visited]
+}
+function workshopCandidates() {
+  const files = []
+  for (const steam of steamRoots()) {
+    const project = path.join(steam, 'steamapps', 'workshop', 'content', APP_ID, WORKSHOP_ID)
+    files.push(path.join(project, 'scene.pkg'), path.join(project, 'scenes', 'scene.pkg'))
+  }
+  return files
+}
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'original-turntable-source.json')
+}
+function preferredPackage() {
+  try {
+    const stored = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
+    if (validPackage(stored?.path)) return stored.path
+  } catch {}
+  return workshopCandidates().find(validPackage) || ''
+}
+function packageData(file) {
+  if (!validPackage(file)) return { error: 'The original Wallpaper Engine scene.pkg is unavailable.' }
+  const pkg = fs.readFileSync(file)
+  let project = null
+  try {
+    const p = path.join(path.dirname(file), path.basename(path.dirname(file)) === 'scenes' ? '..' : '.', 'project.json')
+    if (fs.existsSync(p)) {
+      const b = fs.readFileSync(p)
+      if (b.length <= 1024 * 1024) project = JSON.parse(b.toString('utf8'))
+    }
+  } catch {}
+  return { bytes: Uint8Array.from(pkg), project, key: `workshop:${WORKSHOP_ID}:${pkg.length}:${fs.statSync(file).mtimeMs}` }
+}
+function registerWorkshopWallpaperHandlers(ipcMain) {
+  ipcMain.handle('wallpaper:workshopStatus', () => ({
+    installed: !!preferredPackage(), workshopId: WORKSHOP_ID,
+  }))
+  ipcMain.handle('wallpaper:workshopGet', () => packageData(preferredPackage()))
+  ipcMain.handle('wallpaper:workshopChoose', async (event) => {
+    const parent = require('electron').BrowserWindow.fromWebContents(event.sender)
+    const dialogOptions = {
+      title: 'Select the original Vinyl Record Player scene.pkg',
+      properties: ['openFile'],
+      filters: [{ name: 'Wallpaper Engine scene', extensions: ['pkg'] }],
+    }
+    const selected = await dialog.showOpenDialog(parent, dialogOptions)
+    if (selected.canceled || !selected.filePaths[0]) return { cancelled: true }
+    const file = selected.filePaths[0]
+    if (!validPackage(file)) return { error: 'Select a valid scene.pkg (100 MB maximum).' }
+    fs.writeFileSync(settingsFile(), JSON.stringify({ path: file }))
+    return { installed: true }
+  })
+}
+module.exports = { registerWorkshopWallpaperHandlers, workshopCandidates, validPackage }
