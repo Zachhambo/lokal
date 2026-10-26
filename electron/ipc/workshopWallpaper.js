@@ -93,6 +93,11 @@ async function packageData(file) {
   return { bytes: new Uint8Array(pkg), project, key: `workshop:${WORKSHOP_ID}:${pkg.length}:${fs.statSync(file).mtimeMs}` }
 }
 function registerWorkshopWallpaperHandlers(ipcMain) {
+  // Same centralized SSRF/size/content-type checks used by playlist artwork.
+  // Convert provider artwork to a data URL so WebWallGL's GL texture upload
+  // does not depend on third-party image CORS response headers.
+  ipcMain.handle('wallpaper:coverData', async (_, url) =>
+    require('../playlists/remoteCover').fetchCoverData(url))
   ipcMain.handle('wallpaper:workshopStatus', () => ({
     installed: !!preferredPackage(), workshopId: WORKSHOP_ID,
   }))
