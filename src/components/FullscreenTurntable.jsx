@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { api } from '../api'
 
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=2873513347'
 
@@ -21,30 +20,23 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   const localArtwork = !!track?.artwork_path
   const onlineArtwork = track?.artwork_url || ''
 
-  // WebWallGL uploads thumbnail pixels as the ORIGINAL scene's reserved
-  // $mediaThumbnail GL texture. For local files, Lokal's trusted artwork
-  // protocol serves the full embedded art. External providers often disallow
-  // browser fetch via CORS, so use the existing HTTPS-only cover fetcher in
-  // Electron to get a safe data URL instead.
+  // WebWallGL uploads thumbn  // WebWallGL's original scene binds live images to $mediaThumbnail.
+  // Electron resolves full embedded local artwork using the trusted track ID;
+  // online artwork goes through the existing HTTPS-only image validator.
   useEffect(() => {
     let active = true
-    if (trackId && localArtwork) {
-      setArtwork(api.fullArtworkURL(trackId))
-    } else {
-      setArtwork('')
-      if (onlineArtwork && window.electron?.wallpaperCoverData) {
-        Promise.resolve(window.electron.wallpaperCoverData(onlineArtwork))
-          .then(result => { if (active) setArtwork(result || '') })
-          .catch(() => {})
-      } else if (onlineArtwork) {
-        setArtwork(onlineArtwork)
-      }
+    setArtwork('')
+    if ((trackId && localArtwork) || onlineArtwork) {
+      Promise.resolve(window.electron?.wallpaperCoverData?.({
+        trackId: localArtwork ? trackId : null,
+        url: onlineArtwork,
+      }))
+        .then(result => { if (active) setArtwork(result || '') })
+        .catch(() => {})
     }
     return () => { active = false }
   }, [trackId, localArtwork, onlineArtwork])
-
-  snapshotRef.current = {
-    hasMedia: !!track,
+  hasMedia: !!track,
     title: track?.title || '',
     artist: track?.artist || '',
     album: track?.album || '',
