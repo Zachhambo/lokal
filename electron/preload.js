@@ -240,7 +240,7 @@ contextBridge.exposeInMainWorld('electron', {
   wallpaperWorkshopStatus: () => invoke('wallpaper:workshopStatus'),
   wallpaperWorkshopGet: () => invoke('wallpaper:workshopGet'),
   wallpaperWorkshopChoose: () => invoke('wallpaper:workshopChoose'),
-  wallpaperCoverData: (url) => invoke('wallpaper:coverData', url),
+  wallpaperCoverData: (request) => invoke('wallpaper:coverData', request),
   musicVideo: (trackId) => invoke('musicVideo:find', trackId),
   musicVideoDownload: (trackId) => invoke('musicVideo:download', trackId),
   musicVideoPrepare: (trackId) => invoke('musicVideo:prepare', trackId),
