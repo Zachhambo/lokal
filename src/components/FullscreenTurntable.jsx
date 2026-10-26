@@ -20,7 +20,7 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   const localArtwork = !!track?.artwork_path
   const onlineArtwork = track?.artwork_url || ''
 
-  // WebWallGL uploads thumbn  // WebWallGL's original scene binds live images to $mediaThumbnail.
+  // WebWallGL's original scene binds live images to $mediaThumbnail.
   // Electron resolves full embedded local artwork using the trusted track ID;
   // online artwork goes through the existing HTTPS-only image validator.
   useEffect(() => {
@@ -36,7 +36,9 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
     }
     return () => { active = false }
   }, [trackId, localArtwork, onlineArtwork])
-  hasMedia: !!track,
+
+  snapshotRef.current = {
+    hasMedia: !!track,
     title: track?.title || '',
     artist: track?.artist || '',
     album: track?.album || '',
