@@ -288,21 +288,21 @@ export default function FullscreenPlayer() {
   useEffect(() => onWindowVisibility(setWindowHidden), [])
   // Turned off for this song from the side panel.
   const [coverOff, setCoverOff] = useMotionCoverOff(currentTrack)
+  const [settings, setSettings] = useState({})
   // Whether the song has a Canvas / moving cover (asked even while it's
   // turned off, so its button stays to turn it back on).
   const [coverClip, setCoverClip] = useState({ id: null, clip: null })
   useEffect(() => {
     const id = currentTrack?.id
-    if (!id || !(showFullscreen || showLyricsFullscreen)) return undefined
+    if (!id || !(showFullscreen || showLyricsFullscreen) || settings.fullscreen_visual_mode === 'turntable') return undefined
     let current = true
     loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, clip: clip?.src ? clip : null }) })
     return () => { current = false }
-  }, [currentTrack?.id, showFullscreen, showLyricsFullscreen])
+  }, [currentTrack?.id, showFullscreen, showLyricsFullscreen, settings.fullscreen_visual_mode])
   const clipNow = coverClip.id === currentTrack?.id ? coverClip.clip : null
   const { video: musicVideo } = useMusicVideo(currentTrack, showFullscreen || showLyricsFullscreen)
   const showMusicVideo = useMusicVideoView(s => s.show)
   const clipName = clipNow && (clipNow.tall || clipNow.source === 'spotify') ? 'Canvas' : 'Moving Cover'
-  const [settings, setSettings] = useState({})
   const [showSearch, setShowSearch] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   // Which side panel is open, driven purely by the two buttons below -- not
