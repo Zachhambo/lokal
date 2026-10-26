@@ -16,13 +16,15 @@
 const crypto = require('crypto')
 const yt = require('./youtube')
 const sc = require('./soundcloud')
+const mono = require('./monochrome')
 const addons = require('./addons')
 
 const PROVIDERS = {
   yt: { id: 'yt', label: 'YouTube Music', platform: 'youtube', idPattern: /^[\w-]{11}$/, sourceUrl: id => `https://music.youtube.com/watch?v=${id}` },
   sc: { id: 'sc', label: 'SoundCloud', platform: 'soundcloud', idPattern: /^\d{1,20}$/, sourceUrl: id => sc.trackUrl(id) },
+  mono: { id: 'mono', label: 'Monochrome', platform: 'monochrome', idPattern: mono.TRACK_ID, sourceUrl: id => mono.trackUrl(id) },
 }
-const PLATFORM_TO_PROVIDER = { youtube: 'yt', soundcloud: 'sc' }
+const PLATFORM_TO_PROVIDER = { youtube: 'yt', soundcloud: 'sc', monochrome: 'mono' }
 
 /** A built-in provider, or an addon provider ("a-<key>"), or null. */
 function providerOf(id) {
@@ -53,6 +55,7 @@ async function search(provider, query, { db, ytdlp, fetchImpl, fallbackSearch, l
   const key = addons.keyOfProvider(provider)
   if (key) return { results: await addons.search(db, key, query, { fetchImpl, limit: 20 }) }
   if (provider === 'sc') return { results: await sc.searchTracks(query, { ytdlp, limit }) }
+  if (provider === 'mono') return { results: await mono.searchTracks(query, { limit, fetchImpl }) }
   try {
     return { results: (await yt.searchSongs(query, { limit, fetchImpl })).map(fromYouTube) }
   } catch (e) {
@@ -68,6 +71,7 @@ function resolveStream(provider, id, opts = {}) {
   if (!validId(provider, id)) return Promise.reject(new Error('Unknown online song'))
   const key = addons.keyOfProvider(provider)
   if (key) return addons.resolveStream(opts.db, key, id, { force: opts.force, fetchImpl: opts.addonFetch, signal: opts.signal })
+  if (provider === 'mono') return mono.resolveStream(id)
   return provider === 'sc' ? sc.resolveStream(id, opts) : yt.resolveStream(id, opts)
 }
 
@@ -193,7 +197,7 @@ function streamRef(track) {
   if (fromAddon) {
     try { return { provider: addons.providerFor(fromAddon[1]), id: decodeURIComponent(fromAddon[2]) } } catch { return null }
   }
-  const own = path.match(/^ghost:\/\/(youtube|soundcloud)\/online\/([\w-]+)$/)
+  const own = path.match(/^ghost:\/\/(youtube|soundcloud|monochrome)\/online\/([\w-]+)$/)
   if (own) {
     const provider = PLATFORM_TO_PROVIDER[own[1]]
     return validId(provider, own[2]) ? { provider, id: own[2] } : null
@@ -202,7 +206,9 @@ function streamRef(track) {
   const videoId = yt.videoIdFromUrl(track?.source_url)
   if (videoId) return { provider: 'yt', id: videoId }
   const trackId = sc.idFromUrl(track?.source_url)
-  return trackId ? { provider: 'sc', id: trackId } : null
+  if (trackId) return { provider: 'sc', id: trackId }
+  const monoId = mono.idFromUrl(track?.source_url)
+  return monoId ? { provider: 'mono', id: monoId } : null
 }
 
 /**
@@ -213,7 +219,9 @@ function sourceIdentity(url) {
   const videoId = yt.videoIdFromUrl(url)
   if (videoId) return `yt:${videoId}`
   const trackId = sc.idFromUrl(url)
-  return trackId ? `sc:${trackId}` : null
+  if (trackId) return `sc:${trackId}`
+  const monoId = mono.idFromUrl(url)
+  return monoId ? `mono:${monoId}` : null
 }
 
 // ------------------------------------------------------ the same song, streamed
@@ -487,7 +495,7 @@ function pruneOnlineTracks(db, maxAgeMs = 7 * 24 * 3600 * 1000) {
     const prune = db.transaction((cutoff) => {
       const ids = db.prepare(`
         SELECT id FROM tracks
-        WHERE (file_path LIKE 'ghost://youtube/online/%' OR file_path LIKE 'ghost://soundcloud/online/%' OR file_path LIKE 'ghost://addon/%')
+        WHERE (file_path LIKE 'ghost://youtube/online/%' OR file_path LIKE 'ghost://soundcloud/online/%' OR file_path LIKE 'ghost://monochrome/online/%' OR file_path LIKE 'ghost://addon/%')
           AND COALESCE(last_modified, 0) < ?
           AND id NOT IN (SELECT track_id FROM playlist_tracks)
           AND id NOT IN (SELECT track_id FROM user_likes)
