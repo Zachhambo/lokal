@@ -19,7 +19,7 @@ function SceneArtwork({ track, x, y, width, height }) {
 // a recorded wallpaper (which would hard-code somebody else's album artwork).
 // All scenery is static SVG. Only the vinyl group animates; the album sleeve
 // and record label both receive the active track artwork.
-export default function FullscreenTurntable({ track, playing }) {
+function FullscreenTurntable({ track, playing }) {
   return (
     <div className="fullscreen-turntable absolute inset-0 overflow-hidden pointer-events-none" data-fullscreen-turntable="">
       <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 w-full h-full"
@@ -133,3 +133,6 @@ export default function FullscreenTurntable({ track, playing }) {
     </div>
   )
 }
+
+// The player updates its seek position frequently; do not rebuild this SVG for each tick.
+export default React.memo(FullscreenTurntable)
