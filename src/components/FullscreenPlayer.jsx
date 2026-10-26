@@ -803,7 +803,9 @@ export default function FullscreenPlayer() {
             style={{ pointerEvents: lyricsMode ? 'none' : undefined }}>
 
           {turntableMode && <FullscreenTurntable track={currentTrack}
-            playing={animationRunning && !reduceMotion && !performanceMode} />}
+            playing={animationRunning && !reduceMotion && !performanceMode}
+            progress={progress} duration={duration}
+            onNext={() => next(false)} onPrevious={prev} onPlayPause={togglePlay} />}
 
           {/* The header: close, lyrics view, what's playing from, full screen.
               It fades out (and the cursor hides) after a few seconds without
