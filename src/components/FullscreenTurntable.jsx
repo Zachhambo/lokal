@@ -82,6 +82,22 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retry])
 
+  // These measured coordinates correspond to the original 1920x1080 scene.
+  // The backdrop remains the creator's actual texture; only the media-driven
+  // sleeve and vinyl label are replaced with Lokal's high-resolution artwork.
+  const [bounds, setBounds] = useState({ width: 1920, height: 1080 })
+  useEffect(() => {
+    if (!stageRef.current) return undefined
+    const update = () => setBounds({
+      width: stageRef.current?.clientWidth || 1920,
+      height: stageRef.current?.clientHeight || 1080,
+    })
+    const observer = new ResizeObserver(update)
+    observer.observe(stageRef.current)
+    update()
+    return () => observer.disconnect()
+  }, [])
+  const scale = Math.max(bounds.width / 1920, bounds.height / 1080)
   const artwork = trackFullArtURL(track) || trackArtURL(track) || ''
   useEffect(() => {
     mediaRef.current?.set({
@@ -108,6 +124,34 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
   return (
     <div className="absolute inset-0 overflow-hidden" data-original-turntable="">
       <div ref={stageRef} className="absolute inset-0 pointer-events-none" />
+      {status === 'ready' && artwork && (
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-[1]"
+          style={{ width: 1920, height: 1080, transform: `translate(-50%, -50%) scale(${scale})`, transformOrigin: 'center' }}>
+          {/* Perspective-correct replacement for the LP sleeve in the source scene.
+              The surrounding blinds, lighting, turntable, dust cover and wood
+              remain original pixels rendered from the Workshop package. */}
+          <img src={artwork} alt="" draggable={false}
+            className="absolute h-[512px] w-[512px] object-cover"
+            style={{
+              left: 0, top: 0,
+              transformOrigin: '0 0',
+              transform: 'matrix3d(1.01199238,-0.08786886,0,0.00002078,0.13195849,1.01258253,0,0.00004894,0,0,1,0,160,236,0,1)',
+              filter: 'brightness(.88) saturate(.92)',
+            }} />
+          {/* The original disc remains physically present; its small printed
+              centre label reflects the same cover rather than a default logo. */}
+          <div className="absolute overflow-hidden rounded-full"
+            style={{
+              left: 1184, top: 570, width: 160, height: 160,
+              transform: 'rotate(-7deg) scaleY(.53)',
+              boxShadow: '0 0 0 3px rgba(0,0,0,.16), inset 0 0 15px rgba(0,0,0,.25)',
+            }}>
+            <img src={artwork} alt="" draggable={false} className="h-full w-full rounded-full object-cover fullscreen-turntable-label"
+              style={{ animationPlayState: playing ? 'running' : 'paused', filter: 'brightness(.84)' }}/>
+            <span aria-hidden="true" className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#a4a09b] shadow-inner"/>
+          </div>
+        </div>
+      )}
       {status !== 'ready' && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/90 text-white">
           <div className="max-w-md rounded-xl border border-white/15 bg-neutral-900/95 p-6 text-center shadow-2xl">
