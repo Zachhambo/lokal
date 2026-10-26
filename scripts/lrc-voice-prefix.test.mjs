@@ -44,6 +44,9 @@ function taggedFlac(fields, directory) {
     return Buffer.concat([h, data])
   }
   const streamInfo = Buffer.alloc(34)
+  streamInfo.writeUInt16BE(4096, 0)
+  streamInfo.writeUInt16BE(4096, 2)
+  streamInfo[10] = 0x0a; streamInfo[11] = 0xc4; streamInfo[12] = 0x42; streamInfo[13] = 0xf0
   const file = path.join(directory, 'song.flac')
   fs.writeFileSync(file, Buffer.concat([Buffer.from('fLaC'), block(0, false, streamInfo), block(4, true, comment)]))
   return file
