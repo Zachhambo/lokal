@@ -89,6 +89,7 @@ export async function importCueReport({ song1, song2, reportPath, ffprobe = 'ffp
   const report = JSON.parse(readFileSync(reportPath, 'utf8'))
   for (const [role, file] of [['song1', song1], ['song2', song2]]) {
     if (!file || !existsSync(file)) throw Error('Missing track: ' + role)
+    const originalStamp = statSync(file)
     const digest = await fileSha256(file)
     if (report[`${role}_sha256`] !== digest) {
       throw Error(`CUE-DETR report fingerprint mismatch for ${role}; refusing stale timings`)
@@ -98,6 +99,10 @@ export async function importCueReport({ song1, song2, reportPath, ffprobe = 'ffp
       '-of', 'default=noprint_wrappers=1:nokey=1', file,
     ], { encoding:'utf8', timeout:30000 }).trim())
     const stats = statSync(file)
+    if (stats.size !== originalStamp.size ||
+        Math.abs(stats.mtimeMs - originalStamp.mtimeMs) > 1) {
+      throw Error(`Audio file ${role} changed during preparation; refusing a stale cache entry`)
+    }
     const sidecar = sidecarForRole(role, report, { size:stats.size, mtimeMs:stats.mtimeMs, sha256:digest }, duration)
     saveReport(file, sidecar)
   }
