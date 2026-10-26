@@ -57,3 +57,19 @@ test('an imported tempo wins when the analysis agrees with it (octave or triplet
   assert.equal(tempoOf({ tempo: 120 }, { bpm: 97, beatConfidence: 0.5 }).bpm, 97)
   assert.equal(tempoOf({}, { bpm: 128, beatConfidence: 0.5 }).bpm, 128)
 })
+
+
+test('short audible tails never produce an overlong AutoMix overlap', () => {
+  const outgoing = analysis({ duration: 30, audibleEnd: 23, fadeOutStart: 22, bpm: 124 })
+  const incoming = analysis({ bpm: 124 })
+  const plan = planTransition({ out: outgoing, outTrack: {}, outDuration: 30, next: incoming, nextTrack: {} })
+  assert.ok(plan)
+  assert.ok(plan.start + plan.length <= 23.001)
+  assert.ok(plan.fadeIn <= plan.length)
+  if (plan.bassSwap) assert.ok(plan.swapAt < plan.length - 0.1)
+  const noRoom = planTransition({
+    out: analysis({ duration: 30, audibleEnd: 20.2 }),
+    outTrack: {}, outDuration: 30, next: incoming, nextTrack: {},
+  })
+  assert.equal(noRoom, null)
+})
