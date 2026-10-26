@@ -21,10 +21,16 @@ jobs:
             git commit -m "deps: pin WebWallGL for original scene renderer"
             git push origin HEAD:feature/fullscreen-turntable-scene
           fi
-      - name: Inspect media source API
+      - name: Install application dependencies without native postinstall
+        run: npm ci --ignore-scripts
+      - name: Check Electron integration syntax
         run: |
-          npm pack webwallgl@3.0.0 --silent
-          tar -xzf webwallgl-3.0.0.tgz
-          rg -n -m 12 'thumbnail\??:|artwork\??:|cover\??:|createMediaSource|interface MediaSnapshot' package/*.d.ts | head -70 || true
-      - name: Check Electron syntax
-        run: node --check electron/ipc/workshopWallpaper.js
+          node --check electron/ipc/workshopWallpaper.js
+          node --check electron/main.js
+          node --check electron/preload.js
+      - name: Test fullscreen regression suite
+        run: npm run test:fullscreen-appearance
+      - name: Compile Vite renderer
+        run: |
+          npm run gen:icons
+          npx vite build
