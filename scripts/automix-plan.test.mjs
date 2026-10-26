@@ -110,3 +110,29 @@ test('structural cue selection rejects malformed and low-confidence candidates',
   assert.equal(cueNear([{ time: 8, confidence: 0.9 }], 8, 2)?.time, 8)
   assert.equal(cueNear([{ time: 80, confidence: 0.9 }], 8, 2), null)
 })
+
+test('offline CUE-DETR start points control a complete 32-beat overlap', () => {
+  const out = analysis({
+    duration: 200, audibleEnd: 198, bpm: 124,
+    firstBeat: .2, beatConfidence: .8, energy: .7,
+    transitionCues: { exits: [{time:166,confidence:.95,source:'cue-detr'}] },
+  })
+  const next = analysis({
+    duration: 200, bpm:120, firstBeat:.3,
+    beatConfidence:.8, energy:.7,
+    transitionCues:{entrances:[{time:8,confidence:.95,source:'cue-detr'}]},
+  })
+  const p = planTransition({
+    out, next, outTrack:{}, nextTrack:{}, outDuration:200,
+  })
+  assert.equal(p.kind,'beatmatch')
+  assert.ok(p.start>=165.5 && p.start<=166.5)
+  assert.ok(p.inOffset>=7.5 && p.inOffset<=8.5)
+  assert.ok(p.start+p.length<=198)
+  assert.ok(p.length>15 && p.length<17)
+  const fallback=planTransition({
+    out, next:{...next,transitionCues:{entrances:[]}},
+    outTrack:{}, nextTrack:{},outDuration:200,
+  })
+  assert.ok(fallback.start>p.start, 'unpaired model cue must not skip the outro')
+})
