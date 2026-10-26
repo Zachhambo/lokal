@@ -95,7 +95,7 @@ test('turntable mode reuses real album art and blocks Canvas and moving covers',
   assert.ok(player.includes('!turntableMode && <MotionCover'), 'no video renderers in turntable mode')
   assert.ok(player.includes('if (!opened || !currentTrack || turntableMode) return undefined'), 'scene opens unobstructed')
   assert.ok(scene.includes('trackFullArtURL(track) || trackArtURL(track)'), 'high resolution cover')
-  assert.ok(scene.includes('fallback !=='), 'cover retry')
+  assert.ok(scene.includes('full !== fallback'), 'cover retry')
   assert.ok(scene.includes('track={track} x={9} y={9}'), 'live sleeve artwork')
   assert.ok(scene.includes('track={track} x={-72} y={-72}'), 'live record label')
   assert.ok(scene.includes('animationPlayState: playing'), 'pause record when playback/window stops')
