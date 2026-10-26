@@ -27,7 +27,7 @@ function stampToSeconds(min, sec, frac) {
 // the marker is anchored to the start of the line (not a lyric mentioning v1).
 function stripVoicePrefix(line) {
   if (!line || typeof line.text !== 'string') return line
-  const tag = line.text.match(/^v(\\d{1,4}):\\s*/i)
+  const tag = line.text.match(/^v(\d{1,4}):\s*/i)
   if (!tag) return line
   const text = line.text.slice(tag[0].length).trimStart()
   if (!text) return line
@@ -36,7 +36,7 @@ function stripVoicePrefix(line) {
   if (Array.isArray(words) && words.length) {
     words = words.slice()
     const first = String(words[0].word || '')
-    const leading = first.match(/^v\\d{1,4}:\\s*/i)
+    const leading = first.match(/^v\d{1,4}:\s*/i)
     if (leading) {
       const remainder = first.slice(leading[0].length)
       if (remainder) words[0] = { ...words[0], word: remainder }
