@@ -6,7 +6,7 @@ on:
       - '.github/workflows/turntable-reference-inspect.yml'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
@@ -51,3 +51,35 @@ jobs:
               elif key not in ('objects',):
                   print('SCENE FIELD',key,json.dumps(value,ensure_ascii=False)[:1500])
           PY
+
+      - name: Prepare source-derived WebP layer textures
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile
+          from PIL import Image
+          from pathlib import Path
+          from io import BytesIO
+          z=ZipFile('/tmp/dynamic-record-player.zip')
+          out=Path('public/fullscreen-turntable')
+          out.mkdir(parents=True,exist_ok=True)
+          for key,filename in {
+              'background': 'turntable base.png',
+              'vinyl': 'vinyl.png',
+              'tonearm': 'arm.png',
+              'spindle': 'pin.png',
+              'label-overlay': 'vinyl_overlay.png',
+              'vinyl-blur': 'black_vinyl_blurred.png',
+          }.items():
+              image=Image.open(BytesIO(z.read('dynamic_record_player/materials/'+filename)))
+              image.save(out/(key+'.webp'), 'WEBP',quality=94,method=6)
+              print('Optimized',key,(out/(key+'.webp')).stat().st_size)
+          PY
+      - name: Import source-derived artwork in this feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/fullscreen-turntable
+          if ! git diff --cached --quiet; then
+            git commit -m "assets(fullscreen): import original record player scene textures"
+            git push origin HEAD:feature/fullscreen-turntable-scene
+          fi
