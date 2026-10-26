@@ -6,9 +6,11 @@ const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=287
 // Wallpaper Engine's original composition is rendered from the user's own
 // Workshop scene.pkg. No replacement artwork, custom room, or copyrighted
 // textures are bundled with Lokal.
-export default function FullscreenTurntable({ track, playing, progress = 0, duration = 0 }) {
+export default function FullscreenTurntable({ track, playing, progress = 0, duration = 0, onNext, onPrevious, onPlayPause }) {
   const stageRef = useRef(null)
   const sceneRef = useRef(null)
+  const commandsRef = useRef({ onNext, onPrevious, onPlayPause })
+  commandsRef.current = { onNext, onPrevious, onPlayPause }
   const mediaRef = useRef(null)
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState('')
@@ -45,9 +47,9 @@ export default function FullscreenTurntable({ track, playing, progress = 0, dura
           duration: Number(duration) || 0,
           thumbnail: trackFullArtURL(track) || trackArtURL(track) || '',
         }, {
-          skipNext: () => { window.dispatchEvent(new Event('lokal:wallpaper-next')) },
-          skipPrevious: () => { window.dispatchEvent(new Event('lokal:wallpaper-prev')) },
-          playPause: () => { window.dispatchEvent(new Event('lokal:wallpaper-toggle')) },
+          skipNext: () => commandsRef.current.onNext?.(),
+          skipPrevious: () => commandsRef.current.onPrevious?.(),
+          playPause: () => commandsRef.current.onPlayPause?.(),
         })
         mediaRef.current = media
         scene = await mount(stageRef.current, {
