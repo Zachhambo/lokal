@@ -1,0 +1,26 @@
+name: Probe original Workshop runtime
+on:
+  push:
+    branches: [feature/fullscreen-turntable-scene]
+    paths:
+      - '.github/workflows/workshop-runtime-probe.yml'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Try anonymous official SteamCMD Workshop download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' -OutFile (Join-Path $env:RUNNER_TEMP 'steamcmd.zip')
+          Expand-Archive -Path (Join-Path $env:RUNNER_TEMP 'steamcmd.zip') -DestinationPath (Join-Path $env:RUNNER_TEMP 'steamcmd')
+          $steam = Join-Path $env:RUNNER_TEMP 'steamcmd/steamcmd.exe'
+          & $steam +force_install_dir (Join-Path $env:RUNNER_TEMP 'we-assets') +login anonymous +workshop_download_item 431960 2873513347 validate +quit
+          Write-Output "steamcmd exit code: $LASTEXITCODE"
+          $found = @(Get-ChildItem -Path $env:RUNNER_TEMP -Filter scene.pkg -Recurse -ErrorAction SilentlyContinue)
+          Write-Output "Workshop scenes found: $($found.Count)"
+          foreach ($file in $found) { Write-Output "File: $($file.FullName), bytes: $($file.Length)" }
+          if ($found.Count -eq 0) { Write-Output "Original scene unavailable to anonymous SteamCMD"; exit 0 }
