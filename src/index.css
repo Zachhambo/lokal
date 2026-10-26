@@ -384,18 +384,12 @@ html.performance-mode *::after {
 }
 
 
-/* Turntable view is a single responsive SVG scene. The only animated layer
-   is the record, which is paused on stop, window hide and reduced motion. */
-.fullscreen-turntable-vinyl {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: fullscreen-cd-rotation 2.0s linear infinite;
-}
-.fullscreen-turntable svg {
-  display: block;
+/* Original turntable's live record label: true 33⅓ RPM, paused at rest. */
+.fullscreen-turntable-label {
+  animation: fullscreen-cd-rotation 1.8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .fullscreen-turntable-vinyl { animation: none !important; }
+  .fullscreen-turntable-label { animation: none !important; }
 }
 
 /* Fullscreen CD details follow the reference: hairline white outer rim,
