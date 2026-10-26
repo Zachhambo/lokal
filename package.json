@@ -195,6 +195,7 @@
     "sharp": "^0.35.5",
     "three": "^0.175.0",
     "tough-cookie": "6.0.0",
+    "webwallgl": "3.0.0",
     "ws": "^8.22.0",
     "yauzl": "^3.4.0",
     "youtubei.js": "^17.2.0"
