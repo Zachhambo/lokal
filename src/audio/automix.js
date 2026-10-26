@@ -87,6 +87,15 @@ export function planTransition({ out, outTrack, outDuration, next, nextTrack, sa
     const length = Math.min(plan.length, outEnd - start)
     if (!(Number.isFinite(start) && Number.isFinite(length) && length >= 0.5)) return null
     const rounded = value => Math.round(value * 1000) / 1000
+    // A partial beatmatch would lose its intended beat count/phase. Fall
+    // back to a short ordinary handoff rather than time-stretch off-grid.
+    if (plan.kind === 'beatmatch' && length < plan.length - 0.01) {
+      return {
+        kind: 'smart', start: rounded(start), length: rounded(length),
+        inOffset: plan.inOffset, fadeIn: rounded(Math.min(plan.fadeIn, length)),
+        rate: 1, bassSwap: false,
+      }
+    }
     const result = {
       ...plan, start: rounded(start), length: rounded(length),
       fadeIn: rounded(Math.min(plan.fadeIn, length)),
