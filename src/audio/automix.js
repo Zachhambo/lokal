@@ -7,7 +7,7 @@
 //   beatmatch  two steady songs at nearly the same tempo (or double, or
 //              half): the next one is sped up or slowed (pitch kept) to the
 //              playing one's tempo, starts on its beat, and the two cross
-//              over 16 beats with a bass swap halfway (two basslines at
+//              over 16 beats (or 32 with suitable structural cues) with a bass swap halfway (two basslines at
 //              once sound muddy); its tempo then glides back.
 //   smart      the rest: a crossfade placed on the song's own fade-out (or
 //              its last seconds when it ends hard), silence at either end
@@ -60,6 +60,21 @@ export function matchRate(outBpm, inBpm) {
 }
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value))
+/** Pick a strong, credible bar-level energy cue near the intended handoff.
+ * These are lightweight analysis hints, never a guarantee of vocal absence.
+ */
+export function cueNear(candidates, target, tolerance, min = 0, max = Infinity) {
+  if (!Array.isArray(candidates) || !Number.isFinite(target) || tolerance <= 0) return null
+  const options = candidates.filter(({ time, confidence } = {}) =>
+    Number.isFinite(time) && Number.isFinite(confidence) &&
+    confidence >= 0.55 && time >= min && time <= max &&
+    Math.abs(time - target) <= tolerance)
+  options.sort((a, b) =>
+    (Math.abs(a.time - target) / tolerance - a.confidence * 0.15) -
+    (Math.abs(b.time - target) / tolerance - b.confidence * 0.15))
+  return options[0] || null
+}
+
 
 /**
  * The transition from the playing song into the next.
@@ -124,16 +139,42 @@ export function planTransition({ out, outTrack, outDuration, next, nextTrack, sa
 
   if (rate && steady && driving) {
     const beat = 60 / outTempo.bpm
-    const length = clamp(BEATMATCH_BEATS * beat, 5, 14)
-    // On the playing song's beat grid: the last whole-beat start that still fits before its end.
+    const baseLength = clamp(BEATMATCH_BEATS * beat, 5, 14)
     const firstBeat = Number(outTempo.firstBeat) || 0
-    const latest = (fadeSpan >= 3 ? Math.min(outEnd, Number(out.fadeOutStart) + length) : outEnd) - length
-    const start = firstBeat + Math.floor((latest - firstBeat) / beat) * beat
-    // The next song from its first beat after any silence.
     const inBeat = 60 / inTempo.bpm
     const inFirst = Number(inTempo.firstBeat) || 0
-    const entry = inOffset > inFirst ? inFirst + Math.ceil((inOffset - inFirst) / inBeat) * inBeat : inFirst
-    const swapBeats = Math.round(BEATMATCH_BEATS / 2)
+    let entry = inOffset > inFirst
+      ? inFirst + Math.ceil((inOffset - inFirst) / inBeat) * inBeat
+      : inFirst
+
+    // Optional strong intro cue: shift the incoming song to its next
+    // musically convincing entrance, but never skip more than 15 seconds.
+    const entrance = cueNear(
+      next.transitionCues?.entrances, entry, 12,
+      entry, Math.min(Number(next.duration) || Infinity, entry + MAX_LEAD_IN_S),
+    )
+    if (entrance) {
+      entry = inFirst + Math.ceil((entrance.time - inFirst) / inBeat) * inBeat
+    }
+
+    // AutoMix Engine uses 32-beat handoffs. Attempt one only when independent
+    // source analysis gives credible entry AND exit cues with enough runway.
+    // Otherwise retain the tested 16-beat path rather than forcing long fades.
+    const phraseLength = 32 * beat
+    const phraseLatest = outEnd - phraseLength
+    const exitCue = phraseLength >= 9 && phraseLength <= 22
+      ? cueNear(out.transitionCues?.exits, phraseLatest, 12 * beat, earliest, phraseLatest)
+      : null
+    const phrase = !!entrance && !!exitCue && outEnd - earliest >= phraseLength + 0.5
+    const length = phrase ? phraseLength : baseLength
+    const latest = (fadeSpan >= 3 && !phrase
+      ? Math.min(outEnd, Number(out.fadeOutStart) + length)
+      : outEnd) - length
+    const target = phrase ? exitCue.time : latest
+    const snapped = firstBeat + Math.round((target - firstBeat) / beat) * beat
+    const start = snapped <= latest ? snapped : snapped - beat
+    const beats = phrase ? 32 : BEATMATCH_BEATS
+    const swapBeats = Math.round(beats / 2)
     return finish({
       kind: 'beatmatch', start, length: Math.round(length * 1000) / 1000,
       inOffset: Math.round(Math.max(0, entry) * 1000) / 1000,
