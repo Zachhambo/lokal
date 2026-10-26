@@ -78,7 +78,28 @@ export function planTransition({ out, outTrack, outDuration, next, nextTrack, sa
   const outEnd = Math.min(duration, Number(out?.audibleEnd) || duration)
   const inOffset = next && Number(next.leadIn) > 0.05 && Number(next.leadIn) <= MAX_LEAD_IN_S ? Number(next.leadIn) : 0
   const earliest = Math.max(20, duration * 0.4)
-  const finish = plan => ({ ...plan, start: Math.round(clamp(plan.start, earliest, Math.max(earliest, duration - 1)) * 1000) / 1000 })
+  // The incoming source cannot replace the outgoing one after its last
+  // audible sample. In particular, a short track with a long suggested
+  // beat overlap must not run an overlong fade into silence.
+  const finish = plan => {
+    if (!(Number.isFinite(outEnd) && outEnd - earliest >= 0.5)) return null
+    const start = clamp(plan.start, earliest, outEnd - 0.5)
+    const length = Math.min(plan.length, outEnd - start)
+    if (!(Number.isFinite(start) && Number.isFinite(length) && length >= 0.5)) return null
+    const rounded = value => Math.round(value * 1000) / 1000
+    const result = {
+      ...plan, start: rounded(start), length: rounded(length),
+      fadeIn: rounded(Math.min(plan.fadeIn, length)),
+    }
+    // Shortening an overlap can put the bass swap beyond its endpoint.
+    // When there is no room to exchange basslines, use an ordinary fade.
+    if (result.bassSwap && (!Number.isFinite(result.swapAt) || result.swapAt >= length - 0.1)) {
+      result.bassSwap = false
+      delete result.swapAt
+      delete result.highpass
+    }
+    return result
+  }
 
   if (!out || !next) {
     // Not analysed (yet, or it couldn't be): an even crossfade over the last seconds.
