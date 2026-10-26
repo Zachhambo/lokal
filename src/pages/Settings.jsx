@@ -2303,12 +2303,18 @@ activeCategory === 'data' ? usersTried
             {settings.artwork_backdrop !== '0' ? t('On') : t('Off')}
           </button>
         </Row>
-        <Row label={t("Rotating CD")} desc={t("Rotate the album cover like a CD in fullscreen while music plays. Animated covers take priority.")}>
-          <button
-            onClick={() => set('fullscreen_rotating_cd', settings.fullscreen_rotating_cd === '1' ? '0' : '1')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.fullscreen_rotating_cd === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
-            {settings.fullscreen_rotating_cd === '1' ? t('On') : t('Off')}
-          </button>
+        <Row label={t("Fullscreen Artwork")} desc={t("Choose the fullscreen player presentation. Rotating CD uses the classic disc effect; Turntable uses the current cover on a record sleeve and spinning vinyl. Turntable temporarily disables Moving Covers and Spotify Canvas in fullscreen only.")}>
+          <select
+            value={['cover', 'cd', 'turntable'].includes(settings.fullscreen_visual_mode)
+              ? settings.fullscreen_visual_mode
+              : settings.fullscreen_rotating_cd === '1' ? 'cd' : 'cover'}
+            onChange={e => set('fullscreen_visual_mode', e.target.value)}
+            aria-label={t("Fullscreen Artwork")}
+            className="bg-card border border-border rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-accent/50">
+            <option value="cover">{t('Album Cover')}</option>
+            <option value="cd">{t('Rotating CD')}</option>
+            <option value="turntable">{t('Turntable')}</option>
+          </select>
         </Row>
         <Row label={t("Moving Covers")} desc={t("Play an album's animated cover in the side panel and full screen player, when there is one.")}>
           <button
