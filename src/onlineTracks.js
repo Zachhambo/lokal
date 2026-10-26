@@ -6,7 +6,7 @@
 import { api } from './api.js'
 import { downloadBatchCurrent } from './downloadCancellation.js'
 
-export const PROVIDER_LABELS = { yt: 'YouTube', sc: 'SoundCloud' }
+export const PROVIDER_LABELS = { yt: 'YouTube', sc: 'SoundCloud', mono: 'Monochrome' }
 
 /** Is `provider` a user-installed addon ("a-<key>")? */
 export function isAddonProvider(provider) {
@@ -30,14 +30,16 @@ export function streamRef(track) {
   if (fromAddon) {
     try { return { provider: `a-${fromAddon[1]}`, id: decodeURIComponent(fromAddon[2]) } } catch { return null }
   }
-  const own = path.match(/^ghost:\/\/(youtube|soundcloud)\/online\/([\w-]+)$/)
-  if (own) return { provider: own[1] === 'youtube' ? 'yt' : 'sc', id: own[2] }
+  const own = path.match(/^ghost:\/\/(youtube|soundcloud|monochrome)\/online\/([\w-]+)$/)
+  if (own) return { provider: own[1] === 'youtube' ? 'yt' : own[1] === 'soundcloud' ? 'sc' : 'mono', id: own[2] }
   if (!path.startsWith('ghost://')) return null
   const url = String(track?.source_url || '')
   const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/)|youtu\.be\/)([\w-]{11})/)
   if (yt) return { provider: 'yt', id: yt[1] }
   const sc = url.match(/api\.soundcloud\.com\/tracks\/(?:soundcloud(?:%3A|:)tracks(?:%3A|:))?(\d+)/i)
-  return sc ? { provider: 'sc', id: sc[1] } : null
+  if (sc) return { provider: 'sc', id: sc[1] }
+  const mono = url.match(/^https:\/\/tracks\.monochrome\.st\/track\/(\d{15,20})\/?(?:[?#].*)?$/)
+  return mono ? { provider: 'mono', id: mono[1] } : null
 }
 
 /** Same online song? (a track, or a search result { provider, id }) */
@@ -66,7 +68,7 @@ export function sourceRefKey(ref) {
 }
 
 // Where a downloaded song came from (tracks.download_source).
-const DOWNLOAD_SOURCE_LABELS = { yt: 'YouTube', sc: 'SoundCloud', soulseek: 'Soulseek', web: 'Web' }
+const DOWNLOAD_SOURCE_LABELS = { yt: 'YouTube', sc: 'SoundCloud', mono: 'Monochrome', soulseek: 'Soulseek', web: 'Web' }
 let addonNames = null
 if (typeof window !== 'undefined') window.addEventListener('lokal:addons-changed', () => { addonNames = null })
 
@@ -122,12 +124,14 @@ export function audioSrcFor(track) {
 export function downloadUrlFor(track) {
   const ref = streamRef(track)
   if (!ref || isAddonProvider(ref.provider)) return null // addons: resolved when saving
+  if (ref.provider === 'mono') return /^\d{15,20}$/.test(ref.id) ? `https://tracks.monochrome.st/track/${ref.id}` : null
   return ref.provider === 'sc' ? `https://api.soundcloud.com/tracks/${ref.id}` : `https://music.youtube.com/watch?v=${ref.id}`
 }
 
 /** Rebuild a download URL for a local file that was downloaded from a known source. */
 export function missingTrackDownloadUrl(track) {
-  const match = String(track?.source_ref || '').match(/^(yt|sc):(.+)$/)
+  const match = String(track?.source_ref || '').match(/^(yt|sc|mono):(.+)$/)
+  if (match?.[1] === 'mono') return /^\d{15,20}$/.test(match[2]) ? `https://tracks.monochrome.st/track/${match[2]}` : null
   if (match) return match[1] === 'sc'
     ? `https://api.soundcloud.com/tracks/${match[2]}`
     : `https://music.youtube.com/watch?v=${match[2]}`

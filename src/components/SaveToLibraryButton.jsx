@@ -28,8 +28,8 @@ const SAVING = new Set(['queued', 'downloading', 'finishing'])
 export default function SaveToLibraryButton({ track, getTrack, source, meta, size = 14, className = '', offerUpgrade = false, replaceTrackId = null, openMenuOnEvent = false, openMenuEventKey = null }) {
   const nav = useNavigate()
   const ref = streamRef(track) || source
-  const url = ref && (ref.provider === 'yt' || ref.provider === 'sc')
-    ? downloadUrlFor({ file_path: `ghost://${ref.provider === 'sc' ? 'soundcloud' : 'youtube'}/online/${ref.id}` })
+  const url = ref && ['yt', 'sc', 'mono'].includes(ref.provider)
+    ? downloadUrlFor({ file_path: `ghost://${ref.provider === 'sc' ? 'soundcloud' : ref.provider === 'mono' ? 'monochrome' : 'youtube'}/online/${ref.id}` })
     : null
   // The download job: by its URL (YouTube, SoundCloud), or by the id we got
   // back when starting it (addon links change on every request).
