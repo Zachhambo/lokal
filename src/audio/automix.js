@@ -147,6 +147,39 @@ export function planTransition({ out, outTrack, outDuration, next, nextTrack, sa
       ? inFirst + Math.ceil((inOffset - inFirst) / inBeat) * inBeat
       : inFirst
 
+    // A paired CUE-DETR report supplies 32-beat overlap *start* points,
+    // not the later downbeats. Use those only if both roles are available
+    // and lie in safe regions; missing pairs keep the heuristic planner.
+    const modelEntrance = (next.transitionCues?.entrances || []).find(c =>
+      c?.source === 'cue-detr' && Number.isFinite(c.time) &&
+      c.time >= 0 && c.time <= Math.min(45, Number(next.duration || 180) - 20))
+    const phraseLength = 32 * beat
+    const modelExits = (out.transitionCues?.exits || []).filter(c =>
+      c?.source === 'cue-detr' && Number.isFinite(c.time) &&
+      c.time >= Math.max(earliest, outEnd - 90) &&
+      c.time <= outEnd - phraseLength)
+    const modelExit = modelExits.sort((a, b) => b.time - a.time)[0] || null
+    if (modelEntrance && modelExit &&
+        Number(outTempo.bpm) > 0 && Number(inTempo.bpm) > 0 &&
+        phraseLength >= 9 && phraseLength <= 22) {
+      const entryBeat = Math.round((modelEntrance.time - inFirst) / inBeat)
+      const modelEntry = Math.max(0, inFirst + entryBeat * inBeat)
+      const outBeat = Math.round((modelExit.time - firstBeat) / beat)
+      const modelStart = Math.max(earliest, firstBeat + outBeat * beat)
+      if (modelStart + phraseLength <= outEnd) {
+        return finish({
+          kind: 'beatmatch', start: modelStart,
+          length: Math.round(phraseLength * 1000) / 1000,
+          inOffset: Math.round(modelEntry * 1000) / 1000,
+          fadeIn: Math.round(phraseLength * 500) / 1000,
+          rate: Math.round(rate * 10000) / 10000,
+          bassSwap: true,
+          swapAt: Math.round(Math.min(phraseLength - 1, 16 * beat) * 1000) / 1000,
+          highpass: SWAP_HZ,
+        })
+      }
+    }
+
     // Optional strong intro cue: shift the incoming song to its next
     // musically convincing entrance, but never skip more than 15 seconds.
     const entrance = cueNear(
@@ -160,7 +193,6 @@ export function planTransition({ out, outTrack, outDuration, next, nextTrack, sa
     // AutoMix Engine uses 32-beat handoffs. Attempt one only when independent
     // source analysis gives credible entry AND exit cues with enough runway.
     // Otherwise retain the tested 16-beat path rather than forcing long fades.
-    const phraseLength = 32 * beat
     const phraseLatest = outEnd - phraseLength
     const exitCue = phraseLength >= 9 && phraseLength <= 22
       ? cueNear(out.transitionCues?.exits, phraseLatest, 12 * beat, earliest, phraseLatest)
