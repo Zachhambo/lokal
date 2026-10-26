@@ -52,19 +52,36 @@ function workshopCandidates() {
   }
   return files
 }
+// Accept this specific Workshop source, not an arbitrary package that could run
+// SceneScript inside Lokal's renderer. A copied scene needs its project.json.
+function verifiedWorkshopPackage(file) {
+  if (!validPackage(file)) return false
+  const normal = path.resolve(file).replace(/\\/g, '/')
+  if (normal.split('/').some((part, i, parts) =>
+    part === APP_ID && parts[i + 1] === WORKSHOP_ID)) return true
+  const directory = path.basename(path.dirname(file)) === 'scenes'
+    ? path.dirname(path.dirname(file)) : path.dirname(file)
+  try {
+    const metadata = fs.readFileSync(path.join(directory, 'project.json'))
+    if (metadata.length > 1024 * 1024) return false
+    return String(JSON.parse(metadata.toString('utf8')).workshopid || '') === WORKSHOP_ID
+  } catch { return false }
+}
 function settingsFile() {
   return path.join(app.getPath('userData'), 'original-turntable-source.json')
 }
 function preferredPackage() {
   try {
     const stored = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'))
-    if (validPackage(stored?.path)) return stored.path
+    if (verifiedWorkshopPackage(stored?.path)) return stored.path
   } catch {}
-  return workshopCandidates().find(validPackage) || ''
+  return workshopCandidates().find(verifiedWorkshopPackage) || ''
 }
-function packageData(file) {
-  if (!validPackage(file)) return { error: 'The original Wallpaper Engine scene.pkg is unavailable.' }
-  const pkg = fs.readFileSync(file)
+async function packageData(file) {
+  if (!verifiedWorkshopPackage(file)) return { error: 'The original Wallpaper Engine scene.pkg is unavailable.' }
+  // Loading a large scene synchronously would block Electron's main thread
+  // and make playback or window controls appear frozen.
+  const pkg = await fs.promises.readFile(file)
   let project = null
   try {
     const p = path.join(path.dirname(file), path.basename(path.dirname(file)) === 'scenes' ? '..' : '.', 'project.json')
@@ -73,7 +90,7 @@ function packageData(file) {
       if (b.length <= 1024 * 1024) project = JSON.parse(b.toString('utf8'))
     }
   } catch {}
-  return { bytes: Uint8Array.from(pkg), project, key: `workshop:${WORKSHOP_ID}:${pkg.length}:${fs.statSync(file).mtimeMs}` }
+  return { bytes: new Uint8Array(pkg), project, key: `workshop:${WORKSHOP_ID}:${pkg.length}:${fs.statSync(file).mtimeMs}` }
 }
 function registerWorkshopWallpaperHandlers(ipcMain) {
   ipcMain.handle('wallpaper:workshopStatus', () => ({
@@ -90,9 +107,9 @@ function registerWorkshopWallpaperHandlers(ipcMain) {
     const selected = await dialog.showOpenDialog(parent, dialogOptions)
     if (selected.canceled || !selected.filePaths[0]) return { cancelled: true }
     const file = selected.filePaths[0]
-    if (!validPackage(file)) return { error: 'Select a valid scene.pkg (100 MB maximum).' }
+    if (!verifiedWorkshopPackage(file)) return { error: 'Select the original Workshop 2873513347 scene.pkg, inside its Workshop folder or beside a project.json with the matching workshopid (100 MB maximum).' }
     fs.writeFileSync(settingsFile(), JSON.stringify({ path: file }))
     return { installed: true }
   })
 }
-module.exports = { registerWorkshopWallpaperHandlers, workshopCandidates, validPackage }
+module.exports = { registerWorkshopWallpaperHandlers, workshopCandidates, validPackage, verifiedWorkshopPackage }
