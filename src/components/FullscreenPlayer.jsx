@@ -326,6 +326,19 @@ export default function FullscreenPlayer() {
     ? settings.fullscreen_visual_mode
     : (settings.fullscreen_rotating_cd === '1' ? 'cd' : 'cover')
   const turntableMode = fullscreenVisualMode === 'turntable'
+  // Suspend all moving covers, including a sidebar hidden behind this overlay.
+  // Restore their normal behavior on exit without changing the user's setting.
+  useEffect(() => {
+    const enabled = showFullscreen && turntableMode
+    document.documentElement.toggleAttribute('data-fullscreen-turntable', enabled)
+    window.dispatchEvent(new Event('lokal:fullscreen-turntable'))
+    return () => {
+      if (enabled) {
+        document.documentElement.removeAttribute('data-fullscreen-turntable')
+        window.dispatchEvent(new Event('lokal:fullscreen-turntable'))
+      }
+    }
+  }, [showFullscreen, turntableMode])
   const rotatingCd = fullscreenVisualMode === 'cd' && !performanceMode && !reduceMotion
   // In the original CD mode, a playing Canvas/moving cover still takes priority.
   const spinCd = rotatingCd && !fsCanvas && !squareMotionActive
