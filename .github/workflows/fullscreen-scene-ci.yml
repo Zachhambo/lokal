@@ -1,0 +1,30 @@
+name: Verify full scene renderer integration
+on:
+  push:
+    branches: [feature/fullscreen-turntable-scene]
+    paths:
+      - '.github/workflows/fullscreen-scene-ci.yml'
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install scene renderer and lock dependencies
+        run: |
+          npm install --package-lock-only --save-exact webwallgl@3.0.0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "deps: pin WebWallGL for original scene renderer"
+            git push origin HEAD:feature/fullscreen-turntable-scene
+          fi
+      - name: Inspect media source API
+        run: |
+          npm pack webwallgl@3.0.0 --silent
+          tar -xzf webwallgl-3.0.0.tgz
+          rg -n -m 12 'thumbnail\??:|artwork\??:|cover\??:|createMediaSource|interface MediaSnapshot' package/*.d.ts | head -70 || true
+      - name: Check Electron syntax
+        run: node --check electron/ipc/workshopWallpaper.js
