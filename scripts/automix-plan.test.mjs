@@ -75,3 +75,37 @@ test('short audible tails never produce an overlong AutoMix overlap', () => {
   })
   assert.equal(noRoom, null)
 })
+
+
+test('strong outgoing and incoming cues allow a validated 32-beat handoff', () => {
+  const outgoing = analysis({
+    transitionCues: { exits: [{ time: 182, confidence: 0.9 }] },
+    audibleEnd: 198,
+  })
+  const incoming = analysis({
+    bpm: 120, leadIn: 0.5, firstBeat: 0.3,
+    transitionCues: { entrances: [{ time: 3.3, confidence: 0.9 }] },
+  })
+  const plan = planTransition({
+    out: outgoing, outTrack: {}, outDuration: 200,
+    next: incoming, nextTrack: {},
+  })
+  assert.equal(plan.kind, 'beatmatch')
+  assert.ok(Math.abs(plan.length - (32 * 60 / 124)) < 0.01)
+  assert.ok(plan.start + plan.length <= outgoing.audibleEnd + 0.001)
+  assert.ok(plan.inOffset >= 3.3)
+  assert.ok(plan.swapAt > 7)
+  const withoutCues = planTransition({
+    out: { ...outgoing, transitionCues: { exits: [] } }, outTrack: {},
+    outDuration: 200, next: incoming, nextTrack: {},
+  })
+  assert.ok(withoutCues.length < 14, 'uncertain cues keep a short fade')
+})
+
+test('structural cue selection rejects malformed and low-confidence candidates', async () => {
+  const { cueNear } = await import('../src/audio/automix.js')
+  assert.equal(cueNear([{ time: 8, confidence: 0.2 }], 8, 2), null)
+  assert.equal(cueNear([{ time: Infinity, confidence: 0.9 }], 8, 2), null)
+  assert.equal(cueNear([{ time: 8, confidence: 0.9 }], 8, 2)?.time, 8)
+  assert.equal(cueNear([{ time: 80, confidence: 0.9 }], 8, 2), null)
+})
