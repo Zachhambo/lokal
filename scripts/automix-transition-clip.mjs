@@ -8,6 +8,11 @@ import path from 'node:path'
 import { fileSha256 } from './automix-import-cues.mjs'
 
 export const STEM_CLIP_SCHEMA = 'lokal-automix-stem-clip-v1'
+export function defaultStemClipPath(outgoing, incoming) {
+  const id = createHash('sha256').update(path.resolve(incoming)).digest('hex').slice(0, 24)
+  return path.resolve(outgoing) + '.lokal-stem-to-' + id + '.wav'
+}
+
 const finite = value => typeof value === 'number' && Number.isFinite(value)
 
 /** Read-only, fail-closed interpretation of the upstream stem-render report.
