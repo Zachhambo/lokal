@@ -66,6 +66,7 @@ export function createStemPlayback({
   let preparedHandoff = false
   let expectedInternalSeek = null
   let playing = false
+  let startupPaused = false
 
   const silenceClip = () => {
     mixGain.gain.cancelScheduledValues(ctx.currentTime)
@@ -78,6 +79,8 @@ export function createStemPlayback({
     element.removeEventListener('timeupdate', onProgress)
     element.removeEventListener('ended', complete)
     element.removeEventListener('error', abort)
+    outgoing.removeEventListener('pause', mirrorPause)
+    outgoing.removeEventListener('play', mirrorPlay)
     incoming.removeEventListener('pause', mirrorPause)
     incoming.removeEventListener('play', mirrorPlay)
     incoming.removeEventListener('seeking', onSeek)
@@ -154,7 +157,11 @@ export function createStemPlayback({
       mixGain.gain.setTargetAtTime(Math.max(0, getVolume()),now,.08)
     }
   }
-  function mirrorPause() { if (!finished) element.pause() }
+  function mirrorPause() {
+    if (finished) return
+    startupPaused = true
+    element.pause()
+  }
   function mirrorPlay() {
     if (!finished && playing && element.paused) element.play().catch(abort)
   }
@@ -172,6 +179,8 @@ export function createStemPlayback({
   element.addEventListener('timeupdate',onProgress)
   element.addEventListener('ended',complete)
   element.addEventListener('error',abort)
+  outgoing.addEventListener('pause',mirrorPause)
+  outgoing.addEventListener('play',mirrorPlay)
   incoming.addEventListener('pause',mirrorPause)
   incoming.addEventListener('play',mirrorPlay)
   incoming.addEventListener('seeking',onSeek)
@@ -180,6 +189,7 @@ export function createStemPlayback({
     element,
     async start() {
       if (finished) return false
+      startupPaused = false
       try {
         // HTMLAudioElement.play() may never settle if the system's decoder
         // hangs while opening a damaged WAV. Bound this optional path, then
@@ -187,7 +197,7 @@ export function createStemPlayback({
         // queue under a permanent crossfade lock.
         const startupDeadline = () => {
           if (finished) return
-          if (incoming.paused) {
+          if (startupPaused || outgoing.paused) {
             // User pause during decoder startup must not turn an elapsed
             // timeout into an unsolicited queue advance.
             startupTimer = setTimeout(startupDeadline, 5000)
@@ -199,7 +209,7 @@ export function createStemPlayback({
         await element.play() // Do not mute the real decks until audible.
         // A user may have paused while the decoder was opening the WAV.
         // Do not play through a completed asynchronous startup request.
-        if (incoming.paused) element.pause()
+        if (startupPaused || outgoing.paused) element.pause()
         if (startupTimer) clearTimeout(startupTimer)
         startupTimer = null
         if (finished) return false
