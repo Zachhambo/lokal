@@ -195,7 +195,8 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
         ref={externalMenuButtonRef}
         onClick={(e) => { e.stopPropagation(); saveFromSource() }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPosition(null); setMenu({ x: e.clientX, y: e.clientY }) }}
-        disabled={state === 'saving'}
+        // Keep right-click available while a stereo job is running: Atmos is a
+        // separate quality and may be queued independently.
         title={label}
         aria-label={label}
         className={`flex-shrink-0 transition-all ${color} ${state === 'idle' ? className : ''}`}
@@ -223,7 +224,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
             <Download size={14} className="text-muted" /> Download from {providerLabel}
           </button>
           {canSaveAtmos && (
-            <button role="menuitem" onClick={saveAtmos} disabled={state === 'saving'}
+            <button role="menuitem" onClick={saveAtmos}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-text hover:bg-card disabled:opacity-50">
               <Download size={14} className="text-white" /> Download Dolby Atmos
             </button>
