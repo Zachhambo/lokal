@@ -242,6 +242,7 @@ export const api = {
   // AutoMix: a song's analysis (desktop; electron/automix), null when it can't be.
   automixAnalyze: (track) => isE() && el()?.automixAnalyze ? el().automixAnalyze(track) : Promise.resolve(null),
   automixStemClip: (outgoing, incoming) => isE() && el()?.automixStemClip ? el().automixStemClip(outgoing, incoming) : Promise.resolve(null),
+  automixPreparePair: (outgoing, incoming, engineDir) => isE() && el()?.automixPreparePair ? el().automixPreparePair(outgoing, incoming, engineDir) : Promise.resolve(null),
   // Flow's songs: the library with this user's likes and plays (electron/ipc/flow.js; the server's /tracks/flow-pool on the web).
   flowPool: (uid) => isE() && el()?.flowPool ? el().flowPool(uid || 'guest') : apiFetch(`/tracks/flow-pool?userId=${encodeURIComponent(uid || 'guest')}`),
   spotifyLikesPush: (track) => isE() && el()?.spotifyLikesPush ? el().spotifyLikesPush(track) : Promise.resolve({ ok: false }),
