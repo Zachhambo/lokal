@@ -182,6 +182,8 @@ export async function saveToLibrary(track, extra = {}) {
     ...(extra.downloadAtmos === true && ref && isAddonProvider(ref.provider) ? {
       addonQuality: 'DOLBY_ATMOS', explicitAtmosDownload: true,
     } : {}),
+    // Monochrome also serves bare FLAC URLs without embedded song tags.
+    // Preserve the catalogue title, artist, album and cover as real file tags.
     // An addon's file is a bare audio link, without tags: name and tag it
     // from what the addon said (only where the file has nothing).
     tags: extra.tags || extra.replaceImported?.length
@@ -189,7 +191,7 @@ export async function saveToLibrary(track, extra = {}) {
           title: extra.tags?.title || track.title || undefined,
           artist: extra.tags?.artist || track.artist || undefined,
           album: extra.tags?.album || track.album || undefined,
-          cover: ref && isAddonProvider(ref.provider)
+          cover: ref && (isAddonProvider(ref.provider) || ref.provider === 'mono')
             ? (extra.tags?.cover || (/^https:\/\//.test(String(track.artwork_url || '')) ? track.artwork_url : undefined))
             : undefined,
           // Addon metadata may include details the playlist ghost did not have.
@@ -201,7 +203,7 @@ export async function saveToLibrary(track, extra = {}) {
             genre: extra.tags?.genre || track.genre || undefined,
           } : {}),
         }
-      : (ref && isAddonProvider(ref.provider)
+      : (ref && (isAddonProvider(ref.provider) || ref.provider === 'mono')
           ? {
               title: track.title || undefined, artist: track.artist || undefined, album: track.album || undefined,
               cover: /^https:\/\//.test(String(track.artwork_url || '')) ? track.artwork_url : undefined,
