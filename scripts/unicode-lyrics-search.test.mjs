@@ -15,6 +15,7 @@ const fixture = [
   { id: 'pa', title: 'Punjabi', play_count: 6, lines: [{ text: 'ਦਿਲ ਦੀ ਗੱਲ ਸੁਣ ਲੈ' }] },
   { id: 'latin', title: 'English', play_count: 5, lines: [{ text: 'Love, is all you need' }] },
   { id: 'ru', title: 'Cyrillic', play_count: 5, lines: [{ text: 'ПРИВЕТ МИР' }] },
+  { id: 'accent', title: 'Accented', play_count: 3, lines: [{ text: 'ÉTÉ DANS LE SUD' }] },
   { id: 'mixed', title: 'Mixed', play_count: 4, lines: [{ words: [{ word: '東京' }, { word: 'の' }, { word: '夜' }] }] },
 ]
 
@@ -32,7 +33,7 @@ function libraryDb() {
               file_path: '/music/' + f.id + '.flac',
               content: JSON.stringify(f.lines),
             }))
-            .filter(row => literals.some(literal => row.content.toLowerCase().includes(literal)))
+            .filter(row => literals.some(literal => row.content.replace(/[A-Z]/g, ch => ch.toLowerCase()).includes(literal)))
         },
       }
     },
@@ -42,7 +43,7 @@ function libraryDb() {
 test('preserves CJK, Devanagari and Gurmukhi codepoints and combining marks', () => {
   for (const [query, expected] of [
     ['最亮', 'zh'], ['心に', 'ja'], ['दिल', 'hi'], ['ਦਿਲ', 'pa'],
-    ['東京', 'mixed'], ['LOVE', 'latin'], ['привет', 'ru'],
+    ['東京', 'mixed'], ['LOVE', 'latin'], ['привет', 'ru'], ['été', 'accent'],
   ]) {
     assert.deepEqual(searchLyricsEntries(libraryDb(), query).map(r => r.id), [expected], query)
   }
