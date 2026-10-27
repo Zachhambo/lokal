@@ -1265,6 +1265,17 @@ function registerScannerHandlers(ipcMain) {
   ipcMain.handle('scanner:scan', async (e, folder) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolder(folder || DEFAULT_MUSIC_PATH) })
   ipcMain.handle('scanner:scanFolders', async (e, folders) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolders(folders) })
   ipcMain.handle('scanner:status', () => scanStatus)
+  ipcMain.handle('scanner:artworkRepairStatus', () => require('../artwork/repairDownloads').artworkRepairStatus())
+  ipcMain.handle('scanner:artworkRepairCancel', () => require('../artwork/repairDownloads').cancelArtworkRepair())
+  ipcMain.handle('scanner:artworkRepair', (event) =>
+    require('../artwork/repairDownloads').repairLowQualityDownloads({
+      db: getDB(),
+      artworkDir: path.join(getStorageDir(), 'artwork'),
+      onProgress: (status) => {
+        if (!event.sender.isDestroyed()) event.sender.send('scanner:artworkRepairProgress', status)
+      },
+    }))
+
   ipcMain.handle('scanner:getTrackFileSize', (_, trackId) => {
     const filePath = getDB().prepare('SELECT file_path FROM tracks WHERE id = ?').get(String(trackId || ''))?.file_path
     if (!filePath || String(filePath).startsWith('ghost://')) return { bytes: null }
