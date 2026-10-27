@@ -534,7 +534,10 @@ class PackageService {
         file=target
       }
       let info=await mediaInfo(file,tools,combined)
-      if(info.codec==='flac'&&!/\.flac$/i.test(file)||result.requires_container_conversion || result.requiresContainerConversion){
+      // Spatial E-AC-3 is not a FLAC input. Add-on container flags must not
+      // cause it to be transcoded before the JOC check; it gets a lossless
+      // bitstream-copy remux after positive verification instead.
+      if(!downloadingAtmos && (info.codec==='flac'&&!/\.flac$/i.test(file)||result.requires_container_conversion || result.requiresContainerConversion)){
         const target=path.join(staged,'remuxed.flac');onProgress?.({message:'Converting audio container…'})
         await runTool(tools.ffmpeg,['-nostdin','-y','-i',file,'-map','0:a:0','-c:a',info.codec==='flac'?'copy':'flac',target],combined);file=target;info=await mediaInfo(file,tools,combined)
       }
