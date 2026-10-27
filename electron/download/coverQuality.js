@@ -8,6 +8,28 @@ const MIN_ACCEPTED_SIDE = 32
 const PREFERRED_SIDE = 1000
 const MAX_INPUT_PIXELS = 16 * 1024 * 1024
 
+async function readBoundedBody(response, limit) {
+  const reader = response.body?.getReader?.()
+  if (!reader) return null
+  let total = 0
+  const chunks = []
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > limit) {
+        await reader.cancel().catch(() => {})
+        return null
+      }
+      chunks.push(Buffer.from(value))
+    }
+    return Buffer.concat(chunks, total)
+  } finally {
+    try { reader.releaseLock() } catch {}
+  }
+}
+
 async function fetchBestCover(url, { fetchImpl = globalThis.fetch, timeoutMs = COVER_TIMEOUT_MS } = {}) {
   if (typeof url !== 'string' || !/^https:\/\/[^\s]{1,1000}$/i.test(url)) return null
   const sharp = require('sharp')
@@ -26,8 +48,8 @@ async function fetchBestCover(url, { fetchImpl = globalThis.fetch, timeoutMs = C
         if (!/^image\/(?:jpeg|png|webp)$/.test(declaredType)) continue
         const declaredLength = Number(response.headers.get('content-length'))
         if (declaredLength > COVER_MAX_BYTES) continue
-        const bytes = Buffer.from(await response.arrayBuffer())
-        if (!bytes.length || bytes.length > COVER_MAX_BYTES) continue
+        const bytes = await readBoundedBody(response, COVER_MAX_BYTES)
+        if (!bytes?.length) continue
         const meta = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS }).metadata()
         if (!['jpeg', 'png', 'webp'].includes(meta.format)) continue
         const width = Number(meta.width) || 0
@@ -50,4 +72,4 @@ async function fetchBestCover(url, { fetchImpl = globalThis.fetch, timeoutMs = C
   return best
 }
 
-module.exports = { fetchBestCover }
+module.exports = { fetchBestCover, readBoundedBody }
