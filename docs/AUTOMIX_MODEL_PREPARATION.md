@@ -59,6 +59,32 @@ model licenses. Stem assets are *not yet played or imported into Lokal*.
 This stage prepares them for a future stem-aware renderer, rather than
 silently substituting a pre-rendered audio mix or changing bit-perfect paths.
 
+## Audition a real Demucs stem mix (offline)
+
+Once the upstream engine has prepared its content-addressed Demucs windows,
+the following explicit command runs its **render-only** path and exports the
+actual stem-processed result as a regular stereo WAV:
+
+```bash
+node scripts/automix-export-stems.mjs \
+  --engine "/path/to/automix-engine" \
+  --song1 "/music/a.mp3" --song2 "/music/b.mp3" \
+  --output "/music/automix-a-to-b.wav"
+```
+
+The tool validates the two upstream root input MP3 files by SHA-256, fails if
+`--render-only` cannot find a prepared stem cache, verifies the returned WAV
+header and size, and publishes a complete copy atomically. It does not replace
+existing output unless `--overwrite` is explicitly provided. The output
+is an **actual stem-mixed recording**, suitable for playback in Lokal as a
+normal local file or for A/B listening evaluation.
+
+This command is deliberately *offline*: the live player does **not** substitute
+the resulting WAV for the track-to-track transition yet. The offline mix can
+contain both full songs, so its size can be large (bounded to 2 GiB by the
+exporter). Do not run it automatically for streaming tracks, an entire Flow
+queue or on battery-constrained Android hardware.
+
 ## Mobile transfer
 
 Copy both the original audio file and its adjacent
