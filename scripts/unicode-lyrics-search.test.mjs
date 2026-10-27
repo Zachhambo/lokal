@@ -14,6 +14,7 @@ const fixture = [
   { id: 'hi', title: 'Hindi', play_count: 7, lines: [{ text: 'दिल से दिल तक यह गीत जाएगा' }] },
   { id: 'pa', title: 'Punjabi', play_count: 6, lines: [{ text: 'ਦਿਲ ਦੀ ਗੱਲ ਸੁਣ ਲੈ' }] },
   { id: 'latin', title: 'English', play_count: 5, lines: [{ text: 'Love, is all you need' }] },
+  { id: 'ru', title: 'Cyrillic', play_count: 5, lines: [{ text: 'ПРИВЕТ МИР' }] },
   { id: 'mixed', title: 'Mixed', play_count: 4, lines: [{ words: [{ word: '東京' }, { word: 'の' }, { word: '夜' }] }] },
 ]
 
@@ -23,15 +24,15 @@ function libraryDb() {
       assert.match(sql, /FROM lyrics_cache lc/)
       assert.match(sql, /file_path NOT LIKE 'ghost:\/\//)
       return {
-        all(term) {
-          const literal = term.slice(1, -1).replace(/\\([%_\\])/g, '$1')
+        all(...terms) {
+          const literals = terms.map(term => term.slice(1, -1).replace(/\\([%_\\])/g, '$1'))
           return fixture
             .map(f => ({
               id: f.id, title: f.title, play_count: f.play_count,
               file_path: '/music/' + f.id + '.flac',
               content: JSON.stringify(f.lines),
             }))
-            .filter(row => row.content.toLowerCase().includes(literal))
+            .filter(row => literals.some(literal => row.content.toLowerCase().includes(literal)))
         },
       }
     },
@@ -41,7 +42,7 @@ function libraryDb() {
 test('preserves CJK, Devanagari and Gurmukhi codepoints and combining marks', () => {
   for (const [query, expected] of [
     ['最亮', 'zh'], ['心に', 'ja'], ['दिल', 'hi'], ['ਦਿਲ', 'pa'],
-    ['東京', 'mixed'], ['LOVE', 'latin'],
+    ['東京', 'mixed'], ['LOVE', 'latin'], ['привет', 'ru'],
   ]) {
     assert.deepEqual(searchLyricsEntries(libraryDb(), query).map(r => r.id), [expected], query)
   }
