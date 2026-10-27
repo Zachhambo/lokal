@@ -2407,6 +2407,8 @@ export default function App() {
     const outgoingTrack = currentTrackRef.current
     const enableStem = !!(plan && options.stemClips && outgoingTrack &&
       !outgoingTrack.atmosNative && !nextTrack.atmosNative &&
+      !outgoingTrack.atmosEncoded && !nextTrack.atmosEncoded &&
+      (!window.__lokalOutputStatus || window.__lokalOutputStatus.mode === 'auto') &&
       !streamRef(outgoingTrack) && !streamRef(nextTrack) &&
       Math.abs(playbackSpeed() - 1) < 1e-4)
     if (enableStem) {
@@ -2615,11 +2617,26 @@ export default function App() {
             mixing: { kind: 'stem', until: Date.now() + preparedStemClip.durationSeconds * 1000 },
           })
           clip.start().catch(() => finishTransition())
-          // Watchdog: ensure a corrupt/missing ended event cannot hold the
-          // old deck or queue in the "mixing" state indefinitely.
-          crossfadeTimeoutRef.current = setTimeout(
-            finishTransition, (preparedStemClip.durationSeconds + 2) * 1000,
-          )
+          // Playback-clock watchdog. A user pause must NEVER advance the
+          // track because a wall-clock timeout elapsed during the pause.
+          // Recover only after sustained lack of media-clock progress while
+          // the prepared clip reports that it is playing.
+          let lastPosition = 0
+          let lastProgressAt = performance.now()
+          crossfadeTimeoutRef.current = setInterval(() => {
+            if (token !== crossfadeTokenRef.current) return
+            const player = clip.element
+            if (player.paused) {
+              lastProgressAt = performance.now()
+              return
+            }
+            if (player.currentTime >= lastPosition + 0.02) {
+              lastPosition = player.currentTime
+              lastProgressAt = performance.now()
+            } else if (performance.now() - lastProgressAt > 12000) {
+              clip.abort() // resumes the real incoming deck safely
+            }
+          }, 1000)
           return
         }
       }
