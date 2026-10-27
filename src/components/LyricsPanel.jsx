@@ -575,6 +575,10 @@ export default function LyricsPanel({
         if (refs && line && wordSync) {
           paintVoice(refs.leadEl, line.words, t, false)
           paintVoice(refs.bgEl, line.bgWords, t, false)
+          const sub = subLines?.[i]
+          if (sub?.words?.length && refs.subEl) {
+            paintVoice(refs.subEl.querySelector('[data-voice="timed"]'), sub.words, t, false)
+          }
         }
       }
       for (const i of live) {
@@ -616,6 +620,10 @@ export default function LyricsPanel({
       if (!line || line.gap) return
       paintVoice(refs.leadEl, line.words, t, false)
       paintVoice(refs.bgEl, line.bgWords, t, false)
+      const sub = subLines?.[i]
+      if (sub?.words?.length && refs.subEl) {
+        paintVoice(refs.subEl.querySelector('[data-voice="timed"]'), sub.words, t, false)
+      }
     })
   }, [lines, synced, wordSync, focusIdx, subLines, now])
 
