@@ -105,7 +105,7 @@ async function writeSidecar(file, role, report, source, duration) {
   }
 }
 
-function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? 'python' : 'python3' }) {
+function makeAutoPrepare({ executable = process.platform === 'win32' ? 'python' : 'python3' } = {}) {
   let inFlight = null
   let child = null
   let generation = 0
