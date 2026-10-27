@@ -44,7 +44,7 @@ export function createStemPlayback({
   mixGain.connect(analyser)
   let finished = false
   let preparedHandoff = false
-  let pendingInternalSeek = 0
+  let expectedInternalSeek = null
   let playing = false
 
   const silenceClip = () => {
@@ -69,7 +69,7 @@ export function createStemPlayback({
     finished = true
     try {
       if (!preparedHandoff) {
-        pendingInternalSeek++
+        expectedInternalSeek = clip.resumeIn
         incoming.currentTime = clip.resumeIn
       }
       const t = ctx.currentTime
@@ -106,8 +106,8 @@ export function createStemPlayback({
     if (left <= 0.45 && !preparedHandoff) {
       preparedHandoff = true
       try {
-        pendingInternalSeek++
-        incoming.currentTime = Math.max(0, clip.resumeIn - Math.max(0, left))
+        expectedInternalSeek = Math.max(0, clip.resumeIn - Math.max(0, left))
+        incoming.currentTime = expectedInternalSeek
         incoming.play().catch(() => {})
       } catch {}
       const now = ctx.currentTime
@@ -128,7 +128,14 @@ export function createStemPlayback({
     if (!finished && playing && element.paused) element.play().catch(abort)
   }
   function onSeek() {
-    if (pendingInternalSeek > 0) { pendingInternalSeek--; return }
+    // Ignore only our own precise resume seek. A seek that produces no event
+    // cannot consume the next *user* seek and leave the stem clip playing.
+    if (expectedInternalSeek != null &&
+        Math.abs(incoming.currentTime - expectedInternalSeek) < 0.05) {
+      expectedInternalSeek = null
+      return
+    }
+    expectedInternalSeek = null
     abort()
   }
   element.addEventListener('timeupdate',onProgress)
