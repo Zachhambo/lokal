@@ -2618,6 +2618,7 @@ export default function App() {
           clip: preparedStemClip, ctx, analyser: analyserRef.current,
           outgoing: fadeOutEl, incoming: fadeInEl,
           outFade: fadeOutNode, inFade: fadeInNode,
+          outGain: fadeOutGain, inGain: fadeInGain,
           getVolume: () => volumeRef.current,
           onFinish: () => finishTransition(),
           onAbort: () => finishTransition(),
