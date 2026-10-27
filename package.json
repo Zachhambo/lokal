@@ -44,6 +44,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "src/artworkQuality.mjs",
       "package.json",
       "server/**/*",
       "public/remote.html",

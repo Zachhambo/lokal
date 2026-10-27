@@ -494,6 +494,32 @@ export default function Settings() {
   // shared with the Downloads panel, which can start them too).
   const genreJob = useLibraryJobs(s => s.genres)
   const [missingRepairJob, setMissingRepairJob] = useState(null)
+  const [artworkRepairJob, setArtworkRepairJob] = useState(null)
+  useEffect(() => {
+    if (!api.isElectron) return undefined
+    const off = api.onArtworkRepairProgress(status => setArtworkRepairJob(status))
+    api.artworkRepairStatus().then(status => {
+      if (status?.running || status?.total > 0) setArtworkRepairJob(status)
+    }).catch(() => {})
+    return off
+  }, [])
+  const refreshLowQualityArtwork = async () => {
+    if (artworkRepairJob?.running || !api.isElectron) return
+    setArtworkRepairJob(current => ({ ...current, running: true, error: '' }))
+    try {
+      const result = await api.repairLowQualityArtwork()
+      setArtworkRepairJob(result)
+      window.dispatchEvent(new Event('lokal:refresh'))
+    } catch (error) {
+      setArtworkRepairJob({ running: false, error: error?.message || 'Artwork repair failed' })
+    }
+  }
+  const artworkRepairText = artworkRepairJob?.running
+    ? t('{done} of {total} eligible downloaded files checked · {updated} upgraded', { done: artworkRepairJob.done || 0, total: artworkRepairJob.total || 0, updated: artworkRepairJob.updated || 0 })
+    : artworkRepairJob?.error ? t(artworkRepairJob.error)
+      : artworkRepairJob?.total !== undefined
+        ? t('{updated} upgraded · {skipped} unchanged · {failed} failed{cancelled}', { updated: artworkRepairJob.updated || 0, skipped: artworkRepairJob.skipped || 0, failed: artworkRepairJob.failed || 0, cancelled: artworkRepairJob.cancelled ? ' · stopped' : '' })
+        : t('Check previously downloaded addon covers smaller than 640 px. Only original cover URLs retained in the download history are used; custom artwork and uncertain matches remain unchanged.')
   const lyricsIndexJob = useLibraryJobs(s => s.lyrics)
   const indexAllLyrics = () => (lyricsIndexJob?.running ? cancelLyricsIndex() : startLyricsIndex())
   const indexText = (job, what) => job?.running
@@ -1406,6 +1432,17 @@ activeCategory === 'data' ? usersTried
              {missingRepairJob?.running ? t('Repairing…') : t('Repair All')}
            </button>
          </Row>
+        {api.isElectron && (
+        <Row label={t("Refresh Low-Quality Covers")} desc={artworkRepairText}>
+          <button
+            onClick={artworkRepairJob?.running ? () => api.cancelArtworkRepair() : refreshLowQualityArtwork}
+            className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg text-sm text-white hover:border-accent/30 transition-colors"
+          >
+            <RefreshCw size={13} className={artworkRepairJob?.running ? 'animate-spin' : ''} />
+            {artworkRepairJob?.running ? t('Stop') : t('Refresh Covers')}
+          </button>
+        </Row>
+        )}
         <Row label={t("Rescan Library")}>
           <button onClick={rescan} disabled={scanning || (!settings.music_folder && !settings.music_folders)}
             className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg text-sm text-white hover:border-accent/30 disabled:opacity-40 transition-colors">
