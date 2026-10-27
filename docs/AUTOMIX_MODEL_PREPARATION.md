@@ -89,6 +89,15 @@ The exporter refuses a report with failed vocal-continuity or handoff-smoothness
 checks and checks the two original audio SHA-256 fingerprints. It uses FFmpeg
 and FFprobe for sample-accurate audio extraction and output validation.
 
+Desktop also offers **Automatic Cue Preparation** in Settings → Playback.
+When enabled, point **AutoMix Engine Folder** at an existing engine checkout
+containing `cue_analysis.py` and its model dependencies. Lokal will
+asynchronously stage upcoming **local MP3** pairs, serialize CUE-DETR jobs,
+merge fresh structural cues into the existing analysis cache and reuse valid
+sidecars in later sessions. A slow or unavailable analyzer never blocks the
+active song, and signed streams / other formats retain the lightweight
+analysis path. Model weights are not installed or downloaded by Lokal.
+
 The desktop player now supports this prepared clip through an explicit
 **Settings → Playback → Prepared Stem Mixes (Experimental)** toggle (default
 Off). For a matching local song pair, it verifies both original audio
