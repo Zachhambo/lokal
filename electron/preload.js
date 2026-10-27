@@ -258,6 +258,7 @@ contextBridge.exposeInMainWorld('electron', {
   spotifyPlaylist: (uri, force) => invoke('spotify:playlist', uri, force),
   // AutoMix: a song's analysis (electron/automix)
   automixAnalyze: (track) => invoke('automix:analyze', track),
+  automixStemClip: (outgoing, incoming) => invoke('automix:stemClip', outgoing, incoming),
   // Flow's songs (electron/ipc/flow.js)
   flowPool: (userId) => invoke('flow:pool', userId),
   // Casting (electron/ipc/cast.js)
