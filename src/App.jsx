@@ -2336,6 +2336,21 @@ export default function App() {
     return undefined
   }, [])
 
+  // Explicitly prepared stem clips are SHA-verified off the audio thread
+  // and held briefly per pair, not fetched during the last fraction of the
+  // fade. A missing pair costs one cheap file-existence check per session.
+  const preparedStemFor = useCallback((outTrack, nextTrack) => {
+    if (!outTrack?.id || !nextTrack?.id || !api.automixStemClip) return Promise.resolve(null)
+    const store = automixRef.current
+    const cache = store.stemClips || (store.stemClips = new Map())
+    const key = [outTrack.id,outTrack.file_path,nextTrack.id,nextTrack.file_path].join('|')
+    if (!cache.has(key)) {
+      cache.set(key, Promise.resolve(api.automixStemClip(outTrack, nextTrack)).catch(() => null))
+      while (cache.size > 8) cache.delete(cache.keys().next().value)
+    }
+    return cache.get(key)
+  }, [])
+
   // AutoMix's plan for a song pair, worked out again only when one of the
   // two analyses arrives instead of on every timeupdate (several a second,
   // which made playback stutter on slower machines). A plan that throws,
@@ -2412,7 +2427,7 @@ export default function App() {
       !streamRef(outgoingTrack) && !streamRef(nextTrack) &&
       Math.abs(playbackSpeed() - 1) < 1e-4)
     if (enableStem) {
-      Promise.resolve(api.automixStemClip(outgoingTrack, nextTrack))
+      preparedStemFor(outgoingTrack, nextTrack)
         .then(clip => {
           if (token === crossfadeTokenRef.current &&
               eligibleStemTransition(clip, plan, playbackSpeed())) preparedStemClip = clip
@@ -2668,7 +2683,7 @@ export default function App() {
 
       crossfadeTimeoutRef.current = setTimeout(finishTransition, Math.max(fadeIn, fadeOut) * 1000)
     }
-  }, [flushTime, setActiveAudioElement, beginLastfmPlayback, cancelCrossfade, stopTimer, autoNext, openMixFilters, applyReplayGainToElement])
+  }, [flushTime, setActiveAudioElement, beginLastfmPlayback, cancelCrossfade, stopTimer, autoNext, openMixFilters, applyReplayGainToElement, preparedStemFor])
 
   useEffect(() => {
     if (isCrossfadingRef.current) {
@@ -2999,6 +3014,14 @@ export default function App() {
         const next = remaining < 150 ? automixAnalysis(nextTrack) : undefined
         if (remaining < 90) {
           const plan = automixPlanFor(current, nextTrack, dur, out, next, !!state.crossfade.automixSameAlbum)
+          // Prefetch and SHA-check prepared pairs well before the transition.
+          // This is opt-in, local-file-only and never starts the Python model.
+          if (plan && plan !== AUTOMIX_FALLBACK && remaining < 60 &&
+              state.crossfade?.stemClips && !streamRef(current) &&
+              !streamRef(nextTrack) && !current.atmosNative &&
+              !nextTrack.atmosNative && Math.abs(playbackSpeed() - 1) < 1e-4) {
+            preparedStemFor(current, nextTrack)
+          }
           if (plan === AUTOMIX_FALLBACK) {
             // Planning failed or was too slow: an ordinary crossfade instead.
             if (remaining <= Math.max(CROSSFADE_MIN_S, state.crossfade?.fadeOut || cf || AUTOMIX_FALLBACK_S)) triggerCrossfade(nextTrack)
@@ -3019,7 +3042,7 @@ export default function App() {
     }
 
     topUpRelated()
-  }, [triggerCrossfade, isEventFromActive, topUpRelated, automixAnalysis, automixPlanFor])
+  }, [triggerCrossfade, isEventFromActive, topUpRelated, automixAnalysis, automixPlanFor, preparedStemFor])
 
   const handlePrimaryDurationChange = useCallback((e) => {
     if (isEventFromActive(e) && !isStationTrack(usePlayerStore.getState().currentTrack)) setDuration(e.target.duration)
