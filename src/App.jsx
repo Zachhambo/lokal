@@ -2351,6 +2351,27 @@ export default function App() {
     return cache.get(key)
   }, [])
 
+  const prepareModelPair = useCallback((outTrack, nextTrack, dir) => {
+    if (!api.automixPreparePair || !dir || !outTrack?.id || !nextTrack?.id) return
+    const store = automixRef.current
+    const requests = store.preparing || (store.preparing = new Set())
+    const key = [dir,outTrack.id,outTrack.file_path,nextTrack.id,nextTrack.file_path].join('|')
+    if (requests.has(key)) return
+    requests.add(key)
+    if (requests.size > 30) requests.delete(requests.values().next().value)
+    // A slow CUE-DETR analysis is entirely optional. Its result updates the
+    // existing PCM cache/planner without restarting the live audio element.
+    Promise.resolve(api.automixPreparePair(outTrack,nextTrack,dir))
+      .then(result => {
+        if (!result?.prepared) return
+        for (const track of [outTrack,nextTrack]) {
+          store.analyses.delete(String(track.id))
+          store.asked.delete(String(track.id))
+        }
+        // The next playback tick asks for fresh model-enriched cue data.
+      }).catch(() => {})
+  }, [])
+
   // AutoMix's plan for a song pair, worked out again only when one of the
   // two analyses arrives instead of on every timeupdate (several a second,
   // which made playback stutter on slower machines). A plan that throws,
@@ -3011,6 +3032,10 @@ export default function App() {
       const nextTrack = upcomingTrack(state)
       const current = currentTrackRef.current
       if (nextTrack && current && remaining > 0.3) {
+        if (state.crossfade.autoPrepare && state.crossfade.engineDir &&
+            !streamRef(current) && !streamRef(nextTrack)) {
+          prepareModelPair(current,nextTrack,state.crossfade.engineDir)
+        }
         const out = automixAnalysis(current)
         // The next song is analysed a while ahead (an online one is downloaded to be).
         const next = remaining < 150 ? automixAnalysis(nextTrack) : undefined
@@ -3044,7 +3069,7 @@ export default function App() {
     }
 
     topUpRelated()
-  }, [triggerCrossfade, isEventFromActive, topUpRelated, automixAnalysis, automixPlanFor, preparedStemFor])
+  }, [triggerCrossfade, isEventFromActive, topUpRelated, automixAnalysis, automixPlanFor, preparedStemFor, prepareModelPair])
 
   const handlePrimaryDurationChange = useCallback((e) => {
     if (isEventFromActive(e) && !isStationTrack(usePlayerStore.getState().currentTrack)) setDuration(e.target.duration)
