@@ -12,8 +12,10 @@ import { execFileSync } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { fileSha256 } from './automix-import-cues.mjs'
+import { exportStemWindow } from './automix-transition-clip.mjs'
 
 const UPSTREAM_OUTPUT = path.join('output', 'beat_overlap', 'beat_overlap_transition.wav')
+const UPSTREAM_REPORT = path.join('output', 'beat_overlap', 'beat_overlap_transition_report.json')
 const MAX_EXPORT_BYTES = 2 * 1024 * 1024 * 1024
 
 export async function verifyPreparedStemSources(engine, song1, song2) {
@@ -48,6 +50,7 @@ export function verifyRenderedWav(wav) {
 
 export async function exportPreparedStemMix({
   engine, song1, song2, output, python = 'python3', overwrite = false,
+  clipOutput = null, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe',
 }) {
   if (!output) throw Error('An explicit output WAV path is required')
   const root = await verifyPreparedStemSources(engine, song1, song2)
@@ -74,7 +77,12 @@ export async function exportPreparedStemMix({
   } finally {
     rmSync(temporary, { force: true })
   }
-  return { output: destination, bytes }
+  const clip = clipOutput ? await exportStemWindow({
+    sourceWav: source, reportPath: path.resolve(root, UPSTREAM_REPORT),
+    outgoing: song1, incoming: song2, output: clipOutput,
+    ffmpeg, ffprobe, overwrite,
+  }) : null
+  return { output: destination, bytes, clip }
 }
 
 const isMain = !!process.argv[1] &&
@@ -96,8 +104,11 @@ if (isMain) {
       engine: args.engine, song1: args.song1, song2: args.song2,
       output: args.output, python: args.python || 'python3',
       overwrite: args.overwrite === true,
+      clipOutput: args['clip-output'], ffmpeg: args.ffmpeg || 'ffmpeg',
+      ffprobe: args.ffprobe || 'ffprobe',
     })
     console.log(`Stem-rendered WAV: ${result.output} (${result.bytes} bytes)`)
+    if (result.clip) console.log(`Prepared stem transition clip: ${result.clip.output}; pair manifest: ${result.clip.manifestPath}`)
     console.log('This is an offline render; Lokal does not yet insert it into the live playback queue.')
   } catch (error) {
     console.error('Stem mix export failed:', error.message)
