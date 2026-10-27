@@ -8,14 +8,16 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Music, Pause, Play, Plus } from 'lucide-react'
+import { Music, Pause, Play, Plus, Download, ListEnd, Clock } from 'lucide-react'
 import { api } from '../api'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
-import { sameStream } from '../onlineTracks'
+import { sameStream, saveToLibrary } from '../onlineTracks'
 import { awaitAtmosOutputRelease, shouldToggleNormalStream } from '../audio/atmosHandoff.mjs'
 import { recentTrackItem, saveRecentItem, saveRecentSearch } from '../searchHistory'
 import SaveToLibraryButton from './SaveToLibraryButton'
+import ContextMenu, { useContextMenu } from './ContextMenu'
+import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import SoulseekSearch from './SoulseekSearch'
 import DownloadNotices from './DownloadNotices'
 import SourceIcon from './SourceIcon'
@@ -71,6 +73,7 @@ function useProviders() {
  */
 export default function OnlineResults({ query, soulseekFor = null, findOn = null, showLibraryHint = true }) {
   const { t } = useTranslation()
+  const rightClickMenu = useContextMenu()
   // YouTube Music and SoundCloud, then Soulseek, then installed addons.
   const loaded = useProviders()
   const providers = orderedFindOnSources(loaded)
@@ -189,6 +192,19 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
       { type: 'search', id: q, name: `${providerLabel}: ${q}` })
   }
 
+  const openResultMenu = (event, item, index) => rightClickMenu.open(event, [
+    { label: 'Play', icon: Play, onSelect: () => play(item, index) },
+    { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylist(item) },
+    { label: 'Download song', icon: Download, onSelect: async () => {
+      const [row] = await asTracks([item])
+      if (row) await saveToLibrary(row)
+    } },
+    atmosDownloadRef(item) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
+      const response = await downloadAtmosVersion(item).catch(error => ({ error: error.message }))
+      showToast(response?.error || 'Dolby Atmos download queued.')
+    } },
+  ].filter(Boolean))
+
   const addToPlaylist = async (item) => {
     const [row] = await asTracks([item])
     if (row?.id) openAddToPlaylist(row)
@@ -245,6 +261,7 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: Math.min(i, 10) * 0.02 }}
                 onDoubleClick={() => play(item, i)}
+                onContextMenu={event => openResultMenu(event, item, i)}
                 className={`group grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 px-3 py-1.5 rounded-lg transition-colors ${current ? 'bg-accent/10' : 'hover:bg-elevated'}`}
               >
                 <button
@@ -281,7 +298,7 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
                   </button>
                   <SaveToLibraryButton
                     source={{ provider: item.provider, id: String(item.id) }}
-                    meta={{ title: item.title, artist: item.artist, artists: item.artists }}
+                    meta={item}
                     replaceTrackId={sourceRequest?.replaceTrackId}
                     getTrack={async () => (await asTracks([item]))[0]}
                     size={15}
@@ -296,6 +313,7 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
         </div>
         </>
       )}
+      <ContextMenu menu={rightClickMenu} />
     </section>
   )
 }
