@@ -157,7 +157,17 @@ export function createStemPlayback({
         // hangs while opening a damaged WAV. Bound this optional path, then
         // let the real incoming song play through instead of holding the
         // queue under a permanent crossfade lock.
-        startupTimer = setTimeout(abort, 5000)
+        const startupDeadline = () => {
+          if (finished) return
+          if (incoming.paused) {
+            // User pause during decoder startup must not turn an elapsed
+            // timeout into an unsolicited queue advance.
+            startupTimer = setTimeout(startupDeadline, 5000)
+          } else {
+            abort()
+          }
+        }
+        startupTimer = setTimeout(startupDeadline, 5000)
         await element.play() // Do not mute the real decks until audible.
         if (startupTimer) clearTimeout(startupTimer)
         startupTimer = null
