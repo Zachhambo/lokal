@@ -563,6 +563,11 @@ class DownloadManager {
       // stereo FLAC never satisfies Atmos and an Atmos file never satisfies
       // a regular FLAC download.
       if (owned) {
+        // An Atmos edition is a separate library item: never rewrite the
+        // streamed stereo ghost or imported playlist/like references.
+        if (atmosIntent) {
+          return { alreadyInLibrary: true, trackId: owned.id, error: `Already in your library: ${owned.title || 'this song'}` }
+        }
         try {
           const db = this.db()
           const { resolveGhostTrack } = require('../../server/routes/playlists')
