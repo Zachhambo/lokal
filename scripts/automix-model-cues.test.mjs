@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { sidecarForRole, mergeReports, prepareStemCache } from './automix-import-cues.mjs'
 import { verifyPreparedStemSources, verifyRenderedWav } from './automix-export-stems.mjs'
+import { validateStemRenderReport, validStemClipManifest, STEM_CLIP_SCHEMA } from './automix-transition-clip.mjs'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -110,4 +111,34 @@ test('offline stem export validates WAV format instead of accepting arbitrary ou
   wav.write('WAVE',8,'ascii')
   writeFileSync(good,wav)
   assert.equal(verifyRenderedWav(good),256)
+})
+
+test('stem clip manifest maps mixed-window timeline to source resume point', () => {
+  const sha1='a'.repeat(64), sha2='b'.repeat(64), wav='c'.repeat(64)
+  const upstream={
+    song1_sha256:sha1, song2_sha256:sha2,
+    song1_transition_start_seconds:166.5,
+    song2_transition_start_seconds:7.5,
+    song2_transition_end_source_seconds:24.0,
+    transition_seconds:16.0, master_gain:.93,
+    sample_rate:44100, channels:2,
+    handoff_smoothness_qa:{passed:true},
+    vocal_continuity_qa:{passed:true},
+  }
+  const timeline=validateStemRenderReport(upstream,{song1sha:sha1,song2sha:sha2})
+  assert.equal(timeline.outStart,166.5)
+  assert.equal(timeline.resumeIn,24)
+  assert.equal(timeline.length,16)
+  const manifest={
+    schema:STEM_CLIP_SCHEMA,
+    source:{outgoingSha256:sha1,incomingSha256:sha2},
+    timeline,clip:{sha256:wav},
+  }
+  assert.equal(validStemClipManifest(manifest,{song1sha:sha1,song2sha:sha2,clipSha:wav}),true)
+  assert.equal(validStemClipManifest(manifest,{song1sha:sha2,song2sha:sha2,clipSha:wav}),false)
+  assert.equal(validStemClipManifest(manifest,{song1sha:sha1,song2sha:sha2,clipSha:sha1}),false)
+  assert.equal(validateStemRenderReport({...upstream, song2_transition_end_source_seconds:5},{song1sha:sha1,song2sha:sha2}),null)
+  assert.equal(validateStemRenderReport({...upstream, vocal_continuity_qa:{passed:false}},{song1sha:sha1,song2sha:sha2}),null)
+  assert.equal(validateStemRenderReport({...upstream, handoff_smoothness_qa:{passed:false}},{song1sha:sha1,song2sha:sha2}),null)
+  assert.equal(validateStemRenderReport({...upstream, song1_sha256:sha2},{song1sha:sha1,song2sha:sha2}),null)
 })
