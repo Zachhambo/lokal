@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 import { fileSha256 } from './automix-import-cues.mjs'
-import { exportStemWindow } from './automix-transition-clip.mjs'
+import { exportStemWindow, defaultStemClipPath } from './automix-transition-clip.mjs'
 
 const UPSTREAM_OUTPUT = path.join('output', 'beat_overlap', 'beat_overlap_transition.wav')
 const UPSTREAM_REPORT = path.join('output', 'beat_overlap', 'beat_overlap_transition_report.json')
@@ -79,7 +79,8 @@ export async function exportPreparedStemMix({
   }
   const clip = clipOutput ? await exportStemWindow({
     sourceWav: source, reportPath: path.resolve(root, UPSTREAM_REPORT),
-    outgoing: song1, incoming: song2, output: clipOutput,
+    outgoing: song1, incoming: song2,
+    output: clipOutput === 'auto' ? defaultStemClipPath(song1, song2) : clipOutput,
     ffmpeg, ffprobe, overwrite,
   }) : null
   return { output: destination, bytes, clip }
