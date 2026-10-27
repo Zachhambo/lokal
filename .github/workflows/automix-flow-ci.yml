@@ -35,6 +35,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Install desktop dependencies
+        run: npm ci --ignore-scripts
+      - name: Compile desktop renderer and Electron imports
+        run: |
+          npm run test:electron-syntax
+          npm run gen:icons
+          npx vite build
       - name: Run AutoMix and Flow regression suite
         run: >-
           node --test
