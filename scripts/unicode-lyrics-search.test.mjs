@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const {
   normalizeLyricsSearchText, validLyricsSearchQuery, searchLyricsEntries,
-  buildLyricsSnippet, tokenizeLyricsSearch,
+  buildLyricsSnippet, tokenizeLyricsSearch, countLyricTokenMatches,
 } = require('../electron/lyrics/librarySearch')
 
 const fixture = [
@@ -17,6 +17,8 @@ const fixture = [
   { id: 'ru', title: 'Cyrillic', play_count: 5, lines: [{ text: 'ПРИВЕТ МИР' }] },
   { id: 'accent', title: 'Accented', play_count: 3, lines: [{ text: 'ÉTÉ DANS LE SUD' }] },
   { id: 'mixed', title: 'Mixed', play_count: 4, lines: [{ words: [{ word: '東京' }, { word: 'の' }, { word: '夜' }] }] },
+  { id: 'cjk-punctuation', title: 'CJK punctuation', play_count: 2, lines: [{ text: '夜空、の星' }] },
+  { id: 'decomposed', title: 'Decomposed Japanese', play_count: 2, lines: [{ text: 'か\u3099くの夜' }] },
 ]
 
 function libraryDb() {
@@ -26,14 +28,25 @@ function libraryDb() {
       assert.match(sql, /file_path NOT LIKE 'ghost:\/\//)
       return {
         all(...terms) {
-          const literals = terms.map(term => term.slice(1, -1).replace(/\\([%_\\])/g, '$1'))
+          // Approximate SQLite LIKE with % wildcards for the regression rows.
+          const like = (content, pattern) => {
+            let offset = 0
+            for (const part of pattern.slice(1, -1).split('%')) {
+              if (!part) continue
+              const literal = part.replace(/\\([%_\\])/g, '$1')
+              const next = content.indexOf(literal, offset)
+              if (next < 0) return false
+              offset = next + literal.length
+            }
+            return true
+          }
           return fixture
             .map(f => ({
               id: f.id, title: f.title, play_count: f.play_count,
               file_path: '/music/' + f.id + '.flac',
               content: JSON.stringify(f.lines),
             }))
-            .filter(row => literals.some(literal => row.content.replace(/[A-Z]/g, ch => ch.toLowerCase()).includes(literal)))
+            .filter(row => terms.some(term => like(row.content.replace(/[A-Z]/g, ch => ch.toLowerCase()), term)))
         },
       }
     },
@@ -81,4 +94,23 @@ test('nonmatching lyrics do not enter results even if raw JSON prefilter matches
     content: JSON.stringify([{ text: 'other lyrics' }, { label: '日本' }]),
   }] }) }
   assert.deepEqual(searchLyricsEntries(db, '日本'), [])
+})
+
+
+test('matches CJK phrases even across punctuation in raw SQLite lyrics', () => {
+  assert.deepEqual(searchLyricsEntries(libraryDb(), '夜空の星').map(r => r.id), ['cjk-punctuation'])
+  assert.equal(countLyricTokenMatches('夜空、の星', tokenizeLyricsSearch('夜空の星')), 1)
+  assert.equal(countLyricTokenMatches('love, is', tokenizeLyricsSearch('loveis')), 0)
+  assert.equal(countLyricTokenMatches('दिल से दिल', tokenizeLyricsSearch('दिलसेदिल')), 0)
+})
+
+test('SQLite candidate variants include decomposed Unicode spellings', () => {
+  assert.deepEqual(searchLyricsEntries(libraryDb(), 'がくの夜').map(r => r.id), ['decomposed'])
+  assert.equal(countLyricTokenMatches('か\u3099くの夜', tokenizeLyricsSearch('がくの夜')), 1)
+})
+
+test('emoji bases cannot match on a shared variation selector alone', () => {
+  assert.equal(countLyricTokenMatches('☀️', tokenizeLyricsSearch('❤️')), 0)
+  assert.equal(countLyricTokenMatches('I ❤️ you', tokenizeLyricsSearch('❤')), 1)
+  assert.equal(countLyricTokenMatches('星☀️', tokenizeLyricsSearch('星❤️')), 0)
 })
