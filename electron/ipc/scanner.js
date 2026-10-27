@@ -28,6 +28,7 @@ const { artistIdFromName, findArtistById, migrateUnknownArtist, resolveArtistId,
 
 const DEFAULT_MUSIC_PATH = 'C:\\Users\\sipbuu\\Music'
 const AUDIO_EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac', '.opus', '.wma', '.alac', '.ape'])
+const { isPreparedStemClipName } = require('../automix/stem-clip')
 // Same secrets as the web server's SECRET_KEYS (server/routes/settings.js):
 // masked by settings:get, left out of settings:exportAll, kept on import.
 const SECRET_SETTING_KEYS = new Set(['soulseek_api_key', 'soulseek_password', 'spicylyrics_api_key', 'spotify_sp_dc', 'apple_music_user_token', 'listenbrainz_token', 'lastfm_api_secret', 'lastfm_session_key', 'yt_cookie_header'])
@@ -209,7 +210,8 @@ function walkDir(dir, files = [], failures = null) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) walkDir(full, files, failures)
-      else if (AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(full)
+      else if (!isPreparedStemClipName(entry.name) &&
+          AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(full)
     }
   } catch { failures?.push(dir) }
   return files
@@ -2245,6 +2247,8 @@ async function applyFileChanges(changes = []) {
     const rawPath = change?.path
     if (!rawPath) continue
     const filePath = path.resolve(String(rawPath))
+    // Prepared stem clips are internal transition cache, not library songs.
+    if (isPreparedStemClipName(filePath)) continue
     const owner = rootFor(filePath)
     if (!owner || seen.has(filePath)) continue
     seen.add(filePath)
