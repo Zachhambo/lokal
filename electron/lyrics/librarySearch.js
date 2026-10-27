@@ -81,16 +81,31 @@ function searchLyricsEntries(db, query) {
   if (!tokens.length) return []
   // SQLite LIKE matches literal Chinese/Japanese/Indic characters, but its
   // LOWER() only case-folds ASCII. Do not use ASCII-only text cleanup here.
-  const term = '%' + tokens[0].replace(/[%_\\]/g, ch => '\\' + ch) + '%'
+  const first = tokens[0]
+  const variants = new Set([first])
+  if (/[^\x00-\x7f]/u.test(first)) {
+    // SQLite LOWER() only handles ASCII. Include common Unicode case forms
+    // when looking up Cyrillic, Greek and other cased scripts.
+    variants.add(first.toUpperCase())
+    const parts = [...first]
+    parts[0] = parts[0].toUpperCase()
+    variants.add(parts.join(''))
+    // Also cover original full-width spellings before NFKC folding.
+    const raw = String(query).trim().split(/\s+/u)[0]
+    if (raw.length <= MAX_QUERY_LENGTH) variants.add(raw)
+  }
+  const patterns = [...variants].filter(Boolean)
+    .map(term => '%' + term.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
+  const candidateSql = patterns.map(() => "LOWER(lc.content) LIKE ? ESCAPE '\\'").join(' OR ')
   const rows = db.prepare([
     'SELECT t.*, lc.content',
     'FROM lyrics_cache lc',
     'JOIN tracks t ON t.id = lc.track_id',
     "WHERE t.file_path NOT LIKE 'ghost://%'",
-    "AND LOWER(lc.content) LIKE ? ESCAPE '\\'",
+    'AND (' + candidateSql + ')',
     'ORDER BY t.play_count DESC, t.title',
     'LIMIT ' + SQL_CANDIDATE_LIMIT,
-  ].join('\n')).all(term)
+  ].join('\n')).all(...patterns)
 
   return rows.map(row => {
     let lines = []
