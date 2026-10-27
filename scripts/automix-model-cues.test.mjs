@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { sidecarForRole, mergeReports, prepareStemCache } from './automix-import-cues.mjs'
+import { verifyPreparedStemSources, verifyRenderedWav } from './automix-export-stems.mjs'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -78,4 +79,35 @@ test('stem preparation refuses mismatched fixed-role source files', async t => {
     prepareStemCache({engine,song1:outgoing,song2:incoming}),
     /must match the requested track exactly/,
   )
+})
+
+test('offline WAV export rejects a mismatched source before invoking Python', async t => {
+  const root=mkdtempSync(join(tmpdir(),'lokal-automix-render-check-'))
+  t.after(()=>rmSync(root,{recursive:true,force:true}))
+  const engine=join(root,'engine')
+  mkdirSync(engine)
+  const first=join(root,'out.mp3')
+  const second=join(root,'in.mp3')
+  writeFileSync(first,'same-song')
+  writeFileSync(second,'different-song')
+  writeFileSync(join(engine,'song1.mp3'),'same-song')
+  writeFileSync(join(engine,'song2.mp3'),'wrong-input')
+  await assert.rejects(
+    verifyPreparedStemSources(engine,first,second),
+    /differs from the selected audio/,
+  )
+})
+
+test('offline stem export validates WAV format instead of accepting arbitrary output', t => {
+  const root=mkdtempSync(join(tmpdir(),'lokal-automix-wav-check-'))
+  t.after(()=>rmSync(root,{recursive:true,force:true}))
+  const bad=join(root,'broken.wav')
+  writeFileSync(bad,Buffer.alloc(256,0))
+  assert.throws(()=>verifyRenderedWav(bad),/not a WAV/)
+  const good=join(root,'rendered.wav')
+  const wav=Buffer.alloc(256)
+  wav.write('RIFF',0,'ascii')
+  wav.write('WAVE',8,'ascii')
+  writeFileSync(good,wav)
+  assert.equal(verifyRenderedWav(good),256)
 })
