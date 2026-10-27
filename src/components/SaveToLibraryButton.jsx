@@ -195,8 +195,6 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
         ref={externalMenuButtonRef}
         onClick={(e) => { e.stopPropagation(); saveFromSource() }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPosition(null); setMenu({ x: e.clientX, y: e.clientY }) }}
-        // Keep right-click available while a stereo job is running: Atmos is a
-        // separate quality and may be queued independently.
         title={label}
         aria-label={label}
         className={`flex-shrink-0 transition-all ${color} ${state === 'idle' ? className : ''}`}
