@@ -8,6 +8,7 @@ const { downloadImageWithTimeout } = require('../artworkDownload')
 const artistRoles = require('../artistRoles')
 const mm = require('../musicMetadata')
 const quality = require('../quality')
+const { findAudioEditionDuplicate } = require('../quality/editionDuplicates')
 const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
@@ -2140,8 +2141,9 @@ async function indexSingleFile(filePath, opts = {}) {
   // artist/title/album/duration are identical. Check the actual file profile,
   // not the source's catalogue badge: a failed Atmos request must not bypass
   // deduplication with an ordinary AAC or FLAC file.
-  const edition = audioQuality.atmos_verified === 1 ? 1 : 0
-  const dupe = db.prepare("SELECT * FROM tracks WHERE LOWER(title) = ? AND LOWER(artist) = ? AND (album IS NULL OR album = ? OR ? IS NULL OR album IS NULL) AND ABS(duration - ?) < 2 AND file_path NOT LIKE 'ghost://%' AND COALESCE(atmos_verified, 0) = ?").get(title.toLowerCase(), artist.toLowerCase(), album, album, duration, edition)
+  const dupe = findAudioEditionDuplicate(db, {
+    title, artist, album, duration, atmosVerified: audioQuality.atmos_verified,
+  })
   if (dupe) {
     // A previous download may have left its database row behind after the
     // audio file was deleted. Reuse that row instead of creating a second
