@@ -8,7 +8,7 @@ const os = require('os')
 const path = require('path')
 const { spawn } = require('child_process')
 const crypto = require('crypto')
-const { SCHEMA } = require('./advanced-report')
+const { SCHEMA, readAdvancedReport } = require('./advanced-report')
 const MAX_INPUT_BYTES = 160 * 1024 * 1024
 const TIMEOUT_MS = 8 * 60 * 1000
 
@@ -128,6 +128,13 @@ function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? '
       if (![sa,sb].every(s => s.isFile() && s.size > 0 &&
           s.size <= MAX_INPUT_BYTES)) return {prepared:false,reason:'too-large'}
     } catch { return {prepared:false,reason:'missing-source'} }
+    // A prepared structural cue on both roles is already source-stamped.
+    // Reuse it instead of re-running a minutes-long detector on every app
+    // launch or Flow refill.
+    if (readAdvancedReport(a.file,sa)?.exits.length &&
+        readAdvancedReport(b.file,sb)?.entrances.length) {
+      return {prepared:true,cached:true}
+    }
     const key = [root,a.file,sa.size,sa.mtimeMs,b.file,sb.size,sb.mtimeMs].join('|')
     if (pairs.has(key)) return pairs.get(key)
     // Supersede any older pair immediately; only one model process remains.
@@ -170,6 +177,10 @@ function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? '
     const result = (inFlight || Promise.resolve()).catch(()=>{}).then(job)
     inFlight = result
     pairs.set(key,result)
+    result.then(value => {
+      // An interrupted/failed job must be retryable on the next playback.
+      if (!value?.prepared && pairs.get(key) === result) pairs.delete(key)
+    }).catch(() => { if (pairs.get(key) === result) pairs.delete(key) })
     while(pairs.size>12)pairs.delete(pairs.keys().next().value)
     return result
   }
