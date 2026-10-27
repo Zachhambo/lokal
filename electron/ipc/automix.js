@@ -23,6 +23,7 @@ function registerAutomixHandlers(ipcMain) {
   const { getDB } = require('./db')
   const { analysisFor } = require('../automix')
   const { readAdvancedReport, mergeAdvancedAnalysis } = require('../automix/advanced-report')
+  const { loadPreparedStemClip } = require('../automix/stem-clip')
   const log = message => { try { require('electron-log').info(message) } catch {} }
 
   ipcMain.handle('automix:analyze', async (_, track) => {
@@ -70,6 +71,13 @@ function registerAutomixHandlers(ipcMain) {
       if (automixFileCacheKey(track, current) !== key) return null
       return mergeAdvancedAnalysis(base, readAdvancedReport(file, current))
     } catch { return base }
+  })
+
+  // Used only for a local pair with an explicitly prepared and verified
+  // offline stem clip. Streaming, CUE slices and missing clips return null.
+  // This endpoint NEVER runs the Python engine or decodes an audio source.
+  ipcMain.handle('automix:stemClip', async (_, outgoing, incoming) => {
+    return loadPreparedStemClip(outgoing, incoming)
   })
 }
 
