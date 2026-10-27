@@ -3,6 +3,7 @@ import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { effectiveReplayGainMode, replayGainMultiplier } from './audio/replayGain.mjs'
 import { readCrossfadeSettings, fadeCurve, crossfadeDurations, CROSSFADE_MIN_S } from './audio/crossfade'
 import { planTransition, AUTOMIX_PRELOAD_S } from './audio/automix'
+import { eligibleStemTransition, createStemPlayback } from './audio/stemPlayback'
 
 // handleTimeUpdate's AutoMix: a pair whose plan failed crossfades this long.
 const AUTOMIX_FALLBACK = Object.freeze({ fallback: true })
@@ -581,6 +582,7 @@ export default function App() {
   // AutoMix: songs' analyses (id -> analysis, or null when it couldn't be), and the ones asked for.
   const automixRef = useRef({ analyses: new Map(), asked: new Set() })
   const rateGlideRef = useRef(null)
+  const stemPlaybackRef = useRef(null) // optional third mixed-audio deck
   const audioCtxRef = useRef(null)
   const nativeAudioRef = useRef(null)
   const analyserRef = useRef(null)
@@ -2281,6 +2283,8 @@ export default function App() {
   }, [])
 
   const cancelCrossfade = useCallback(() => {
+    stemPlaybackRef.current?.stop()
+    stemPlaybackRef.current = null
     crossfadeTokenRef.current += 1
     isCrossfadingRef.current = false
     expectedCrossfadeTrackIdRef.current = null
@@ -2396,6 +2400,22 @@ export default function App() {
     const fadeInNode = isPrimaryActive ? fadeGainRef.current.cf : fadeGainRef.current.primary
 
     const encodedSrc = audioSrcFor(nextTrack)
+    // The optional prepared stem WAV is checked asynchronously while the
+    // ordinary incoming source is loading. If its content/plan mismatches or
+    // it misses the window, the existing two-deck AutoMix path wins.
+    let preparedStemClip = null
+    const outgoingTrack = currentTrackRef.current
+    const enableStem = !!(plan && options.stemClips && outgoingTrack &&
+      !outgoingTrack.atmosNative && !nextTrack.atmosNative &&
+      !streamRef(outgoingTrack) && !streamRef(nextTrack) &&
+      Math.abs(playbackSpeed() - 1) < 1e-4)
+    if (enableStem) {
+      Promise.resolve(api.automixStemClip(outgoingTrack, nextTrack))
+        .then(clip => {
+          if (token === crossfadeTokenRef.current &&
+              eligibleStemTransition(clip, plan, playbackSpeed())) preparedStemClip = clip
+        }).catch(() => {})
+    }
     if (!encodedSrc) { isCrossfadingRef.current = false; expectedCrossfadeTrackIdRef.current = null; return }
 
     // Keep the old source identity until the replacement reaches canplay.
@@ -2469,7 +2489,8 @@ export default function App() {
         try { fadeInEl.playbackRate = (plan.rate || 1) * playbackSpeed() } catch {}
         const waitForStart = () => {
           if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
-          const left = plan.start - fadeOutEl.currentTime
+          const cueStart = preparedStemClip?.outStart ?? plan.start
+          const left = cueStart - fadeOutEl.currentTime
           if (left <= 0.03 || fadeOutEl.ended) { beginCrossfade(); return }
           crossfadeTimeoutRef.current = setTimeout(waitForStart, Math.min(250, Math.max(5, left * 1000 / (fadeOutEl.playbackRate || 1) - 8)))
         }
@@ -2521,6 +2542,88 @@ export default function App() {
       // with AutoMix the cover dissolves into the next song's (MixCovers).
       const transitionSeconds = Math.max(fadeIn, fadeOut)
       if (transitionSeconds >= 2) usePlayerStore.setState({ mixing: { kind: plan ? plan.kind : 'crossfade', until: Date.now() + transitionSeconds * 1000 } })
+      const finishTransition = () => {
+        if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
+        if (crossfadeTimeoutRef.current) clearTimeout(crossfadeTimeoutRef.current)
+        crossfadeTimeoutRef.current = null
+        stemPlaybackRef.current?.stop()
+        stemPlaybackRef.current = null
+
+        const endNow = ctx.currentTime
+        fadeInGain.gain.cancelScheduledValues(endNow)
+        fadeOutGain.gain.cancelScheduledValues(endNow)
+        for (const fade of [fadeInNode.gain, fadeOutNode.gain]) {
+          fade.cancelScheduledValues(endNow)
+          fade.setValueAtTime(1, endNow)
+        }
+        
+        if (fadeInGain === gainNodeRef.current) {
+          gainNodeRef.current.gain.setValueAtTime(volumeRef.current, endNow)
+          cfGainNodeRef.current.gain.setValueAtTime(0, endNow)
+        } else {
+          cfGainNodeRef.current.gain.setValueAtTime(volumeRef.current, endNow)
+          gainNodeRef.current.gain.setValueAtTime(0, endNow)
+        }
+
+        isCrossfadingRef.current = false
+        expectedCrossfadeTrackIdRef.current = null
+        crossfadeTimeoutRef.current = null
+        openMixFilters()
+        usePlayerStore.setState({ mixing: null })
+        // A beat-matched song back to its own tempo, gently (8 s).
+        if (plan && !usingStemClip && fadeInEl.playbackRate !== playbackSpeed()) {
+          clearInterval(rateGlideRef.current)
+          const from = fadeInEl.playbackRate
+          const began = Date.now()
+          // Every playbackRate change makes the media pipeline re-time its
+          // audio (costly on Linux): a few coarse steps, not 80 tiny ones.
+          rateGlideRef.current = setInterval(() => {
+            const part = Math.min(1, (Date.now() - began) / 8000)
+            const target = playbackSpeed()
+            const rate = from + (target - from) * part
+            try { fadeInEl.playbackRate = Math.abs(rate - target) < 0.004 ? target : Math.round(rate * 1000) / 1000 } catch {}
+            if (part >= 1 || fadeInEl.playbackRate === playbackSpeed()) clearInterval(rateGlideRef.current)
+          }, 500)
+        }
+
+        pauseSuppressRef.current = true
+        try { fadeOutEl.pause() } catch {}
+        try { fadeOutEl.src = '' } catch {}
+        try { fadeOutEl.currentTime = 0 } catch {}
+        fadeOutEl.dataset.lokalTrackPending = ''
+        fadeOutEl.dataset.lokalTrackId = ''
+        setTimeout(() => { pauseSuppressRef.current = false }, 200)
+      }
+      let usingStemClip = false
+      if (preparedStemClip && analyserRef.current &&
+          eligibleStemTransition(preparedStemClip, plan, playbackSpeed())) {
+        const clip = createStemPlayback({
+          clip: preparedStemClip, ctx, analyser: analyserRef.current,
+          outgoing: fadeOutEl, incoming: fadeInEl,
+          outFade: fadeOutNode, inFade: fadeInNode,
+          getVolume: () => volumeRef.current,
+          onFinish: () => finishTransition(),
+          onAbort: () => finishTransition(),
+        })
+        if (clip) {
+          usingStemClip = true
+          stemPlaybackRef.current = clip
+          // The clip includes the upstream tempo warp. The real next song
+          // stays at native speed and resumes at the exact source timestamp.
+          try { fadeInEl.playbackRate = playbackSpeed() } catch {}
+          usePlayerStore.setState({
+            mixing: { kind: 'stem', until: Date.now() + preparedStemClip.durationSeconds * 1000 },
+          })
+          clip.start().catch(() => finishTransition())
+          // Watchdog: ensure a corrupt/missing ended event cannot hold the
+          // old deck or queue in the "mixing" state indefinitely.
+          crossfadeTimeoutRef.current = setTimeout(
+            finishTransition, (preparedStemClip.durationSeconds + 2) * 1000,
+          )
+          return
+        }
+      }
+
       if (plan?.bassSwap) {
         // A bass swap halfway: the next song comes in without its bass, then
         // takes the low end over from the playing one (two basslines clash).
@@ -2546,54 +2649,7 @@ export default function App() {
       fadeInNode.gain.cancelScheduledValues(rampNow)
       fadeInNode.gain.setValueCurveAtTime(fadeCurve(0, 1, options.curve), rampNow, fadeIn)
 
-      crossfadeTimeoutRef.current = setTimeout(() => {
-        if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
-
-        const endNow = ctx.currentTime
-        fadeInGain.gain.cancelScheduledValues(endNow)
-        fadeOutGain.gain.cancelScheduledValues(endNow)
-        for (const fade of [fadeInNode.gain, fadeOutNode.gain]) {
-          fade.cancelScheduledValues(endNow)
-          fade.setValueAtTime(1, endNow)
-        }
-        
-        if (fadeInGain === gainNodeRef.current) {
-          gainNodeRef.current.gain.setValueAtTime(volumeRef.current, endNow)
-          cfGainNodeRef.current.gain.setValueAtTime(0, endNow)
-        } else {
-          cfGainNodeRef.current.gain.setValueAtTime(volumeRef.current, endNow)
-          gainNodeRef.current.gain.setValueAtTime(0, endNow)
-        }
-
-        isCrossfadingRef.current = false
-        expectedCrossfadeTrackIdRef.current = null
-        crossfadeTimeoutRef.current = null
-        openMixFilters()
-        usePlayerStore.setState({ mixing: null })
-        // A beat-matched song back to its own tempo, gently (8 s).
-        if (plan && fadeInEl.playbackRate !== playbackSpeed()) {
-          clearInterval(rateGlideRef.current)
-          const from = fadeInEl.playbackRate
-          const began = Date.now()
-          // Every playbackRate change makes the media pipeline re-time its
-          // audio (costly on Linux): a few coarse steps, not 80 tiny ones.
-          rateGlideRef.current = setInterval(() => {
-            const part = Math.min(1, (Date.now() - began) / 8000)
-            const target = playbackSpeed()
-            const rate = from + (target - from) * part
-            try { fadeInEl.playbackRate = Math.abs(rate - target) < 0.004 ? target : Math.round(rate * 1000) / 1000 } catch {}
-            if (part >= 1 || fadeInEl.playbackRate === playbackSpeed()) clearInterval(rateGlideRef.current)
-          }, 500)
-        }
-
-        pauseSuppressRef.current = true
-        try { fadeOutEl.pause() } catch {}
-        try { fadeOutEl.src = '' } catch {}
-        try { fadeOutEl.currentTime = 0 } catch {}
-        fadeOutEl.dataset.lokalTrackPending = ''
-        fadeOutEl.dataset.lokalTrackId = ''
-        setTimeout(() => { pauseSuppressRef.current = false }, 200)
-      }, Math.max(fadeIn, fadeOut) * 1000)
+      crossfadeTimeoutRef.current = setTimeout(finishTransition, Math.max(fadeIn, fadeOut) * 1000)
     }
   }, [flushTime, setActiveAudioElement, beginLastfmPlayback, cancelCrossfade, stopTimer, autoNext, openMixFilters, applyReplayGainToElement])
 
