@@ -65,3 +65,31 @@ test('Monochrome retries an intermittent provider error only once', async () => 
   assert.deepEqual(result, [])
   assert.equal(attempts, 2)
 })
+
+test('saving a Monochrome ghost forwards catalogue tags and cover to the downloader', async () => {
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../src/onlineTracks.js', import.meta.url), 'utf8')
+    .replace("import { api } from './api.js'", "const api = globalThis.__testMonochromeApi")
+    .replace("import { downloadBatchCurrent } from './downloadCancellation.js'", 'const downloadBatchCurrent = value => value || (() => true)')
+  const calls = []
+  globalThis.__testMonochromeApi = {
+    downloadYT: async (url, opts) => { calls.push([url, opts]); return { downloadId: 'mono-job' } },
+  }
+  try {
+    const { saveToLibrary } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+    const result = await saveToLibrary({
+      id: 'ghost-mono', file_path: 'ghost://monochrome/online/155142501534011392',
+      title: 'Get Lucky', artist: 'Daft Punk', album: 'Random Access Memories',
+      artwork_url: 'https://tracks.monochrome.st/cover.jpg',
+    })
+    assert.equal(result.downloadId, 'mono-job')
+    assert.equal(calls[0][0], 'https://tracks.monochrome.st/track/155142501534011392')
+    assert.deepEqual(calls[0][1].tags, {
+      title: 'Get Lucky', artist: 'Daft Punk', album: 'Random Access Memories',
+      cover: 'https://tracks.monochrome.st/cover.jpg',
+      year: undefined, track: undefined, disc: undefined, isrc: undefined, genre: undefined,
+    })
+  } finally {
+    delete globalThis.__testMonochromeApi
+  }
+})
