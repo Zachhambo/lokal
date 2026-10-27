@@ -110,13 +110,26 @@ test('third stem deck follows pause/resume and resumes the incoming source',asyn
   let ending=0,aborting=0
   try {
     const outFade=node(),inFade=node(),outGain=node(),inGain=node()
+    const referenceEQ = { type:'peaking',
+      frequency:{value:1200}, Q:{value:1.1}, gain:{value:3} }
+    const copies=[]
+    ctx.createBiquadFilter=()=>{
+      const filter=node()
+      filter.frequency={value:0}
+      filter.Q={value:0}
+      filter.type='peaking'
+      copies.push(filter)
+      return filter
+    }
     const handler=createStemPlayback({
       clip,ctx,analyser:node(),outgoing,incoming,
-      outFade,inFade,outGain,inGain,
+      outFade,inFade,outGain,inGain,equalizer:[referenceEQ],
       getVolume:()=>.65,
       onFinish:()=>ending++,onAbort:()=>aborting++,
     })
     assert.ok(handler)
+    assert.equal(copies.length,1,'the optional stem signal must pass through an EQ clone')
+    assert.equal(copies[0].gain.value,3)
     assert.equal(await handler.start(),true)
     assert.equal(inGain.gain.value,.65,'the real incoming decoder must not remain muted')
     assert.equal(inFade.gain.value,0)
