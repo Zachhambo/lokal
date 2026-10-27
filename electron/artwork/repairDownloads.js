@@ -37,7 +37,7 @@ async function pixelSide(bytes) {
   try {
     const meta = await sharp(Buffer.from(bytes), { limitInputPixels: 16 * 1024 * 1024 }).metadata()
     return Math.min(meta.width || 0, meta.height || 0)
-  } catch { return 0 }
+  } catch { return null }
 }
 
 /** Returns a summary even when some files are busy, deleted or unsupported. */
@@ -68,7 +68,7 @@ async function repairLowQualityDownloads({ db, artworkDir, onProgress = () => {}
         const metadata = await require('../musicMetadata').parseFile(file, { duration: false, skipCovers: false })
         const currentBytes = metadata?.common?.picture?.[0]?.data
         const side = await pixelSide(currentBytes)
-        if (side >= LOW_SIDE) { state.skipped++; continue }
+        if (side === null || side >= LOW_SIDE) { state.skipped++; continue }
         const best = await fetchBestCover(history.get(track.id).url)
         if (!best || best.side < Math.max(640, side * 1.5)) { state.skipped++; continue }
         // Files may be edited while the network request is in flight. Never
