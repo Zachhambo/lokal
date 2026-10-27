@@ -52,6 +52,8 @@ async function loadPreparedStemClip(outgoing, incoming) {
         !isSHA(manifest?.source?.incomingSha256) ||
         !isSHA(manifest?.clip?.sha256) ||
         manifest?.clip?.bytes !== sc.size ||
+        !finite(manifest?.clip?.durationSeconds) ||
+        Math.abs(manifest.clip.durationSeconds - timeline.length) > 0.1 ||
         ![timeline.outStart,timeline.inStart,timeline.resumeIn,
           timeline.length,timeline.masterGain].every(finite) ||
         timeline.outStart < 15 || timeline.inStart < 0 ||
@@ -71,7 +73,9 @@ async function loadPreparedStemClip(outgoing, incoming) {
       while (memo.size > 16) memo.delete(memo.keys().next().value)
     }
     const bytes = await readFile(clip)
-    if (bytes.length !== sc.size) return null
+    if (bytes.length !== sc.size ||
+        !['RIFF','RF64'].includes(bytes.toString('ascii',0,4)) ||
+        bytes.toString('ascii',8,12) !== 'WAVE') return null
     return {
       audio: new Uint8Array(bytes),
       outStart:timeline.outStart,
