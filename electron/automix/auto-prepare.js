@@ -7,7 +7,8 @@ const fsp = fs.promises
 const os = require('os')
 const path = require('path')
 const { spawn } = require('child_process')
-const { pathToFileURL } = require('url')
+const crypto = require('crypto')
+const { SCHEMA } = require('./advanced-report')
 const MAX_INPUT_BYTES = 160 * 1024 * 1024
 const TIMEOUT_MS = 8 * 60 * 1000
 
@@ -44,6 +45,66 @@ function runModel(executable, script, song1, song2, output, cwd, register) {
   })
 }
 
+async function fileSha256(file) {
+  const hash = crypto.createHash('sha256')
+  for await(const chunk of fs.createReadStream(file)) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+async function writeSidecar(file, role, report, source, duration) {
+  if (report.cue_detector !== 'disco-eth/cue-detr' ||
+      !/^[a-f0-9]{40}$/.test(report.cue_detector_revision || '')) {
+    throw Error('Unknown model provenance')
+  }
+  const cue = Number(report[role + '_transition_start_seconds'])
+  const snapped = Number(report[role + '_cue_snapped_seconds'])
+  const bpm = Number(report[role + '_estimated_bpm'])
+  if (![cue,snapped,bpm].every(Number.isFinite) || cue < 0 ||
+      snapped < cue || snapped > duration + .5 || bpm < 50 || bpm > 220) {
+    throw Error('Invalid model timing')
+  }
+  const entry = {time:Math.round(cue*1000)/1000,confidence:.95}
+  const result = {
+    schema:SCHEMA,
+    source,
+    durationSeconds:duration,
+    bpm,
+    analyzer:{
+      id:'disco-eth/cue-detr',
+      revision:report.cue_detector_revision,
+      processorRevision:String(report.cue_processor_revision || ''),
+    },
+    transitionCues:{
+      entrances: role === 'song2' ? [entry] : [],
+      exits: role === 'song1' ? [entry] : [],
+    },
+  }
+  const dest = file + '.lokal-automix.json'
+  try {
+    const previous = JSON.parse(await fsp.readFile(dest,'utf8'))
+    if (previous?.schema === SCHEMA &&
+        previous.source?.sha256 === source.sha256 &&
+        previous.analyzer?.revision === result.analyzer.revision) {
+      for (const type of ['entrances','exits']) {
+        const cues = [...result.transitionCues[type],
+          ...(previous.transitionCues?.[type] || [])]
+          .filter(c => Number.isFinite(c?.time) && Number.isFinite(c?.confidence) &&
+            c.time >= 0 && c.time <= duration && c.confidence >= 0 && c.confidence <= 1)
+        const byTime = new Map()
+        for (const c of cues) byTime.set(c.time.toFixed(2),c)
+        result.transitionCues[type] = [...byTime.values()].slice(0,24)
+      }
+    }
+  } catch {}
+  const tmp = dest + '.' + process.pid + '.tmp'
+  try {
+    await fsp.writeFile(tmp,JSON.stringify(result),{flag:'wx'})
+    await fsp.rename(tmp,dest)
+  } finally {
+    await fsp.rm(tmp,{force:true}).catch(()=>{})
+  }
+}
+
 function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? 'python' : 'python3' }) {
   let inFlight = null
   let child = null
@@ -69,11 +130,11 @@ function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? '
     } catch { return {prepared:false,reason:'missing-source'} }
     const key = [root,a.file,sa.size,sa.mtimeMs,b.file,sb.size,sb.mtimeMs].join('|')
     if (pairs.has(key)) return pairs.get(key)
-    // Only the most recently requested next pair gets background CPU time.
-    // No queued model work from a previous playback context can hold up Flow.
+    // Supersede any older pair immediately; only one model process remains.
+    const token = ++generation
+    if (child) child.kill()
     const job = async () => {
-      const token = ++generation
-      if (child) child.kill()
+      if (token !== generation) return {prepared:false,reason:'superseded'}
       const staging = await fsp.mkdtemp(path.join(os.tmpdir(),'lokal-cue-detr-'))
       try {
         const first = path.join(staging,'song1.mp3')
@@ -84,9 +145,6 @@ function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? '
         await runModel(executable,script,first,second,reportPath,root,
           running => { child = running })
         if (token !== generation) return {prepared:false,reason:'superseded'}
-        const { fileSha256, sidecarForRole, saveReport } = await import(
-          pathToFileURL(path.join(appDir,'scripts','automix-import-cues.mjs')).href
-        )
         const report = JSON.parse(await fsp.readFile(reportPath,'utf8'))
         const [hashA,hashB] = await Promise.all([fileSha256(a.file),fileSha256(b.file)])
         if (report.song1_sha256 !== hashA || report.song2_sha256 !== hashB) {
@@ -97,12 +155,8 @@ function makeAutoPrepare({ appDir, executable = process.platform === 'win32' ? '
             fa.mtimeMs !== sa.mtimeMs || fb.mtimeMs !== sb.mtimeMs) {
           return {prepared:false,reason:'changed-source'}
         }
-        saveReport(a.file,sidecarForRole('song1',report,{
-          size:fa.size,mtimeMs:fa.mtimeMs,sha256:hashA,
-        },a.duration))
-        saveReport(b.file,sidecarForRole('song2',report,{
-          size:fb.size,mtimeMs:fb.mtimeMs,sha256:hashB,
-        },b.duration))
+        await writeSidecar(a.file,'song1',report,{size:fa.size,mtimeMs:fa.mtimeMs,sha256:hashA},a.duration)
+        await writeSidecar(b.file,'song2',report,{size:fb.size,mtimeMs:fb.mtimeMs,sha256:hashB},b.duration)
         return {prepared:true}
       } catch (_) {
         return {prepared:false,reason:'analyzer-failed'}
