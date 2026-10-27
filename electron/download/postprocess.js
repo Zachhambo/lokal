@@ -230,17 +230,17 @@ const { fetchBestCover } = require('./coverQuality')
 /** Tags for a download from the client, checked: { title, artist, album, cover, year, track, disc, isrc, genre } or undefined. */
 function knownTagsOf(value) {
   if (!value || typeof value !== 'object') return undefined
-  const text = (v) => (typeof v === 'string' && v.trim() ? v.trim().replace(/[\\u0000-\\u001f]/g, ' ').slice(0, 300) : undefined)
+  const text = (v) => (typeof v === 'string' && v.trim() ? v.trim().replace(/[\u0000-\u001f]/g, ' ').slice(0, 300) : undefined)
   const number = (v, min, max) => (Number(v) >= min && Number(v) <= max ? Math.floor(Number(v)) : undefined)
   const tags = {
     title: text(value.title),
     artist: text(value.artist),
     album: text(value.album),
-    cover: typeof value.cover === 'string' && /^https:\\/\\/[^\\s]{1,1000}$/.test(value.cover) ? value.cover : undefined,
+    cover: typeof value.cover === 'string' && /^https:\/\/[^\s]{1,1000}$/.test(value.cover) ? value.cover : undefined,
     year: number(value.year, 1000, 2999),
     track: number(value.track, 1, 999),
     disc: number(value.disc, 1, 99),
-    isrc: typeof value.isrc === 'string' && /^[A-Z]{2}[A-Z0-9]{3}\\d{7}$/i.test(value.isrc.replace(/-/g, '')) ? value.isrc.replace(/-/g, '').toUpperCase() : undefined,
+    isrc: typeof value.isrc === 'string' && /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/i.test(value.isrc.replace(/-/g, '')) ? value.isrc.replace(/-/g, '').toUpperCase() : undefined,
     genre: text(value.genre)?.slice(0, 100),
   }
   return tags.title || tags.artist ? tags : undefined
