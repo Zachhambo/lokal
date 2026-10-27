@@ -36,5 +36,6 @@ test('pixel-based repair reads image bytes rather than 150px UI cache dimensions
     width: 1200, height: 1100, channels: 3, background: '#222222',
   } }).jpeg().toBuffer()
   assert.equal(await pixelSide(full), 1100)
-  assert.equal(await pixelSide(Buffer.from('not an image')), 0)
+  assert.equal(await pixelSide(Buffer.from('not an image')), null)
+  assert.equal(await pixelSide(null), 0)
 })
