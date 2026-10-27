@@ -2619,6 +2619,7 @@ export default function App() {
           outgoing: fadeOutEl, incoming: fadeInEl,
           outFade: fadeOutNode, inFade: fadeInNode,
           outGain: fadeOutGain, inGain: fadeInGain,
+          equalizer: isPrimaryActive ? eqFiltersRef.current.primary : eqFiltersRef.current.cf,
           getVolume: () => volumeRef.current,
           onFinish: () => finishTransition(),
           onAbort: () => finishTransition(),
