@@ -767,7 +767,7 @@ export default function Settings() {
     touchedSettingsRef.current.add(k)
     setSettings(s => ({ ...s, [k]: v }))
     queueSettings({ [k]: v })
-    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'automix_same_album' || k === 'automix_stem_clips') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
+    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'automix_same_album' || k === 'automix_stem_clips' || k === 'automix_auto_prepare' || k === 'automix_engine_path') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
     if (k === 'replaygain_mode') usePlayerStore.getState().setReplayGainMode(v)
   }
   const crossfade = readCrossfadeSettings(settings)
@@ -1748,6 +1748,26 @@ activeCategory === 'data' ? usersTried
             </button>
           </Row>
         )}
+        {crossfade.mode === 'automix' && (<>
+          <Row label={t("Automatic Cue Preparation")}
+            desc={t("Optional: analyze upcoming local MP3 pairs in the background using your separately installed AutoMix Engine. Cached cue data is reused; normal playback never waits for the model.")}>
+            <button
+              onClick={() => set('automix_auto_prepare', settings.automix_auto_prepare === '1' ? '0' : '1')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.automix_auto_prepare === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+              {settings.automix_auto_prepare === '1' ? t('On') : t('Off')}
+            </button>
+          </Row>
+          {settings.automix_auto_prepare === '1' && (
+            <Row label={t("AutoMix Engine Folder")}
+              desc={t("Local folder containing cue_analysis.py and its installed CUE-DETR model. No weights are downloaded by Lokal.")}>
+              <input type="text" spellCheck={false}
+                value={settings.automix_engine_path || ''}
+                onChange={e => set('automix_engine_path', e.target.value)}
+                placeholder="C:\\Tools\\automix-engine"
+                className="min-w-0 w-60 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-white outline-none focus:border-accent/50" />
+            </Row>
+          )}
+        </>)}
         {crossfade.mode === 'crossfade' && (
         <Row label={t("Crossfade")} desc={t("Start the next song this many seconds before the current one ends. Skipping doesn't fade.")}>
           <div className="flex items-center gap-2">
