@@ -302,14 +302,14 @@ function sourceRefOfTrack(track) {
 function libraryCopyOf(db, trackId) {
   if (!trackId) return null
   try {
-    const alias = db.prepare("SELECT t.id FROM track_aliases a JOIN tracks t ON t.id = a.track_id WHERE a.old_id = ? AND t.file_path NOT LIKE 'ghost://%'").get(trackId)
+    const alias = db.prepare("SELECT t.id FROM track_aliases a JOIN tracks t ON t.id = a.track_id WHERE a.old_id = ? AND t.file_path NOT LIKE 'ghost://%' AND COALESCE(t.atmos_verified, 0) != 1").get(trackId)
     if (alias) return alias.id
   } catch {}
   const track = db.prepare('SELECT id, file_path, source_url, title, artist, duration FROM tracks WHERE id = ?').get(trackId)
   if (!track || !String(track.file_path || '').startsWith('ghost://')) return null
   const ref = sourceRefOfTrack(track)
   if (ref) {
-    const hit = db.prepare("SELECT id FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' LIMIT 1").get(ref)
+    const hit = db.prepare("SELECT id FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' AND COALESCE(atmos_verified, 0) != 1 LIMIT 1").get(ref)
     if (hit) return hit.id
   }
   // The same song downloaded from elsewhere. sameSong needs both lengths
@@ -317,7 +317,7 @@ function libraryCopyOf(db, trackId) {
   // those are the candidates, each compared the same way as everywhere else.
   const length = Number(track.duration) || 0
   if (!(length > 0)) return null
-  const candidates = db.prepare("SELECT id, title, artist, duration FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND duration BETWEEN ? AND ?")
+  const candidates = db.prepare("SELECT id, title, artist, duration FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND COALESCE(atmos_verified, 0) != 1 AND duration BETWEEN ? AND ?")
     .all(length - TWIN_DURATION_SLACK_S, length + TWIN_DURATION_SLACK_S)
   return candidates.find(candidate => sameSong(track, candidate))?.id || null
 }
