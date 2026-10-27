@@ -498,7 +498,9 @@ export default function Settings() {
   useEffect(() => {
     if (!api.isElectron) return undefined
     const off = api.onArtworkRepairProgress(status => setArtworkRepairJob(status))
-    api.artworkRepairStatus().then(status => setArtworkRepairJob(status)).catch(() => {})
+    api.artworkRepairStatus().then(status => {
+      if (status?.running || status?.total > 0) setArtworkRepairJob(status)
+    }).catch(() => {})
     return off
   }, [])
   const refreshLowQualityArtwork = async () => {
