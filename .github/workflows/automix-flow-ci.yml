@@ -42,5 +42,6 @@ jobs:
           scripts/automix-decode.test.mjs
           scripts/automix-file-cache.test.mjs
           scripts/automix-model-cues.test.mjs
+          scripts/automix-stem-live.test.mjs
           scripts/automix-plan.test.mjs
           scripts/flow.test.mjs
