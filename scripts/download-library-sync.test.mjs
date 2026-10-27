@@ -51,6 +51,29 @@ for (const [stored, current, rejected] of [[100, 200, false], [200, 100, true]])
   })
 }
 
+test('repair of a missing verified Atmos edition re-probes the replacement file', async t => {
+  const { db, filepath, add } = fixture(t)
+  const missingPath = path.join(path.dirname(filepath), 'lost.atmos.m4a')
+  add('missing-atmos', missingPath, 'Song', 'Artist', 200)
+  db.prepare("UPDATE tracks SET album = ?, atmos_verified = 1 WHERE id = 'missing-atmos'").run('Album')
+  t.mock.method(mm, 'parseFile', async () => ({
+    common: { title: 'Song', artist: 'Artist', album: 'Album', genre: ['Electronic'] },
+    format: { duration: 200, codec: 'E-AC-3', container: 'MPEG-4' },
+  }))
+  const quality = require('../electron/quality')
+  const probe = t.mock.method(quality, 'probeAtmosFile', async () => 1)
+
+  const result = await indexSingleFile(filepath, {
+    metadata: { title: 'Song', artist: 'Artist', album: 'Album', duration: 200 },
+  })
+
+  assert.equal(result.id, 'missing-atmos')
+  assert.equal(result.repaired, true)
+  assert.equal(db.prepare("SELECT file_path FROM tracks WHERE id = 'missing-atmos'").get().file_path, filepath)
+  assert.equal(db.prepare("SELECT atmos_verified FROM tracks WHERE id = 'missing-atmos'").get().atmos_verified, 1)
+  assert.ok(probe.mock.callCount() >= 2, 'both indexing and missing-file replacement must check JOC')
+})
+
 test('unchanged-file duration avoids parsing and artist repairs refresh links', async t => {
   const { db, filepath, add } = fixture(t)
   add('existing', filepath, 'Song', 'Old artist')
@@ -202,6 +225,30 @@ test('reusing an owned source validates the full imported batch before replacing
   assert.equal(result.alreadyInLibrary, undefined)
   assert.deepEqual(db.prepare('SELECT track_id FROM playlist_tracks ORDER BY position').all().map(r => r.track_id), ['g1', 'g2', 'streamed'])
   assert.ok(fs.existsSync(filepath))
+})
+
+test('already-owned Atmos edition does not replace stereo playlist or like ghosts', t => {
+  const { db, mgr } = downloadFixture(t, { skipped: true }, false)
+  db.prepare("UPDATE tracks SET source_ref = ?, atmos_verified = 1 WHERE id = 'target'").run('a-0123456789:song')
+  db.prepare("UPDATE tracks SET file_path = ?, source_ref = ? WHERE id = 'streamed'")
+    .run('ghost://addon/0123456789/song', 'a-0123456789:song')
+  db.prepare("INSERT INTO user_likes (user_id, track_id) VALUES ('guest', 'streamed')").run()
+  mgr.configure({ findTools: () => ({ ytdlp: 'unused' }) })
+  mgr.pump = () => { throw new Error('Owned Atmos edition should not be queued again') }
+
+  const response = mgr.enqueue('single', 'https://addon.example/file.flac', {
+    title: 'Song', addonSource: { provider: 'a-0123456789', id: 'song' },
+    explicitAtmosDownload: true, addonQuality: 'DOLBY_ATMOS',
+    replaceImported: ['g1'], replaceTrackId: 'streamed',
+  })
+
+  assert.equal(response.alreadyInLibrary, true)
+  assert.equal(response.trackId, 'target')
+  assert.deepEqual(db.prepare('SELECT track_id FROM playlist_tracks ORDER BY position').all().map(row => row.track_id),
+    ['g1', 'g2', 'streamed'])
+  assert.deepEqual(db.prepare('SELECT track_id FROM user_likes ORDER BY track_id').all().map(row => row.track_id),
+    ['g1', 'streamed'])
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM track_aliases').get().n, 0)
 })
 
 test('desktop ghost resolution honors match checks, deduplication, and completed aliases', t => {
