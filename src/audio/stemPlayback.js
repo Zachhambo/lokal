@@ -197,6 +197,9 @@ export function createStemPlayback({
         }
         startupTimer = setTimeout(startupDeadline, 5000)
         await element.play() // Do not mute the real decks until audible.
+        // A user may have paused while the decoder was opening the WAV.
+        // Do not play through a completed asynchronous startup request.
+        if (incoming.paused) element.pause()
         if (startupTimer) clearTimeout(startupTimer)
         startupTimer = null
         if (finished) return false
