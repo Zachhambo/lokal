@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const sharp = require('sharp')
-const { fetchBestCover } = require('../electron/download/coverQuality')
+const { fetchBestCover, readBoundedBody } = require('../electron/download/coverQuality')
 const { shouldUpgradeEmbeddedCover } = require('../electron/download/tagger')
 
 const cover = async (size) => sharp({
@@ -15,7 +15,12 @@ function response(bytes, status = 200) {
   return {
     ok: status === 200,
     headers: new Headers({ 'content-type': 'image/jpeg', 'content-length': String(bytes.length) }),
-    arrayBuffer: () => Promise.resolve(bytes),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
   }
 }
 
@@ -74,4 +79,17 @@ test('unknown/signed artwork URL is never rewritten', async () => {
   })
   assert.equal(result.width, 900)
   assert.deepEqual(requests, [signed])
+})
+
+test('streamed artwork refuses oversized response without buffering it', async () => {
+  let cancelled = false
+  const response = {
+    body: new ReadableStream({
+      pull(controller) { controller.enqueue(Buffer.alloc(1024)) },
+      cancel() { cancelled = true },
+    }),
+  }
+  const result = await readBoundedBody(response, 512)
+  assert.equal(result, null)
+  assert.equal(cancelled, true)
 })
