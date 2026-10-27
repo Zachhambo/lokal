@@ -767,7 +767,7 @@ export default function Settings() {
     touchedSettingsRef.current.add(k)
     setSettings(s => ({ ...s, [k]: v }))
     queueSettings({ [k]: v })
-    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'automix_same_album') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
+    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'automix_same_album' || k === 'automix_stem_clips') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
     if (k === 'replaygain_mode') usePlayerStore.getState().setReplayGainMode(v)
   }
   const crossfade = readCrossfadeSettings(settings)
@@ -1735,6 +1735,16 @@ activeCategory === 'data' ? usersTried
               onClick={() => set('automix_same_album', settings.automix_same_album === '1' ? '0' : '1')}
               className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.automix_same_album === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
               {settings.automix_same_album === '1' ? t('On') : t('Off')}
+            </button>
+          </Row>
+        )}
+        {crossfade.mode === 'automix' && (
+          <Row label={t("Prepared Stem Mixes (Experimental)")}
+            desc={t("Use a previously prepared, source-verified Demucs transition clip when both local tracks match. No models are downloaded or run during playback. Other tracks use regular AutoMix. Pauses and skips cancel the clip.")}>
+            <button
+              onClick={() => set('automix_stem_clips', settings.automix_stem_clips === '1' ? '0' : '1')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.automix_stem_clips === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+              {settings.automix_stem_clips === '1' ? t('On') : t('Off')}
             </button>
           </Row>
         )}
