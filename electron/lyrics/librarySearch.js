@@ -4,12 +4,20 @@
 const MAX_QUERY_LENGTH = 160
 const RESULT_LIMIT = 24
 const SQL_CANDIDATE_LIMIT = 120
+const CJK_RUNE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u
+const CJK_SEPARATORS = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])\s+(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/gu
+
+// Punctuation and spacing between CJK characters needn't appear in the query.
+// Leave separators between Latin/Indic words untouched.
+function normalizedLyricMatchText(value) {
+  return normalizeLyricsSearchText(value).replace(CJK_SEPARATORS, '$1')
+}
 
 function normalizeLyricsSearchText(value) {
   return String(value ?? '')
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\s]+/gu, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\p{S}\s]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
 }
@@ -45,7 +53,7 @@ function lineToSearchText(line) {
 
 function countLyricTokenMatches(text, tokens) {
   if (!tokens.length) return 0
-  const normalized = normalizeLyricsSearchText(text)
+  const normalized = normalizedLyricMatchText(text)
   let matches = 0
   for (const token of tokens) if (normalized.includes(token)) matches++
   return matches
@@ -60,7 +68,7 @@ function buildLyricsSnippet(lines, query) {
     .sort((a, b) => b.score - a.score)
   const match = ranked[0]?.text
   if (!match) return texts[0] || ''
-  const normalized = normalizeLyricsSearchText(match)
+  const normalized = normalizedLyricMatchText(match)
   const token = tokens.find(t => normalized.includes(t)) || tokens[0]
   const lower = match.toLowerCase()
   // For non-Latin and normalized text, avoid byte offsets that split surrogate
@@ -82,7 +90,7 @@ function searchLyricsEntries(db, query) {
   // SQLite LIKE matches literal Chinese/Japanese/Indic characters, but its
   // LOWER() only case-folds ASCII. Do not use ASCII-only text cleanup here.
   const first = tokens[0]
-  const variants = new Set([first])
+  const variants = new Set([first, first.normalize('NFD')])
   if (/[^\x00-\x7f]/u.test(first)) {
     // SQLite LOWER() only handles ASCII. Include common Unicode case forms
     // when looking up Cyrillic, Greek and other cased scripts.
@@ -94,11 +102,19 @@ function searchLyricsEntries(db, query) {
     const raw = String(query).trim().split(/\s+/u)[0]
     if (raw.length <= MAX_QUERY_LENGTH) variants.add(raw)
   }
-  const patterns = [...new Set([...variants].filter(Boolean)
-    // SQLite LOWER() folds ASCII only, even inside Unicode words: e.g.
-    // ÉTÉ becomes ÉtÉ, not été. Mirror that behavior in the LIKE patterns.
-    .map(term => term.replace(/[A-Z]/g, ch => ch.toLowerCase())))]
-    .map(term => '%' + term.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
+  const escapeLike = term => term.replace(/[%_\\]/g, ch => '\\' + ch)
+  const patterns = [...new Set([...variants].filter(Boolean).flatMap(term => {
+    // SQLite LOWER only folds ASCII, while JavaScript's NFKC can change the
+    // spelling of cached text. Include NFD and original-script alternatives.
+    const lower = term.replace(/[A-Z]/g, ch => ch.toLowerCase())
+    const candidates = ['%' + escapeLike(lower) + '%']
+    if ([...lower].filter(ch => CJK_RUNE.test(ch)).length >= 2) {
+      // Allow punctuation or spaces in SQLite's *raw* lyrics JSON between
+      // adjacent CJK characters; the final JavaScript matcher verifies hits.
+      candidates.push('%' + [...lower].map(escapeLike).join('%') + '%')
+    }
+    return candidates
+  }))]
   const candidateSql = patterns.map(() => "LOWER(lc.content) LIKE ? ESCAPE '\\'").join(' OR ')
   const rows = db.prepare([
     'SELECT t.*, lc.content',
