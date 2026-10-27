@@ -225,42 +225,7 @@ function renameWithoutArtist(filePath, artist) {
 // title and artist replace yt-dlp's guesses, its album and cover fill in
 // whatever the file itself doesn't have.
 
-const COVER_MAX_BYTES = 5 * 1024 * 1024
-const COVER_TIMEOUT_MS = 10000
-
-/** Tags for a download from the client, checked: { title, artist, album, cover, year, track, disc, isrc, genre } or undefined. */
-function knownTagsOf(value) {
-  if (!value || typeof value !== 'object') return undefined
-  const text = (v) => (typeof v === 'string' && v.trim() ? v.trim().replace(/[\u0000-\u001f]/g, ' ').slice(0, 300) : undefined)
-  const number = (v, min, max) => (Number(v) >= min && Number(v) <= max ? Math.floor(Number(v)) : undefined)
-  const tags = {
-    title: text(value.title),
-    artist: text(value.artist),
-    album: text(value.album),
-    cover: typeof value.cover === 'string' && /^https:\/\/[^\s]{1,1000}$/.test(value.cover) ? value.cover : undefined,
-    year: number(value.year, 1000, 2999),
-    track: number(value.track, 1, 999),
-    disc: number(value.disc, 1, 99),
-    isrc: typeof value.isrc === 'string' && /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/i.test(value.isrc.replace(/-/g, '')) ? value.isrc.replace(/-/g, '').toUpperCase() : undefined,
-    genre: text(value.genre)?.slice(0, 100),
-  }
-  return tags.title || tags.artist ? tags : undefined
-}
-
-/** The cover image at `url` (https, an image, 5 MB at most), or null. */
-async function fetchCover(url) {
-  if (!url) return null
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), COVER_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, { signal: controller.signal, redirect: 'follow' })
-    const mime = String(res.headers.get('content-type') || '').split(';')[0].trim()
-    if (!res.ok || !/^image\/(?:jpeg|png|webp)$/.test(mime)) return null
-    if (Number(res.headers.get('content-length')) > COVER_MAX_BYTES) return null
-    const bytes = Buffer.from(await res.arrayBuffer())
-    return bytes.length && bytes.length <= COVER_MAX_BYTES ? { bytes, mime } : null
-  } catch { return null } finally { clearTimeout(timer) }
-}
+const { fetchBestCover } = require('./coverQuality')
 
 /**
  * @param known  tags the source gave for the song ({ title, artist, album, cover }),
@@ -346,8 +311,8 @@ async function finishKnownFile(filePath, info, { db, settings, known, outputDir,
   if (album.replace) changes.album = album.value
   // Year, track and disc numbers, ISRC, genre: only where the file has none.
   for (const key of ['year', 'track', 'disc', 'isrc', 'genre']) if (known[key]) changes[key] = known[key]
-  const cover = known.cover ? await fetchCover(known.cover) : null
-  if (cover) { changes.coverBytes = cover.bytes; changes.coverMime = cover.mime }
+  const cover = known.cover ? await fetchBestCover(known.cover) : null
+  if (cover) { changes.coverBytes = cover.bytes; changes.coverMime = cover.mime; changes.upgradeLowResolutionCover = true }
 
   if (settings.download_embed_lyrics !== '0' && !info.hasLyrics && tags.title && tags.artist && db) {
     const controller = new AbortController()
