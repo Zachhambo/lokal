@@ -173,6 +173,9 @@ export async function saveToLibrary(track, extra = {}) {
     // An addon's link expires: the downloader asks the addon for a fresh one
     // each time the job starts (queued, restarted or retried).
     addonSource: ref && isAddonProvider(ref.provider) ? { provider: ref.provider, id: ref.id } : undefined,
+    ...(extra.downloadAtmos === true && ref && isAddonProvider(ref.provider) ? {
+      addonQuality: 'DOLBY_ATMOS', explicitAtmosDownload: true,
+    } : {}),
     // An addon's file is a bare audio link, without tags: name and tag it
     // from what the addon said (only where the file has nothing).
     tags: extra.tags || extra.replaceImported?.length

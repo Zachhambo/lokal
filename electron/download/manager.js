@@ -535,8 +535,10 @@ class DownloadManager {
     // Merge all playlist requests even when they use exactly the same URL.
     // Addon identities take precedence: a shared endpoint can serve different songs.
     const ref = jobSourceRef(kind, url, opts)
+    const atmosIntent = packageSource && opts.explicitAtmosDownload === true && opts.addonQuality === 'DOLBY_ATMOS'
     const running = [...this.jobs.values()].find(j => ACTIVE.has(j.status) && !j.stop &&
-      (ref ? j.sourceRef === ref : j.url === url && j.kind === kind))
+      (ref ? j.sourceRef === ref : j.url === url && j.kind === kind) &&
+      (!packageSource || (j.opts?.explicitAtmosDownload === true) === atmosIntent))
     if (running) {
       if (opts.replaceTrackId && opts.replaceTrackId !== running.opts.replaceTrackId) {
         if (!running.opts.replaceTrackId) running.opts.replaceTrackId = opts.replaceTrackId
@@ -555,7 +557,7 @@ class DownloadManager {
       this.persist(running)
       return { downloadId: running.id, playlistId: running.playlistId, duplicate: true }
     }
-    if (ref && kind !== 'music-video') {
+    if (ref && kind !== 'music-video' && !atmosIntent) {
       const owned = this.libraryTrackWithRef(ref)
       if (owned) {
         try {
@@ -1058,6 +1060,7 @@ class DownloadManager {
       const { provider, id } = job.opts.addonSource
       artifact = await this.downloadPackageWithVerification(provider.slice(2), id, {
         signal: controller.signal, quality: job.opts.addonQuality,
+        allowAtmos: job.opts.explicitAtmosDownload === true && job.opts.addonQuality === 'DOLBY_ATMOS',
         onProgress: update => { if (job.packageRunId === runId && !job.stop) this.update(job, { progress: update.percent ?? job.progress, message: update.message || 'Downloading addon audio…' }) },
       }, {
         onVerificationRequired: () => this.update(job, { message: 'Waiting for addon verification…' }),
@@ -1067,7 +1070,7 @@ class DownloadManager {
       const outputDir = require('../storageLocations').downloadDirectory(job.settings, job.opts.outputDir)
       fs.ensureDirSync(outputDir)
       const title = String(job.title || 'Addon Track').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0,180)
-      const ext = path.extname(artifact.file)
+      const ext = job.opts.explicitAtmosDownload ? '.atmos.m4a' : path.extname(artifact.file)
       let target = path.join(outputDir, `${title}${ext}`)
       for (let suffix = 1; fs.existsSync(target); suffix++) target = path.join(outputDir, `${title} (${suffix})${ext}`)
       await fs.copy(artifact.file, target, { overwrite: false, errorOnExist: true })
