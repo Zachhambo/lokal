@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url)
 const sharp = require('sharp')
 const { fetchBestCover, readBoundedBody } = require('../electron/download/coverQuality')
 const { shouldUpgradeEmbeddedCover } = require('../electron/download/tagger')
+const { knownTagsOf } = require('../electron/download/postprocess')
 
 const cover = async (size) => sharp({
   create: { width: size, height: size, channels: 3, background: '#456789' },
@@ -92,4 +93,13 @@ test('streamed artwork refuses oversized response without buffering it', async (
   const result = await readBoundedBody(response, 512)
   assert.equal(result, null)
   assert.equal(cancelled, true)
+})
+
+test('known addon metadata validator remains available at module load', () => {
+  const tags = knownTagsOf({ title: 'A', artist: 'B',
+    cover: 'https://cdn.example/cover.jpg',
+    isrc: 'USABC1234567' })
+  assert.equal(tags.cover, 'https://cdn.example/cover.jpg')
+  assert.equal(tags.isrc, 'USABC1234567')
+  assert.equal(knownTagsOf({ cover: 'https://cdn.example/only.jpg' }), undefined)
 })
