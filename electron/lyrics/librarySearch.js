@@ -94,7 +94,10 @@ function searchLyricsEntries(db, query) {
     const raw = String(query).trim().split(/\s+/u)[0]
     if (raw.length <= MAX_QUERY_LENGTH) variants.add(raw)
   }
-  const patterns = [...variants].filter(Boolean)
+  const patterns = [...new Set([...variants].filter(Boolean)
+    // SQLite LOWER() folds ASCII only, even inside Unicode words: e.g.
+    // ÉTÉ becomes ÉtÉ, not été. Mirror that behavior in the LIKE patterns.
+    .map(term => term.replace(/[A-Z]/g, ch => ch.toLowerCase())))]
     .map(term => '%' + term.replace(/[%_\\]/g, ch => '\\' + ch) + '%')
   const candidateSql = patterns.map(() => "LOWER(lc.content) LIKE ? ESCAPE '\\'").join(' OR ')
   const rows = db.prepare([
