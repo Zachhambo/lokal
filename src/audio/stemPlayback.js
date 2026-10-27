@@ -28,7 +28,8 @@ export function eligibleStemTransition(clip, plan, speed = 1) {
  */
 export function createStemPlayback({
   clip, ctx, analyser, outgoing, incoming,
-  outFade, inFade, outGain, inGain, getVolume, onFinish, onAbort,
+  outFade, inFade, outGain, inGain, equalizer = [],
+  getVolume, onFinish, onAbort,
 }) {
   if (!ctx || !analyser || !outgoing || !incoming || !outFade?.gain ||
       !inFade?.gain || !outGain?.gain || !inGain?.gain || !clip?.audio) return null
@@ -40,7 +41,25 @@ export function createStemPlayback({
   element.preload = 'auto'
   const source = ctx.createMediaElementSource(element)
   const mixGain = ctx.createGain()
-  source.connect(mixGain)
+  // Recreate the ordinary track EQ before the mixed-stem volume bus. Without
+  // this, prepared stems bypass the equalizer and change tonal balance every
+  // time a transition starts. Reuse the active deck's live filter values.
+  const stemFilters = []
+  let previous = source
+  if (ctx.createBiquadFilter && Array.isArray(equalizer)) {
+    for (const reference of equalizer) {
+      if (!reference?.frequency || !reference?.gain || !reference?.Q) continue
+      const filter = ctx.createBiquadFilter()
+      filter.type = reference.type
+      filter.frequency.value = reference.frequency.value
+      filter.Q.value = reference.Q.value
+      filter.gain.value = reference.gain.value
+      previous.connect(filter)
+      previous = filter
+      stemFilters.push({ filter, reference })
+    }
+  }
+  previous.connect(mixGain)
   mixGain.connect(analyser)
   let finished = false
   let startupTimer = null
@@ -65,6 +84,9 @@ export function createStemPlayback({
     silenceClip()
     try { element.removeAttribute('src'); element.load() } catch {}
     try { source.disconnect(); mixGain.disconnect() } catch {}
+    for (const { filter } of stemFilters) {
+      try { filter.disconnect() } catch {}
+    }
     URL.revokeObjectURL(objectURL)
   }
   const complete = () => {
@@ -103,6 +125,12 @@ export function createStemPlayback({
     if (finished || !playing) return
     const duration = element.duration
     if (!Number.isFinite(duration)) return
+    // User EQ changes should still apply during the short third-deck window.
+    for (const { filter, reference } of stemFilters) {
+      if (filter.gain.value !== reference.gain.value) {
+        filter.gain.setTargetAtTime(reference.gain.value,ctx.currentTime,.025)
+      }
+    }
     const left = duration - element.currentTime
     // The next track is pre-decoded and played quietly before the boundary,
     // then both decks are blended for 350 ms to hide codec seek jitter.
