@@ -2344,11 +2344,20 @@ export default function App() {
     const store = automixRef.current
     const cache = store.stemClips || (store.stemClips = new Map())
     const key = [outTrack.id,outTrack.file_path,nextTrack.id,nextTrack.file_path].join('|')
-    if (!cache.has(key)) {
-      cache.set(key, Promise.resolve(api.automixStemClip(outTrack, nextTrack)).catch(() => null))
-      while (cache.size > 8) cache.delete(cache.keys().next().value)
+    const old = cache.get(key)
+    if (old && old.expires > Date.now()) return old.promise
+    const entry = {
+      expires: Date.now() + 30000,
+      promise: Promise.resolve(api.automixStemClip(outTrack, nextTrack)).catch(() => null),
     }
-    return cache.get(key)
+    cache.set(key, entry)
+    entry.promise.then(clip => {
+      // Recheck missing/newly replaced sidecars; don't hold a stale, verified
+      // WAV forever after the user edits either audio file.
+      if (cache.get(key) === entry) entry.expires = Date.now() + (clip ? 60000 : 5000)
+    }).catch(() => {})
+    while (cache.size > 8) cache.delete(cache.keys().next().value)
+    return entry.promise
   }, [])
 
   const prepareModelPair = useCallback((outTrack, nextTrack, dir) => {
