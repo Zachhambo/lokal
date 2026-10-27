@@ -43,6 +43,7 @@ export function createStemPlayback({
   source.connect(mixGain)
   mixGain.connect(analyser)
   let finished = false
+  let startupTimer = null
   let preparedHandoff = false
   let expectedInternalSeek = null
   let playing = false
@@ -53,6 +54,8 @@ export function createStemPlayback({
     try { element.pause() } catch {}
   }
   const detach = () => {
+    if (startupTimer) clearTimeout(startupTimer)
+    startupTimer = null
     element.removeEventListener('timeupdate', onProgress)
     element.removeEventListener('ended', complete)
     element.removeEventListener('error', abort)
@@ -150,7 +153,14 @@ export function createStemPlayback({
     async start() {
       if (finished) return false
       try {
+        // HTMLAudioElement.play() may never settle if the system's decoder
+        // hangs while opening a damaged WAV. Bound this optional path, then
+        // let the real incoming song play through instead of holding the
+        // queue under a permanent crossfade lock.
+        startupTimer = setTimeout(abort, 5000)
         await element.play() // Do not mute the real decks until audible.
+        if (startupTimer) clearTimeout(startupTimer)
+        startupTimer = null
         if (finished) return false
         playing = true
         const now = ctx.currentTime
