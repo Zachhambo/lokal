@@ -45,3 +45,20 @@ test('an Atmos result must not be downloaded through another provider', async ()
   })
   assert.match(response.error, /same Atmos source/)
 })
+
+test('persisted Atmos ghost retains download action after the search result disappears', async () => {
+  const persisted = {
+    file_path: 'ghost://addon/1234567890/tidal-track-88',
+    title: 'Atmos track', artist: 'Artist', atmos_available: 1,
+  }
+  assert.deepEqual(atmosDownloadRef(persisted),
+    { provider: 'a-1234567890', id: 'tidal-track-88' })
+  const result = await downloadAtmosVersion(persisted, {
+    save: async (track, opts) => {
+      assert.equal(track, persisted)
+      assert.deepEqual(opts, { downloadAtmos: true })
+      return { downloadId: 'atmos-queue' }
+    },
+  })
+  assert.equal(result.downloadId, 'atmos-queue')
+})

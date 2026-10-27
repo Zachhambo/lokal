@@ -2141,6 +2141,9 @@ async function indexSingleFile(filePath, opts = {}) {
   // artist/title/album/duration are identical. Check the actual file profile,
   // not the source's catalogue badge: a failed Atmos request must not bypass
   // deduplication with an ordinary AAC or FLAC file.
+  // Support libraries upgraded before Atmos columns existed (and standalone
+  // imports where the scanner is invoked before the normal quality migration).
+  quality.ensureColumns(db)
   const dupe = findAudioEditionDuplicate(db, {
     title, artist, album, duration, atmosVerified: audioQuality.atmos_verified,
   })
