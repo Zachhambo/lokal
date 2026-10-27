@@ -24,6 +24,8 @@ function registerAutomixHandlers(ipcMain) {
   const { analysisFor } = require('../automix')
   const { readAdvancedReport, mergeAdvancedAnalysis } = require('../automix/advanced-report')
   const { loadPreparedStemClip } = require('../automix/stem-clip')
+  const { makeAutoPrepare } = require('../automix/auto-prepare')
+  const autoPrepare = makeAutoPrepare({})
   const log = message => { try { require('electron-log').info(message) } catch {} }
 
   ipcMain.handle('automix:analyze', async (_, track) => {
@@ -78,6 +80,14 @@ function registerAutomixHandlers(ipcMain) {
   // This endpoint NEVER runs the Python engine or decodes an audio source.
   ipcMain.handle('automix:stemClip', async (_, outgoing, incoming) => {
     return loadPreparedStemClip(outgoing, incoming)
+  })
+
+  // Optional MP3-only model preparation. The process is launched asynchronously
+  // and serialized; the normal playback thread never waits for Python.
+  ipcMain.handle('automix:preparePair', async (_, outgoing, incoming, engineDir) => {
+    const sources = require('../online/sources')
+    if (sources.streamRef(outgoing) || sources.streamRef(incoming)) return null
+    return autoPrepare.prepare(outgoing, incoming, engineDir)
   })
 }
 
