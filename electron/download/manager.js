@@ -313,7 +313,7 @@ class DownloadManager {
   /** The library track downloaded from the online song `ref`, or null. */
   libraryTrackWithRef(ref) {
     try {
-      const track = this.db().prepare("SELECT id, title, file_path FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' LIMIT 1").get(ref)
+      const track = this.db().prepare("SELECT id, title, file_path, atmos_verified FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' ORDER BY COALESCE(atmos_verified, 0) ASC LIMIT 1").get(ref)
       return track && fs.existsSync(track.file_path) ? track : null
     } catch { return null }
   }
@@ -559,7 +559,8 @@ class DownloadManager {
     }
     if (ref && kind !== 'music-video' && !atmosIntent) {
       const owned = this.libraryTrackWithRef(ref)
-      if (owned) {
+      // A verified Atmos version does not satisfy a stereo FLAC download.
+      if (owned && (!packageSource || Number(owned.atmos_verified) !== 1)) {
         try {
           const db = this.db()
           const { resolveGhostTrack } = require('../../server/routes/playlists')
@@ -1312,7 +1313,10 @@ class DownloadManager {
         if (!job.stop) this.update(job, { message: `Adding lyrics: ${path.basename(filepath)}` })
         const outputDir = require('../storageLocations').downloadDirectory(job.settings, job.opts.outputDir)
         // Apple Lossless and other codecs the player can't decode: FLAC (or AAC) first.
-        const playable = await makePlayable(filepath, { ffmpeg: this.deps.findTools?.()?.ffmpeg })
+        // Never transcode E-AC-3 JOC to AAC in the ordinary Chromium
+        // compatibility pipeline: Atmos is saved as a verified bitstream.
+        const playable = job.opts.explicitAtmosDownload ? filepath
+          : await makePlayable(filepath, { ffmpeg: this.deps.findTools?.()?.ffmpeg })
         if (playable !== filepath) {
           job.outputLines.push(`[Lokal] Converted ${path.basename(filepath)} to ${path.extname(playable).slice(1).toUpperCase()} so it plays in Lokal`)
           const fileIndex = job.filepaths.indexOf(filepath)
@@ -1327,7 +1331,11 @@ class DownloadManager {
         // Stopped: the files already downloaded are still tagged and added,
         // but without looking up lyrics, so stopping doesn't wait on a backlog.
         const settings = job.stop ? { ...(job.settings || {}), download_embed_lyrics: '0' } : (job.settings || {})
-        const done = await finishFile(filepath, { db: this.db(), settings, url: job.url, meta, kind: job.kind, outputDir, known: job.opts?.tags || null })
+        // Do not rewrite compressed Atmos MP4 atoms with the generic tagger;
+        // its metadata was already set during the copy/remux and verified.
+        const done = job.opts.explicitAtmosDownload
+          ? { filePath: filepath, lyrics: null, cover: false }
+          : await finishFile(filepath, { db: this.db(), settings, url: job.url, meta, kind: job.kind, outputDir, known: job.opts?.tags || null })
         finalPath = done.filePath
         // Explicit output paths and lossless replacements keep their own destinations.
         const downloadFolder = String(job.settings?.download_folder || '').trim()

@@ -554,7 +554,13 @@ class PackageService {
           throw new Error('The addon did not supply verified E-AC-3 JOC Dolby Atmos audio; nothing was saved')
         }
         const target=path.join(staged,'verified.atmos.m4a')
-        await runTool(tools.ffmpeg,['-nostdin','-y','-i',file,'-map','0:a:0','-c:a','copy',target],combined)
+        await runTool(tools.ffmpeg,[
+          '-nostdin','-y','-i',file,'-map','0:a:0','-c:a','copy',
+          '-metadata','title='+String(track.name || track.title || '').slice(0,500),
+          '-metadata','artist='+(Array.isArray(track.artists) ? track.artists.map(a => typeof a === 'string' ? a : a?.name || '').join(', ') : String(track.artists || track.artist || '')),
+          '-metadata','album='+(albumNameOf(track) || ''),
+          target,
+        ],combined)
         file=target
         info=await mediaInfo(file,tools,combined)
         if(info.codec!=='eac3' || await probeAtmosFile(file,{codec:info.codec,ffprobe:tools.ffprobe})!==1) {
