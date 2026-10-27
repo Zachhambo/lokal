@@ -301,6 +301,9 @@ function sourceRefOfTrack(track) {
  */
 function libraryCopyOf(db, trackId) {
   if (!trackId) return null
+  // On upgrades, the persisted online queue can be read before scanner
+  // initialization. Ensure the edition column exists before filtering it.
+  try { require('../quality').ensureColumns(db) } catch {}
   try {
     const alias = db.prepare("SELECT t.id FROM track_aliases a JOIN tracks t ON t.id = a.track_id WHERE a.old_id = ? AND t.file_path NOT LIKE 'ghost://%' AND COALESCE(t.atmos_verified, 0) != 1").get(trackId)
     if (alias) return alias.id
