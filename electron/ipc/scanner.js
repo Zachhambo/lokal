@@ -2136,7 +2136,12 @@ async function indexSingleFile(filePath, opts = {}) {
   const album = requestedAlbum || c.album?.trim() || 'Unknown Album'
   // A streamed (ghost) copy of the song isn't a copy in the library: the file
   // is added, and then takes the ghost's place.
-  const dupe = db.prepare("SELECT * FROM tracks WHERE LOWER(title) = ? AND LOWER(artist) = ? AND (album IS NULL OR album = ? OR ? IS NULL OR album IS NULL) AND ABS(duration - ?) < 2 AND file_path NOT LIKE 'ghost://%'").get(title.toLowerCase(), artist.toLowerCase(), album, album, duration)
+  // Stereo FLAC and Dolby Atmos JOC are different editions, even if their
+  // artist/title/album/duration are identical. Check the actual file profile,
+  // not the source's catalogue badge: a failed Atmos request must not bypass
+  // deduplication with an ordinary AAC or FLAC file.
+  const edition = audioQuality.atmos_verified === 1 ? 1 : 0
+  const dupe = db.prepare("SELECT * FROM tracks WHERE LOWER(title) = ? AND LOWER(artist) = ? AND (album IS NULL OR album = ? OR ? IS NULL OR album IS NULL) AND ABS(duration - ?) < 2 AND file_path NOT LIKE 'ghost://%' AND COALESCE(atmos_verified, 0) = ?").get(title.toLowerCase(), artist.toLowerCase(), album, album, duration, edition)
   if (dupe) {
     // A previous download may have left its database row behind after the
     // audio file was deleted. Reuse that row instead of creating a second
