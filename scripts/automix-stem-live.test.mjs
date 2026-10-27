@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { eligibleStemTransition } from '../src/audio/stemPlayback.js'
+import { eligibleStemTransition, createStemPlayback } from '../src/audio/stemPlayback.js'
 import { defaultStemClipPath } from './automix-transition-clip.mjs'
 
 const require=createRequire(import.meta.url)
@@ -77,4 +77,75 @@ test('a forged clip with wrong source revision fails closed',async t=>{
     timeline:{outStart:130,inStart:7,resumeIn:24,length:16,masterGain:.9},
   }))
   assert.equal(await loadPreparedStemClip({file_path:outFile},{file_path:inFile}),null)
+})
+
+test('third stem deck follows pause/resume and resumes the incoming source',async()=>{
+  const oldAudio=globalThis.Audio
+  class FakeMedia {
+    constructor(src='') {
+      this.src=src;this.currentTime=0;this.duration=16
+      this.paused=true;this.listeners=new Map()
+    }
+    addEventListener(type,fn) {
+      const list=this.listeners.get(type)||new Set();list.add(fn);this.listeners.set(type,list)
+    }
+    removeEventListener(type,fn){this.listeners.get(type)?.delete(fn)}
+    emit(type){for(const fn of this.listeners.get(type)||[])fn()}
+    async play(){this.paused=false;this.emit('play')}
+    pause(){this.paused=true;this.emit('pause')}
+    removeAttribute(){this.src=''}
+    load(){}
+  }
+  globalThis.Audio=FakeMedia
+  const parameter=()=>({
+    value:0, cancelScheduledValues(){},
+    setValueAtTime(x){this.value=x}, linearRampToValueAtTime(x){this.value=x},
+    setTargetAtTime(x){this.value=x},
+  })
+  const node=()=>({gain:parameter(),connect(){return this},disconnect(){}})
+  const ctx={
+    currentTime:100,createMediaElementSource(){return node()},createGain:node,
+  }
+  const outgoing=new FakeMedia(),incoming=new FakeMedia()
+  let ending=0,aborting=0
+  try {
+    const outFade=node(),inFade=node(),outGain=node(),inGain=node()
+    const handler=createStemPlayback({
+      clip,ctx,analyser:node(),outgoing,incoming,
+      outFade,inFade,outGain,inGain,
+      getVolume:()=>.65,
+      onFinish:()=>ending++,onAbort:()=>aborting++,
+    })
+    assert.ok(handler)
+    assert.equal(await handler.start(),true)
+    assert.equal(inGain.gain.value,.65,'the real incoming decoder must not remain muted')
+    assert.equal(inFade.gain.value,0)
+    incoming.emit('pause')
+    assert.equal(handler.element.paused,true)
+    incoming.emit('play')
+    await Promise.resolve()
+    assert.equal(handler.element.paused,false)
+    handler.element.currentTime=15.7
+    handler.element.emit('timeupdate')
+    assert.ok(Math.abs(incoming.currentTime-23.7)<.01)
+    assert.equal(inFade.gain.value,1)
+    handler.element.emit('ended')
+    assert.equal(ending,1)
+    assert.equal(aborting,0)
+    handler.stop()
+    const second=createStemPlayback({
+      clip,ctx,analyser:node(),outgoing,incoming,
+      outFade:node(),inFade:node(),outGain:node(),inGain:node(),
+      getVolume:()=>.65,
+      onFinish:()=>ending++,onAbort:()=>aborting++,
+    })
+    await second.start()
+    incoming.currentTime=45 // explicit user seek (not internal resume)
+    incoming.emit('seeking')
+    assert.equal(aborting,1,'user seek must cancel optional third deck')
+    second.stop()
+  } finally {
+    if (oldAudio === undefined) delete globalThis.Audio
+    else globalThis.Audio=oldAudio
+  }
 })
