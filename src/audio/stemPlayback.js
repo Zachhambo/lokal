@@ -28,10 +28,10 @@ export function eligibleStemTransition(clip, plan, speed = 1) {
  */
 export function createStemPlayback({
   clip, ctx, analyser, outgoing, incoming,
-  outFade, inFade, getVolume, onFinish, onAbort,
+  outFade, inFade, outGain, inGain, getVolume, onFinish, onAbort,
 }) {
   if (!ctx || !analyser || !outgoing || !incoming || !outFade?.gain ||
-      !inFade?.gain || !clip?.audio) return null
+      !inFade?.gain || !outGain?.gain || !inGain?.gain || !clip?.audio) return null
   const bytes = clip.audio instanceof ArrayBuffer
     ? clip.audio : clip.audio.buffer.slice(clip.audio.byteOffset,
       clip.audio.byteOffset + clip.audio.byteLength)
@@ -154,6 +154,13 @@ export function createStemPlayback({
         if (finished) return false
         playing = true
         const now = ctx.currentTime
+        // Both normal gain nodes must be open. The inactive deck normally
+        // has main gain zero; opening only its fade node would leave the
+        // actual incoming song silent at the stem-to-source handoff.
+        for (const gain of [outGain.gain,inGain.gain]) {
+          gain.cancelScheduledValues(now)
+          gain.setValueAtTime(Math.max(0,getVolume()),now)
+        }
         for(const fade of [outFade.gain,inFade.gain]) fade.cancelScheduledValues(now)
         outFade.gain.setValueAtTime(1,now)
         outFade.gain.linearRampToValueAtTime(0,now+.15)
