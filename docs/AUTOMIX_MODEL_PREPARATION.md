@@ -74,7 +74,22 @@ node scripts/automix-export-stems.mjs \
 
 The tool validates the two upstream root input MP3 files by SHA-256, fails if
 `--render-only` cannot find a prepared stem cache, verifies the returned WAV
-header and size, and publishes a complete copy atomically. It does not replace
+header and size, and publishes a complete copy atomically.
+
+For development of a future *live* stem transition, supply
+`--clip-output "/music/a-to-b-stem-window.wav"` as well. This extracts **only**
+the source-verified, already-mixed transition window into a separate bounded
+stereo WAV and publishes an adjacent `.json` manifest with the exact outgoing
+source position, incoming entry, transition duration and source-resume position.
+The exporter refuses a report with failed vocal-continuity or handoff-smoothness
+checks and checks the two original audio SHA-256 fingerprints. It uses FFmpeg
+and FFprobe for sample-accurate audio extraction and output validation.
+
+**The clip is not consumed by live playback yet.** Playback needs a third
+decoded audio deck and interruption-safe seek/pause/handoff behavior before it
+can replace the existing two-deck mix. The manifest deliberately preserves
+the source-resume timestamp so that future integration does not repeat a
+sung phrase or drop seconds of the incoming song. It does not replace
 existing output unless `--overwrite` is explicitly provided. The output
 is an **actual stem-mixed recording**, suitable for playback in Lokal as a
 normal local file or for A/B listening evaluation.
