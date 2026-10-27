@@ -346,3 +346,30 @@ test('album route marks missing files while retaining existing album normalizati
   assert.equal(rows.find(row => row.id === 'missing').missing, true)
   assert.ok(rows.every(row => row.album === 'Album'))
 })
+
+test('explicit Atmos indexing keeps stereo ghosts, likes and imported references intact', async t => {
+  const { db, filepath, add, mgr, job } = downloadFixture(t, { success: true }, false)
+  add('atmos-copy', filepath + '.atmos.m4a', 'Song', 'Artist', 200)
+  job.opts.explicitAtmosDownload = true
+  job.opts.addonSource = { provider: 'a-0123456789', id: 'tidal88' }
+  job.sourceRef = 'a-0123456789:tidal88'
+  mgr.deps.index = async () => ({ success: true, id: 'atmos-copy' })
+  const result = await mgr.indexOne(job, filepath)
+  assert.equal(result.libraryAdded, true)
+  assert.equal(job.indexedTracks[0].id, 'atmos-copy')
+  assert.equal(db.prepare('SELECT source_ref FROM tracks WHERE id = ?').get('atmos-copy').source_ref, job.sourceRef)
+  assert.equal(db.prepare('SELECT track_id FROM user_likes').get().track_id, 'g1')
+  assert.deepEqual(db.prepare('SELECT track_id FROM playlist_tracks ORDER BY position').all().map(row => row.track_id),
+    ['g1', 'g2', 'streamed'])
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM track_aliases').get().n, 0)
+})
+
+test('second verified Atmos download cannot report a duplicate file as newly indexed', async t => {
+  const { db, filepath, mgr, job } = downloadFixture(t, { duplicate: true }, false)
+  job.opts.explicitAtmosDownload = true
+  const result = await mgr.indexOne(job, filepath)
+  assert.equal(result.libraryAdded, false)
+  assert.equal(job.indexedTracks.length, 0)
+  assert.equal(db.prepare('SELECT track_id FROM user_likes').get().track_id, 'g1')
+  assert.equal(job.outputLines.some(line => /already indexed/.test(line)), true)
+})
