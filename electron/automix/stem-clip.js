@@ -21,6 +21,9 @@ const safeLocal = track => {
   return path.resolve(value)
 }
 
+const isPreparedStemClipName = name =>
+  /\.lokal-stem-to-[a-f0-9]{24}\.wav$/i.test(path.basename(name))
+
 function stemClipPath(outgoing, incoming) {
   const one = safeLocal(outgoing)
   const two = safeLocal(incoming)
@@ -91,4 +94,4 @@ async function loadPreparedStemClip(outgoing, incoming) {
   }
 }
 
-module.exports = { stemClipPath, loadPreparedStemClip }
+module.exports = { stemClipPath, loadPreparedStemClip, isPreparedStemClipName }
