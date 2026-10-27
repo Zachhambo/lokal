@@ -152,10 +152,16 @@ export async function saveToLibrary(track, extra = {}) {
   const ref = streamRef(track)
   let url = downloadUrlFor(track)
   if (ref && isAddonProvider(ref.provider)) {
-    // An addon's link is only known once asked for (and may expire): get it now.
-    const got = await api.onlineDownloadUrl(ref.provider, ref.id)
-    if (!got?.url) return { error: got?.error || 'The addon gave no download link' }
-    url = got.url
+    if (extra.downloadAtmos === true) {
+      // Mornye resolves its own media after the job starts. Never prefetch
+      // a stereo stream (or cause a failed hi-res request) before Atmos.
+      // The download manager verifies that this is an installed package.
+      url = 'lokal-addon://' + ref.provider + '/' + encodeURIComponent(ref.id)
+    } else {
+      const got = await api.onlineDownloadUrl(ref.provider, ref.id)
+      if (!got?.url) return { error: got?.error || 'The addon gave no download link' }
+      url = got.url
+    }
   }
   if (!url) return { error: 'Not a streamed song' }
   if (!isCurrent()) return { cancelled: true }
@@ -173,6 +179,9 @@ export async function saveToLibrary(track, extra = {}) {
     // An addon's link expires: the downloader asks the addon for a fresh one
     // each time the job starts (queued, restarted or retried).
     addonSource: ref && isAddonProvider(ref.provider) ? { provider: ref.provider, id: ref.id } : undefined,
+    ...(extra.downloadAtmos === true && ref && isAddonProvider(ref.provider) ? {
+      addonQuality: 'DOLBY_ATMOS', explicitAtmosDownload: true,
+    } : {}),
     // An addon's file is a bare audio link, without tags: name and tag it
     // from what the addon said (only where the file has nothing).
     tags: extra.tags || extra.replaceImported?.length

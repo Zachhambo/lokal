@@ -80,6 +80,8 @@ function albumIdOf(track) {
 }
 
 const { hasAtmosMetadata } = require('./atmos')
+const { addonDownloadQuality, isAtmosQuality } = require('./playbackQuality')
+const { probeAtmosFile } = require('../quality/atmos')
 const { skipPlaybackEnrichment } = require('./providerFastPath')
 
 /** Keep album metadata string-valued before passing it into file taggers. */
@@ -422,7 +424,7 @@ class PackageService {
     if(pending.callback){const expected=new URL(pending.callback);if(url.protocol!==expected.protocol||url.host!==expected.host||url.pathname!==expected.pathname)throw new Error('Unexpected OAuth callback URL')}
     runtime.host.auth.code=url.searchParams.get('code') || '';runtime.host.auth.pending=null;runtime.host.network.persist?.();return {success:true}
   }
-  async download(key,id,{signal,onProgress,onLive,quality,purpose='download'}={}) {
+  async download(key,id,{signal,onProgress,onLive,quality,purpose='download',allowAtmos=false}={}) {
     const addon=this.find(key);if(!addon||!addon.enabled)throw new Error('Addon is not available')
     const controller=new AbortController(),opId=crypto.randomUUID(),combined=signal?AbortSignal.any([signal,controller.signal]):controller.signal
     this.operations.set(opId,{key,controller})
@@ -515,7 +517,8 @@ class PackageService {
       // The Amazon extension prefers web_metadata over host_track, so keep both
       // in sync with the resolved Amazon metadata instead of the original track.
       if(providerName==='amazon') prepared.web_metadata=track
-      const chosen=quality || this.settings(addon).downloadQuality || addon.manifest.qualityOptions?.find(q=>q.kind==='lossless')?.id || addon.manifest.qualityOptions?.[0]?.id || 'default'
+      const chosen=addonDownloadQuality(addon,this.settings(addon),{quality,allowAtmos,purpose})
+      const downloadingAtmos=isAtmosQuality(chosen)
       const result=await runtime.invoke('download',[available.track_id || available.trackId || String(id),chosen,path.join(staged,'audio.flac'),{preparedContext:prepared,resolutionTimeoutMs:60000}],{timeoutMs:24*3600000,signal:combined})
       if(!result?.success)throw Object.assign(new Error(result?.error_message || result?.error || 'Addon download failed'),{authUrl:result?.auth_url,errorType:result?.error_type})
       let file=safePath(runtime.host.root,result.file_path || result.filePath || result.path,runtime.host.grants)
@@ -531,11 +534,14 @@ class PackageService {
         file=target
       }
       let info=await mediaInfo(file,tools,combined)
-      if(info.codec==='flac'&&!/\.flac$/i.test(file)||result.requires_container_conversion || result.requiresContainerConversion){
+      // Spatial E-AC-3 is not a FLAC input. Add-on container flags must not
+      // cause it to be transcoded before the JOC check; it gets a lossless
+      // bitstream-copy remux after positive verification instead.
+      if(!downloadingAtmos && (info.codec==='flac'&&!/\.flac$/i.test(file)||result.requires_container_conversion || result.requiresContainerConversion)){
         const target=path.join(staged,'remuxed.flac');onProgress?.({message:'Converting audio container…'})
         await runTool(tools.ffmpeg,['-nostdin','-y','-i',file,'-map','0:a:0','-c:a',info.codec==='flac'?'copy':'flac',target],combined);file=target;info=await mediaInfo(file,tools,combined)
       }
-      for(const hook of addon.manifest.postProcessing?.enabled ? addon.manifest.postProcessing.hooks || [] : []){
+      for(const hook of !downloadingAtmos && addon.manifest.postProcessing?.enabled ? addon.manifest.postProcessing.hooks || [] : []){
         const formats=hook.supportedFormats || hook.formats
         if(!hook.defaultEnabled||formats?.length&&!formats.includes(path.extname(file).slice(1)))continue
         const processed=await runtime.invoke('postProcessV2',[{path:file},track,hook.id],{timeoutMs:120000,signal:combined})
@@ -544,6 +550,26 @@ class PackageService {
         if(processed.new_file_path || processed.newFilePath)file=safePath(runtime.host.root,processed.new_file_path || processed.newFilePath,runtime.host.grants)
       }
       info=await mediaInfo(file,tools,combined)
+      if(downloadingAtmos) {
+        // Verify the actual downloaded audio, not its filename or catalogue
+        // badge. Preserve the compressed JOC bitstream via remux, never FLAC.
+        if(info.codec!=='eac3' || await probeAtmosFile(file,{codec:info.codec,ffprobe:tools.ffprobe})!==1) {
+          throw new Error('The addon did not supply verified E-AC-3 JOC Dolby Atmos audio; nothing was saved')
+        }
+        const target=path.join(staged,'verified.atmos.m4a')
+        await runTool(tools.ffmpeg,[
+          '-nostdin','-y','-i',file,'-map','0:a:0','-c:a','copy',
+          '-metadata','title='+String(track.name || track.title || '').slice(0,500),
+          '-metadata','artist='+(Array.isArray(track.artists) ? track.artists.map(a => typeof a === 'string' ? a : a?.name || '').join(', ') : String(track.artists || track.artist || '')),
+          '-metadata','album='+(albumNameOf(track) || ''),
+          target,
+        ],combined)
+        file=target
+        info=await mediaInfo(file,tools,combined)
+        if(info.codec!=='eac3' || await probeAtmosFile(file,{codec:info.codec,ffprobe:tools.ffprobe})!==1) {
+          throw new Error('Dolby Atmos JOC metadata was not preserved by the container remux')
+        }
+      }
       if(track.duration_ms && Math.abs(info.duration_ms-Number(track.duration_ms))>12000)throw new Error('Downloaded audio does not match the track duration')
       if(purpose==='playback'&&!['flac','mp3','aac','opus','vorbis','pcm_s16le','pcm_s24le','pcm_f32le'].includes(info.codec)){
         const lossless=['alac','flac','wavpack','ape'].includes(info.codec),target=path.join(staged,lossless?'playable.flac':'playable.m4a')
