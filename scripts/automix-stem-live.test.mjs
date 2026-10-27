@@ -9,7 +9,7 @@ import { eligibleStemTransition, createStemPlayback } from '../src/audio/stemPla
 import { defaultStemClipPath } from './automix-transition-clip.mjs'
 
 const require=createRequire(import.meta.url)
-const { stemClipPath, loadPreparedStemClip } =
+const { stemClipPath, loadPreparedStemClip, isPreparedStemClipName } =
   require('../electron/automix/stem-clip.js')
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
 
@@ -148,4 +148,12 @@ test('third stem deck follows pause/resume and resumes the incoming source',asyn
     if (oldAudio === undefined) delete globalThis.Audio
     else globalThis.Audio=oldAudio
   }
+})
+
+test('generated stem windows never masquerade as user library recordings',()=>{
+  const one='example.mp3.lokal-stem-to-'+'f'.repeat(24)+'.wav'
+  assert.equal(isPreparedStemClipName(one),true)
+  assert.equal(isPreparedStemClipName(one+'.json'),false)
+  assert.equal(isPreparedStemClipName('normal-listening.wav'),false)
+  assert.equal(isPreparedStemClipName('album_mix_to_stems.wav'),false)
 })
