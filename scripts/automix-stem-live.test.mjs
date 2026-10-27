@@ -45,7 +45,7 @@ test('Electron loads only fingerprinted local prepared pairs', async t=>{
   const manifest={
     schema:'lokal-automix-stem-clip-v1',
     source:{outgoingSha256:sha(a),incomingSha256:sha(b)},
-    clip:{sha256:sha(wav),bytes:wav.length},
+    clip:{sha256:sha(wav),bytes:wav.length,durationSeconds:16},
     timeline:{outStart:166.4,inStart:8,resumeIn:24,length:16,masterGain:.9},
   }
   writeFileSync(output+'.json',JSON.stringify(manifest))
