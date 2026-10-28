@@ -78,6 +78,38 @@ function diffPlaylistSnapshots(previous, current) {
   return changes
 }
 
+// On an upgrade there may be no stored snapshot yet. Use the durable
+// operations as a baseline, so a desktop playlist deleted outside the old
+// capture triggers is not accidentally retained forever on the phone.
+function snapshotFromJournal(rows) {
+  const playlists = {}
+  for (const row of rows) {
+    const id = row.entity_id
+    const op = row.op
+    let fields
+    try { fields = typeof row.fields_json === 'string' ? JSON.parse(row.fields_json) : row.fields || {} }
+    catch { continue }
+    if (op === 'playlist.create') {
+      playlists[id] = { name: fields.name || 'Playlist', members: [] }
+    } else if (op === 'playlist.delete') {
+      delete playlists[id]
+    } else {
+      const playlist = playlists[id]
+      if (!playlist) continue
+      if (op === 'playlist.rename') playlist.name = fields.name || playlist.name
+      if (op === 'playlist.remove') {
+        playlist.members = playlist.members.filter(member => member.track_key !== fields.track_key)
+      } else if ((op === 'playlist.add' || op === 'playlist.move') && fields.track_key) {
+        const index = playlist.members.findIndex(member => member.track_key === fields.track_key)
+        const member = { ...playlist.members[index] || {}, ...fields }
+        if (index < 0) playlist.members.push(member)
+        else playlist.members[index] = member
+      }
+    }
+  }
+  return playlists
+}
+
 function _key(userId) {
   return 'link_playlist_reconciliation_v1:' + userId
 }
@@ -97,6 +129,11 @@ function reconcilePlaylists(store, userId) {
       const decoded = JSON.parse(raw)
       if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) previous = decoded
     } catch {}
+  } else {
+    const history = store.db.prepare(
+      "SELECT entity_id,op,fields_json FROM library_ops WHERE user_id=? AND entity='playlist' ORDER BY cursor"
+    ).all(userId)
+    previous = snapshotFromJournal(history)
   }
   const current = snapshotPlaylists(store, userId)
   const changes = diffPlaylistSnapshots(previous, current)
@@ -108,4 +145,4 @@ function reconcilePlaylists(store, userId) {
   return changes.length
 }
 
-module.exports = { snapshotPlaylists, diffPlaylistSnapshots, savePlaylistSnapshot, reconcilePlaylists }
+module.exports = { snapshotPlaylists, snapshotFromJournal, diffPlaylistSnapshots, savePlaylistSnapshot, reconcilePlaylists }
