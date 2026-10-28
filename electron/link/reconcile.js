@@ -9,7 +9,7 @@ function snapshotPlaylists(store, userId) {
   const result = {}
   const playlists = db.prepare('SELECT id,uuid,name FROM playlists WHERE user_id=?').all(userId)
   const members = db.prepare(
-    'SELECT pt.position,t.* FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id WHERE pt.playlist_id=? ORDER BY pt.position,pt.id'
+    'SELECT pt.position,t.* FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id WHERE pt.playlist_id=? ORDER BY pt.position,pt.rowid'
   )
   for (const playlist of playlists) {
     if (!playlist.uuid) continue
@@ -101,7 +101,7 @@ function snapshotFromJournal(rows) {
         playlist.members = playlist.members.filter(member => member.track_key !== fields.track_key)
       } else if ((op === 'playlist.add' || op === 'playlist.move') && fields.track_key) {
         const index = playlist.members.findIndex(member => member.track_key === fields.track_key)
-        const member = { ...playlist.members[index] || {}, ...fields }
+        const member = { ...(playlist.members[index] || {}), ...fields }
         if (index < 0) playlist.members.push(member)
         else playlist.members[index] = member
       }
