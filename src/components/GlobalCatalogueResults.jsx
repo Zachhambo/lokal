@@ -1,8 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Disc3, Music, Play } from 'lucide-react'
+import { Clock, Disc3, Download, ExternalLink, Heart, ListEnd, Music, Play, Plus, Radio, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { playRecommendationPool } from '../recommendationPlayback'
+import { resolveOnline, downloadOnline } from '../onlineActions'
+import { addToPlaylistMany, addToQueueMany, playNextMany } from '../trackActions'
+import { openRadio } from '../radioActions'
+import { artistPath } from '../releaseActions'
+import { useAppStore, usePlayerStore } from '../store/player'
+import ContextMenu, { useContextMenu } from './ContextMenu'
 import { showToast, showLoadingToast } from './Toaster'
 import { onlineAlbumPath } from '../onlineBrowse'
 import { useSearchStore } from '../store/search'
@@ -21,6 +27,7 @@ export default function GlobalCatalogueResults({
   localArtists = [], localAlbums = [], onLocalArtistClick, onLocalAlbumClick,
 }) {
   const nav = useNavigate()
+  const menu = useContextMenu()
   const q = String(query || '').trim()
   const [results, setResults] = useState(EMPTY)
   const [error, setError] = useState('')
@@ -106,6 +113,51 @@ export default function GlobalCatalogueResults({
     } finally { setPlaying('') }
   }
 
+
+  // Global catalogue IDs identify metadata, not playable streams. Use the
+  // source-priority resolver for actions that need a real library/ghost track.
+  const withResolvedSong = async (song, action) => {
+    const [track] = await resolveOnline([song])
+    if (track) await action(track)
+  }
+  const toggleSongLike = song => withResolvedSong(song, async track => {
+    const userId = useAppStore.getState().user?.id
+    const result = await api.toggleLike(track.id, userId, track)
+    if (result?.error) { showToast(result.error); return }
+    if (userId !== useAppStore.getState().user?.id) return
+    const liked = typeof result === 'boolean' ? result : result?.liked ?? false
+    usePlayerStore.getState().setLiked(track.id, liked)
+    showToast(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs')
+  })
+  const openSongMenu = (event, song) => menu.open(event, [
+    { label: 'Play', icon: Play, onSelect: () => play(song) },
+    { label: 'Play next', icon: Clock, onSelect: () => withResolvedSong(song, track => playNextMany([track])) },
+    { label: 'Add to queue', icon: ListEnd, onSelect: () => withResolvedSong(song, track => addToQueueMany([track])) },
+    { label: 'Add to playlist…', icon: Plus, onSelect: () => withResolvedSong(song, track => addToPlaylistMany([track])) },
+    // The catalogue has no library track ID to check the current like state.
+    { label: 'Like / Unlike', icon: Heart, onSelect: () => toggleSongLike(song) },
+    { label: 'Download song', icon: Download, onSelect: () => downloadOnline([song]) },
+    { separator: true },
+    song.album && { label: 'Go to album', icon: Disc3, onSelect: () => nav(onlineAlbumPath({ artist: song.artist, album: song.album }), { state: { artwork: song.artwork_url } }) },
+    song.artist && { label: 'Go to artist', icon: User, onSelect: () => nav(artistPath(song.artist), { state: { name: song.artist } }) },
+    { label: 'Start radio', icon: Radio, onSelect: () => openRadio(nav, song, useAppStore.getState().user?.id) },
+  ])
+  const openAlbum = (origin, album) => origin === 'library'
+    ? onLocalAlbumClick?.(album)
+    : nav(onlineAlbumPath({ artist: album.artist, album: album.title }), { state: { artwork: album.artwork_url } })
+  const openAlbumMenu = (event, origin, album) => menu.open(event, [
+    { label: 'Open album', icon: ExternalLink, onSelect: () => openAlbum(origin, album) },
+    (album.artist || album.album_artist) && { label: 'Go to artist', icon: User, onSelect: () => nav(artistPath(album.artist || album.album_artist), { state: { name: album.artist || album.album_artist } }) },
+    { label: 'Start album radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'album', title: album.title, artist: album.artist || album.album_artist }, useAppStore.getState().user?.id) },
+  ])
+  const openArtist = (origin, artist) => origin === 'library'
+    ? onLocalArtistClick?.(artist)
+    : useSearchStore.getState().setQuery(artist.title || artist.name)
+  const openArtistMenu = (event, origin, artist) => menu.open(event, [
+    { label: 'Open artist', icon: ExternalLink, onSelect: () => openArtist(origin, artist) },
+    { label: 'Start artist radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'artist', artist: artist.name || artist.title }, useAppStore.getState().user?.id) },
+  ])
+
   if (!q.length) return null
   const showSongs = includesResultCategory(category, 'songs')
   const showArtists = includesResultCategory(category, 'artists')
@@ -131,7 +183,7 @@ export default function GlobalCatalogueResults({
     {enableOnline && showSongs && <div>
       {heading('Songs', 'songs')}
       <div className="space-y-0.5">
-        {(expanded ? results.tracks : results.tracks.slice(0, 8)).map(row => <button key={row.id} disabled={!!playing} onClick={() => play(row)}
+        {(expanded ? results.tracks : results.tracks.slice(0, 8)).map(row => <button key={row.id} disabled={!!playing} onClick={() => play(row)} onContextMenu={event => openSongMenu(event, row)}
           className="w-full flex items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.06] disabled:opacity-60">
           <span className="h-11 w-11 overflow-hidden rounded-md bg-card shrink-0">{row.artwork_url ? <QualityImage src={row.artwork_url} className="w-full h-full object-cover" /> : <span className="flex h-full items-center justify-center"><Music size={18}/></span>}</span>
           <span className="min-w-0 flex-1"><span className="block truncate text-sm text-white">{row.title}</span><span className="block truncate text-xs text-muted">{row.artist}{row.album ? ' · ' + row.album : ''}</span></span>
@@ -147,9 +199,8 @@ export default function GlobalCatalogueResults({
       <div className="grid grid-cols-3 @sm:grid-cols-5 gap-2">
         {albums.map(({ origin, item: row, key }) => (
           <button key={origin + ':' + key} className="min-w-0 text-left"
-            onClick={() => origin === 'library'
-              ? onLocalAlbumClick?.(row)
-              : nav(onlineAlbumPath({ artist: row.artist, album: row.title }), { state: { artwork: row.artwork_url } })}>
+            onContextMenu={event => openAlbumMenu(event, origin, row)}
+            onClick={() => openAlbum(origin, row)}>
             <span className="block aspect-square rounded-md overflow-hidden bg-card">
               {origin === 'library'
                 ? (api.albumArtURL(row) ? <img src={api.albumArtURL(row)} alt="" className="w-full h-full object-cover" /> : <span className="h-full flex items-center justify-center"><Disc3 size={20}/></span>)
@@ -168,7 +219,8 @@ export default function GlobalCatalogueResults({
       <div className="grid grid-cols-3 @sm:grid-cols-5 @md:grid-cols-6 gap-3">
         {artists.map(({ origin, item: row, key }) => (
           <button key={origin + ':' + key}
-            onClick={() => origin === 'library' ? onLocalArtistClick?.(row) : useSearchStore.getState().setQuery(row.title)}
+            onContextMenu={event => openArtistMenu(event, origin, row)}
+            onClick={() => openArtist(origin, row)}
             className="flex flex-col items-center gap-2 group min-w-0">
             <span className="w-full aspect-square rounded-full bg-elevated border border-border overflow-hidden flex items-center justify-center text-muted group-hover:border-accent/40">
               <SearchArtistPortrait
@@ -182,5 +234,6 @@ export default function GlobalCatalogueResults({
         ))}
       </div>
     </div>}
+    <ContextMenu menu={menu} />
   </section>
 }
