@@ -8,7 +8,8 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Music, Pause, Play, Plus, Download, ListEnd, Clock } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Music, Pause, Play, Plus, Download, ListEnd, Clock, Heart, Disc3, User, Radio } from 'lucide-react'
 import { api } from '../api'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -27,6 +28,10 @@ import { useTranslation } from '../i18n'
 import { atmosAvailable, ATMOS_AVAILABLE } from '../quality'
 import AtmosPlayButton from './AtmosPlayButton'
 import { advertisedQuality } from '../catalogueQuality'
+import { playNextMany, addToQueueMany } from '../trackActions'
+import { trackAlbumPath } from '../onlineBrowse'
+import { artistPath } from '../releaseActions'
+import { openRadio } from '../radioActions'
 import { showToast } from './Toaster'
 
 let atmosRequestSerial = 0
@@ -74,6 +79,7 @@ function useProviders() {
 export default function OnlineResults({ query, soulseekFor = null, findOn = null, showLibraryHint = true }) {
   const { t } = useTranslation()
   const rightClickMenu = useContextMenu()
+  const nav = useNavigate()
   // YouTube Music and SoundCloud, then Soulseek, then installed addons.
   const loaded = useProviders()
   const providers = orderedFindOnSources(loaded)
@@ -192,18 +198,53 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
       { type: 'search', id: q, name: `${providerLabel}: ${q}` })
   }
 
-  const openResultMenu = (event, item, index) => rightClickMenu.open(event, [
-    { label: 'Play', icon: Play, onSelect: () => play(item, index) },
-    { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylist(item) },
-    { label: 'Download song', icon: Download, onSelect: async () => {
+  // Search results are provider IDs, not Lokal track IDs. Save just the
+  // selected source as a ghost when an action needs a queue/playlist/like ID;
+  // opening a menu alone must never create library entries.
+  const withTrack = async (item, action) => {
+    try {
       const [row] = await asTracks([item])
-      if (row) await saveToLibrary(row)
-    } },
-    atmosDownloadRef(item) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
-      const response = await downloadAtmosVersion(item).catch(error => ({ error: error.message }))
-      showToast(response?.error || 'Dolby Atmos download queued.')
-    } },
-  ].filter(Boolean))
+      if (!row?.id) { showToast('Could not prepare this online song.'); return }
+      await action(row)
+    } catch (error) {
+      showToast(error?.message || 'Could not perform this action.')
+    }
+  }
+  const toggleResultLike = item => withTrack(item, async row => {
+    const userId = useAppStore.getState().user?.id
+    const result = await api.toggleLike(row.id, userId, row)
+    if (result?.error) { showToast(result.error); return }
+    if (userId !== useAppStore.getState().user?.id) return
+    const liked = typeof result === 'boolean' ? result : result?.liked ?? false
+    usePlayerStore.getState().setLiked(row.id, liked)
+    showToast(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs')
+  })
+  const openResultMenu = (event, item, index) => {
+    // We can show the precise like state only when this result is the current
+    // stream; other results have no Lokal ID until the user selects an action.
+    const known = sameStream(currentTrack, item)
+    const liked = known && usePlayerStore.getState().likedIds.has(currentTrack.id)
+    const anchor = {
+      title: item.title, album: item.album || '', provider: item.provider || provider,
+      id: item.id, artistId: item.artistIds?.[0] || item.artistId || null,
+    }
+    rightClickMenu.open(event, [
+      { label: 'Play', icon: Play, onSelect: () => play(item, index) },
+      { label: 'Play next', icon: Clock, onSelect: () => withTrack(item, row => playNextMany([row])) },
+      { label: 'Add to queue', icon: ListEnd, onSelect: () => withTrack(item, row => addToQueueMany([row])) },
+      { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylist(item) },
+      { label: known ? (liked ? 'Remove from Liked Songs' : 'Like') : 'Like / Unlike', icon: Heart, onSelect: () => toggleResultLike(item) },
+      { label: 'Download song', icon: Download, onSelect: () => withTrack(item, saveToLibrary) },
+      atmosDownloadRef(item) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
+        const response = await downloadAtmosVersion(item).catch(error => ({ error: error.message }))
+        showToast(response?.error || 'Dolby Atmos download queued.')
+      } },
+      { separator: true },
+      (item.album || item.albumId || item.source_album_id) && { label: 'Go to album', icon: Disc3, onSelect: () => nav(trackAlbumPath({ ...item, provider: anchor.provider }), { state: { artwork: item.thumbnail || item.artwork_url || null, highlightTitle: item.title, anchor } }) },
+      item.artist && { label: 'Go to artist', icon: User, onSelect: () => nav(artistPath(item.artist), { state: { name: item.artist, anchor } }) },
+      { label: 'Start radio', icon: Radio, onSelect: () => openRadio(nav, item, useAppStore.getState().user?.id) },
+    ])
+  }
 
   const addToPlaylist = async (item) => {
     const [row] = await asTracks([item])
