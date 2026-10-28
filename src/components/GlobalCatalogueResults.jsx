@@ -31,7 +31,6 @@ export default function GlobalCatalogueResults({
   const q = String(query || '').trim()
   const [results, setResults] = useState(EMPTY)
   const [error, setError] = useState('')
-  const [catalogue, setCatalogue] = useState('apple')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [playing, setPlaying] = useState('')
@@ -57,7 +56,6 @@ export default function GlobalCatalogueResults({
           artists: Array.isArray(found?.artists) ? found.artists : [],
         }
         setResults(clean); setHasMore(clean.tracks.length === PAGE_SIZE)
-        setCatalogue(found.catalogue === 'spotify' ? 'spotify' : 'apple')
         setNotice(found.fallback ? found.notice || 'Spotify unavailable; showing Apple Music.' : found.partial ? 'Spotify currently supplies only song results through this session.' : '')
       } catch (e) {
         if (version === seq.current) setError(e?.message || 'Global catalogue unavailable.')
@@ -166,22 +164,13 @@ export default function GlobalCatalogueResults({
   const albums = mergeSearchAlbums(localAlbums, enableOnline ? results.albums : [])
   const hasResults = (showSongs && enableOnline && results.tracks.length > 0) ||
     (showArtists && artists.length > 0) || (showAlbums && albums.length > 0)
-  const catalogueName = catalogue === 'spotify' ? 'Spotify' : 'Apple Music'
-  const subtitle = `${catalogueName} catalogue · plays through your configured sources`
-  const heading = (kind, categoryName) => (
-    <div className="mb-2">
-      <h2 className="text-xs font-display uppercase tracking-widest text-white">{enableOnline ? 'Online ' + categoryName : kind}</h2>
-      {enableOnline && <p className="mt-1 text-[11px] text-muted">{subtitle}</p>}
-    </div>
-  )
   return <section className="space-y-3">
     {enableOnline && notice && <p className="text-xs text-amber-400" role="status">{notice}</p>}
     {enableOnline && busy && <p className="text-xs text-muted" role="status">Searching the global catalogue…</p>}
     {enableOnline && error && <p className="text-xs text-muted" role="status">{error} <button className="underline" onClick={() => setRetry(value => value + 1)}>Retry</button></p>}
     {enableOnline && !busy && !error && !hasResults &&
       <p className="text-xs text-muted">No catalogue matches found.</p>}
-    {enableOnline && showSongs && <div>
-      {heading('Songs', 'songs')}
+    {enableOnline && showSongs && results.tracks.length > 0 && <div aria-label="Online songs">
       <div className="space-y-0.5">
         {(expanded ? results.tracks : results.tracks.slice(0, 8)).map(row => <button key={row.id} disabled={!!playing} onClick={() => play(row)} onContextMenu={event => openSongMenu(event, row)}
           className="w-full flex items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.06] disabled:opacity-60">
@@ -194,8 +183,7 @@ export default function GlobalCatalogueResults({
       {expanded && hasMore && <button disabled={loadingMore} onClick={more} className="mt-2 text-xs text-accent hover:underline disabled:opacity-50">{loadingMore ? 'Loading…' : 'Load more global songs'}</button>}
       {expanded && <button onClick={() => setExpanded(false)} className="ml-4 text-xs text-muted hover:underline">Show fewer</button>}
     </div>}
-    {showAlbums && (enableOnline || albums.length > 0) && <div>
-      {heading('Albums', 'albums')}
+    {showAlbums && albums.length > 0 && <div aria-label={enableOnline ? 'Online albums' : 'Albums'}>
       <div className="grid grid-cols-3 @sm:grid-cols-5 gap-2">
         {albums.map(({ origin, item: row, key }) => (
           <button key={origin + ':' + key} className="min-w-0 text-left"
@@ -214,8 +202,7 @@ export default function GlobalCatalogueResults({
         ))}
       </div>
     </div>}
-    {showArtists && (enableOnline || artists.length > 0) && <div>
-      {heading('Artists', 'artists')}
+    {showArtists && artists.length > 0 && <div aria-label={enableOnline ? 'Online artists' : 'Artists'}>
       <div className="grid grid-cols-3 @sm:grid-cols-5 @md:grid-cols-6 gap-3">
         {artists.map(({ origin, item: row, key }) => (
           <button key={origin + ':' + key}
