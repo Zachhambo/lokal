@@ -1,6 +1,6 @@
 // Online results: songs that aren't in the library, under the local results
 // on the Search page, from YouTube Music, SoundCloud, Monochrome, installed addons or
-// Soulseek (switch in the section header, remembered). The streaming sources
+// Soulseek (switch in the source selector, remembered). The streaming sources
 // play with the user's yt-dlp; + adds one to a playlist and ⬇ saves it to the
 // library (right-click ⬇ for Soulseek), both keeping it as a ghost track
 // until the file is in. YouTube Music also lists matching playlists and
@@ -76,7 +76,7 @@ function useProviders() {
  *                     in lossless"): Soulseek is shown, and the file picked
  *                     there replaces the stream / the track's file
  */
-export default function OnlineResults({ query, soulseekFor = null, findOn = null, showLibraryHint = true }) {
+export default function OnlineResults({ query, soulseekFor = null, findOn = null }) {
   const { t } = useTranslation()
   const rightClickMenu = useContextMenu()
   const nav = useNavigate()
@@ -255,10 +255,6 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
     <section>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 mb-3">
         <div className="flex items-center gap-3 min-w-0 flex-wrap">
-          <h2 className="text-xs font-display text-muted uppercase tracking-widest flex items-center gap-2 flex-shrink-0">
-            Online
-            {loading && !soulseek && <span className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
-          </h2>
           <div role="tablist" aria-label={t('Online source')} className="flex max-w-full flex-wrap items-center gap-1 rounded-2xl border border-border p-0.5">
             {providers.map(p => (
               <button
@@ -275,8 +271,8 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
               </button>
             ))}
           </div>
+          {loading && !soulseek && <span role="status" aria-label={t('Searching…')} className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
         </div>
-        <span className="min-w-0 text-[10px] text-muted/80 truncate">{t(soulseek ? 'Files people share, through slskd' : providers.find(p => p.id === provider)?.addon ? 'From an add-on you installed' : provider === 'mono' ? 'FLAC audio via Monochrome' : 'Streams with yt-dlp')}{showLibraryHint ? t(' · not in your library') : ''}</span>
       </div>
       <div className="mb-3 empty:hidden"><DownloadNotices youtube={provider === 'yt'} /></div>
       {!soulseek && <AddonSetupNotice source={providers.find(p => p.id === provider)} className="mb-3" />}
