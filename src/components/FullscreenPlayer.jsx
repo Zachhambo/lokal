@@ -730,6 +730,14 @@ export default function FullscreenPlayer() {
   const isAutoSynced = settings.unsynced_auto_sync === '1'
   const isPanelVisible = currentTrack && fullscreenPanel !== 'none'
   const coverSize = isPanelVisible ? COVER_SIZE_WITH_PANEL : COVER_SIZE
+  const fullscreenQualityTier = currentTrack
+    ? (isSuspect(currentTrack) ? 'suspect' : tierOf(currentTrack))
+    : 'unknown'
+  const fullscreenQualityLabel = currentTrack
+    ? qualityTagLabel(currentTrack, fullscreenQualityTier, settings.resolution_tags_in_full_player === '1')
+    : null
+  const showFullscreenQuality = !!fullscreenQualityLabel &&
+    !(fullscreenQualityTier === 'unknown' && fullscreenQualityLabel === 'Not read')
   // The two layout-affecting transitions below (main content re-centering,
   // panel width collapsing) only need to animate while this view is
   // actually staying open -- while it's closing, the whole overlay is
@@ -861,6 +869,25 @@ export default function FullscreenPlayer() {
               on it), then the progress, the title and the artist. Clear of
               the header, so a tall canvas doesn't run into "Playing from". */}
           <div ref={coverStageRef} className={`relative z-10 flex flex-col items-center ${turntableMode ? 'justify-end' : 'justify-center'} flex-1 min-w-0 px-12 pt-24 pb-12 ${showFullscreen ? 'transition-all duration-500' : ''}`}>
+            {/* Keep the tag outside the artwork, directly above the cover.
+                This zero-height anchor never shifts the cover, title, or seek
+                bar when the tag is hidden (or when tracks change). In
+                Turntable mode the scene is a full-stage canvas, so anchor
+                the badge just below the main header instead. */}
+            {showFullscreenQuality && (
+              <div data-fullscreen-quality-tag aria-hidden={chromeHidden}
+                className={`pointer-events-none z-20 flex h-0 justify-center ${turntableMode ? 'absolute inset-x-0 top-16' : 'relative flex-shrink-0'}`}
+                style={turntableMode ? undefined : { width: coverSize }}>
+                <span
+                  className={`absolute bottom-3 left-1/2 -translate-x-1/2 max-w-full truncate whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white ${chromeFade}`}
+                  title={fullscreenQualityLabel}
+                  aria-label={settings.resolution_tags_in_full_player === '1'
+                    ? `Audio resolution: ${fullscreenQualityLabel}`
+                    : `Audio quality: ${fullscreenQualityLabel}`}>
+                  {fullscreenQualityLabel}
+                </span>
+              </div>
+            )}
             {/* One card for every song (never swapped, so never waiting on an
                 exit while the window is minimized): the artwork changes inside
                 it (MixCovers: AutoMix's cloudy dissolve, else a short fade). */}
@@ -982,18 +1009,6 @@ export default function FullscreenPlayer() {
               <h2 className="text-3xl font-bold text-white leading-tight truncate">{currentTrack?.title || '—'}</h2>
               <p className="mt-1.5 text-lg text-white/70 truncate">{currentTrack?.artist}</p>
               {currentTrack?.album && <p className="mt-0.5 text-sm text-white/40 truncate">{currentTrack.album}</p>}
-              {currentTrack && (() => {
-                const tier = isSuspect(currentTrack) ? 'suspect' : tierOf(currentTrack)
-                const tag = qualityTagLabel(currentTrack, tier, settings.resolution_tags_in_full_player === '1')
-                if (!tag || (tier === 'unknown' && tag === 'Not read')) return null
-                return (
-                  <div className="mt-2 flex justify-center" data-fullscreen-quality-tag>
-                    <span className="max-w-full truncate rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white" title={tag} aria-label={settings.resolution_tags_in_full_player === '1' ? `Audio resolution: ${tag}` : `Audio quality: ${tag}`}>
-                      {tag}
-                    </span>
-                  </div>
-                )
-              })()}
             </motion.div>
           </div>
 
