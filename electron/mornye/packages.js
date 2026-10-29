@@ -402,7 +402,7 @@ class PackageService {
   async artist(key,id) {
     const data=await (await this.runtime(key)).invoke('getArtist',[id]);if(!data)throw new Error('Addon returned no artist')
     this.remember(key,data.top_tracks || data.tracks || [])
-    return {provider:`a-${key}`,id:String(data.id || id),name:data.name,image:data.image_url,albums:(data.albums || []).map(a=>({provider:`a-${key}`,albumId:a.id,title:a.name,artist:a.artists || data.name,year:Number(String(a.release_date || '').slice(0,4))||null,release_type:a.album_type || 'album',artwork_url:a.cover_url,track_count:a.total_tracks})),tracks:(data.top_tracks || data.tracks || []).map(t=>trackOf(t,`a-${key}`))}
+    return {provider:`a-${key}`,id:String(data.id || id),name:data.name,image:data.image_url,albums:(data.albums || []).map(a=>({provider:`a-${key}`,albumId:a.id,title:a.name,artist:a.artists || data.name,year:Number(String(a.release_date || '').slice(0,4))||null,release_type:a.album_type || 'album',artwork_url:a.cover_url,track_count:a.total_tracks})),tracks:(data.top_tracks || data.tracks || []).map(t=>trackOf(t,`a-${key}`,this.find(key)))}
   }
   async invokeAction(key,action,input,token) {
     const runtime=await this.runtime(key),addon=this.find(key)
@@ -614,6 +614,7 @@ class PackageService {
         // This verifies AC-4 encoding, not an Atmos object presentation.
         if(info.codec!=='ac4') throw new Error('Amazon did not return the requested AC-4 audio. No stereo track was substituted.')
         if(!/\.(?:mp4|m4a)$/i.test(file)) throw new Error('Amazon AC-4 must be delivered in an MP4 container')
+        if(!String(info.format || '').split(',').some(fmt=>['mov','mp4','m4a','3gp','3g2','mj2'].includes(fmt.trim()))) throw new Error('Amazon AC-4 returned a non-MP4 audio container; nothing was saved')
       }
       if(downloadingAtmos && String(chosen).toLowerCase()!=='ac4') {
         // Verify E-AC-3 JOC; plain E-AC-3 does not imply Dolby Atmos.
