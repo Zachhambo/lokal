@@ -6,8 +6,6 @@
 // list) are marked "In library" and use the file.
 
 import React from 'react'
-
-let onlineDolbyRequestSerial = 0
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Clock, Disc3, Download, ListEnd, Play, Plus, Radio, User, Gem } from 'lucide-react'
 import ContextMenu, { useContextMenu } from './ContextMenu'
@@ -28,6 +26,8 @@ import { losslessMenuItem, atmosAvailable, atmosRequestable, ATMOS_AVAILABLE } f
 import AtmosPlayButton from './AtmosPlayButton'
 import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import { useTranslation } from '../i18n'
+
+let onlineDolbyRequestSerial = 0
 
 /** A song to tell its album or artist by (an addon's own result, when it's from one). */
 const anchorOf = track => {
