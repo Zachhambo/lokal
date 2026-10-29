@@ -82,7 +82,7 @@ function albumIdOf(track) {
 const { hasAtmosMetadata } = require('./atmos')
 const { addonDownloadQuality, isAtmosQuality } = require('./playbackQuality')
 const { probeAtmosFile } = require('../quality/atmos')
-const { shouldRetryEnrichment } = require('./providerFastPath')
+const { shouldRetryEnrichment, isLiveProvider } = require('./providerFastPath')
 
 /** Keep album metadata string-valued before passing it into file taggers. */
 function normalizeTrackMetadata(track) {
@@ -444,7 +444,7 @@ class PackageService {
     // The same bytes and authorization path are used for saving and playing.
     // Only Qobuz exposes growing media to the player; segmented, encrypted
     // and converted providers finish downloading before playback starts.
-    const liveProvider=addon.name.toLowerCase().replace(/-web$/,'')==='qobuz'
+    const liveProvider=isLiveProvider(addon)
     const startedAt=Date.now()
     const phase=stage=>console.info(`[Mornye] ${addon.name} ${purpose} stage=${stage} elapsedMs=${Date.now()-startedAt}`)
     let sawBytes=false
