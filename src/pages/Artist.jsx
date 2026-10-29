@@ -73,7 +73,8 @@ export default function Artist() {
   onlineRef.current = online
   // Their name as the link gave it ("Earth, Wind & Fire"; the id is a slug).
   const onlineNames = useRef({})
-  if (location.state?.name) onlineNames.current[id] = { name: location.state.name, anchor: location.state.anchor || null }
+  const onlineNameKey = `${id}:${catalogueIdentityKey}`
+  if (location.state?.name) onlineNames.current[onlineNameKey] = { name: location.state.name, anchor: location.state.anchor || null }
   const playQueue = usePlayerStore(s => s.playQueue)
   const artistContext = makeArtistContext(id, artist?.name)
   // Set by the "playing from ..." shortcut so we can scroll to the playing track.
@@ -222,10 +223,10 @@ export default function Artist() {
 
   if (online || catalogueArtist) return <OnlineArtist
     key={`${id}:${catalogueIdentityKey}`} id={id}
-    name={catalogueArtist?.name || onlineNames.current[id]?.name}
+    name={catalogueArtist?.name || onlineNames.current[onlineNameKey]?.name}
     anchor={catalogueArtist
       ? { provider: `catalogue:${catalogueArtist.catalogue}`, artistId: catalogueArtist.artistId }
-      : onlineNames.current[id]?.anchor}
+      : onlineNames.current[onlineNameKey]?.anchor}
     catalogueIdentity={catalogueArtist}
   />
   if (!artist) return <div className="p-6 text-muted text-sm">{t("Loading...")}</div>
