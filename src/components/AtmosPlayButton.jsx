@@ -171,11 +171,12 @@ export default function AtmosPlayButton({ track, onPlay }) {
           <label htmlFor={'atmos-mode-' + String(track?.id)}>Output mode</label>
           <select id={'atmos-mode-' + String(track?.id)} value={mode} onChange={event => {
             const selected = event.target.value
+            if (amazonAc4 && selected === 'hdmi') return
             setMode(selected)
             try { localStorage.setItem('lokal-atmos-output-mode', selected) } catch {}
           }} className="rounded border border-white/25 bg-neutral-900 p-2 text-white">
             <option value="headphones">Windows native media · default output</option>
-            <option value="hdmi">HDMI · native bitstream passthrough</option>
+            <option value="hdmi" disabled={amazonAc4}>HDMI · E-AC-3 JOC passthrough (Tidal only)</option>
           </select>
           {mode === 'headphones' ? (
             <>
