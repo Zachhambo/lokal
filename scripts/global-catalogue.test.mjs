@@ -162,4 +162,6 @@ test('artist page prefers explicit catalogue identity over same-slug local recor
   assert.match(page, /if \(online \|\| catalogueArtist\) return <OnlineArtist/)
   assert.match(online, /if \(catalogueIdentity\) \{ setLibraryTracks\(\[\]\); return \}/)
   assert.match(online, /artistCacheKey\(fallbackName, anchor\)/)
+  assert.match(online, /String\(anchor\?\.provider \|\| ''\)\.startsWith\('catalogue:'\)/)
+  assert.match(online, /loadArtistChannel\(fallbackName, \{ anchor: lookupAnchor, hints \}\)/)
 })
