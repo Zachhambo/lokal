@@ -876,10 +876,10 @@ export default function FullscreenPlayer() {
                 the badge just below the main header instead. */}
             {showFullscreenQuality && (
               <div data-fullscreen-quality-tag aria-hidden={chromeHidden}
-                className={`pointer-events-none z-20 flex h-0 justify-center ${turntableMode ? 'absolute inset-x-0 top-16' : 'relative flex-shrink-0'}`}
+                className={`pointer-events-none z-20 flex h-0 justify-center ${turntableMode ? 'absolute inset-x-0 top-20' : 'relative flex-shrink-0'}`}
                 style={turntableMode ? undefined : { width: coverSize }}>
                 <span
-                  className={`absolute bottom-3 left-1/2 -translate-x-1/2 max-w-full truncate whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white ${chromeFade}`}
+                  className={`absolute ${turntableMode ? 'top-0' : 'bottom-3'} left-1/2 -translate-x-1/2 max-w-full truncate whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white ${chromeFade}`}
                   title={fullscreenQualityLabel}
                   aria-label={settings.resolution_tags_in_full_player === '1'
                     ? `Audio resolution: ${fullscreenQualityLabel}`
