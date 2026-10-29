@@ -3,7 +3,7 @@
 // Tidal exposes Dolby Atmos as an audio mode, independently from the stereo
 // stream's FLAC/AAC quality. Never infer Atmos from sample rate or bitrate.
 const isAtmosMode = value => typeof value === 'string' &&
-  /^(?:DOLBY[_ -]?ATMOS|ATMOS)$/i.test(value.trim())
+  value.split(/[,;|]/).some(mode => /^(?:DOLBY[_ -]?ATMOS|ATMOS)$/i.test(mode.trim()))
 
 function hasAtmosMetadata(track) {
   if (!track || typeof track !== 'object') return false

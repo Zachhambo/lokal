@@ -10,6 +10,9 @@ const backend = require('../electron/quality')
 const { findAudioEditionDuplicate } = require('../electron/quality/editionDuplicates')
 const source = readFileSync(new URL('../src/quality.js', import.meta.url), 'utf8')
   .replace("import { peekSettings } from './api'", 'const peekSettings = () => ({})')
+  // A data: URL cannot resolve relative imports. This test only exercises
+  // the quality/Atmos tiers, not the resolution-label module itself.
+  .replace("import { measuredResolutionLabel } from './resolutionLabel.mjs'", 'const measuredResolutionLabel = () => null')
 const frontend = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 
 test('JOC detection requires actual E-AC-3 codec AND Dolby Atmos profile', () => {

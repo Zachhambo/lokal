@@ -6,12 +6,13 @@ import { usePlayerStore } from '../store/player'
 // The HDMI route uses mpv compressed passthrough. Headphones use native
 // Windows MediaPlayer/Media Foundation with the installed Spatial Sound engine.
 export default function AtmosPlayButton({ track, onPlay }) {
+  const amazonAc4 = !!track?.atmos_requestable
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem('lokal-atmos-output-mode') === 'headphones' ? 'headphones' : 'hdmi' }
-    catch { return 'hdmi' }
+    try { return track?.atmos_requestable ? 'headphones' : (localStorage.getItem('lokal-atmos-output-mode') === 'headphones' ? 'headphones' : 'hdmi') }
+    catch { return track?.atmos_requestable ? 'headphones' : 'hdmi' }
   })
   const [setupOpen, setSetupOpen] = useState(false)
   const [capability, setCapability] = useState(null)
@@ -117,7 +118,7 @@ export default function AtmosPlayButton({ track, onPlay }) {
           artist: '',
           album: '',
           file_path: result.file,
-          file_type: 'E-AC-3 JOC',
+          file_type: result.codec || 'E-AC-3 JOC',
           atmosNative: true,
           atmosMode: mode,
           atmosProvider: 'local',
@@ -140,9 +141,11 @@ export default function AtmosPlayButton({ track, onPlay }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
       <button type="button" disabled={busy} onClick={start}
-        title={mode === 'headphones' ? 'Play original Tidal E-AC-3 JOC through Windows Media Foundation and Windows Spatial Sound (renderer must be enabled).' : 'Play original Tidal E-AC-3 JOC over HDMI with mpv passthrough.'}
+        title={amazonAc4
+          ? 'Try Amazon AC-4 using the installed Windows Media Foundation decoder. Atmos rendering is unverified.'
+          : (mode === 'headphones' ? 'Play original Tidal E-AC-3 JOC through Windows Media Foundation.' : 'Play original Tidal E-AC-3 JOC over HDMI with mpv passthrough.')}
         className="rounded-full border border-white/25 bg-black px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50">
-        {busy || status?.state === 'loading' ? 'PREPARING ATMOS…' : active ? 'STOP ATMOS' : mode === 'headphones' ? 'PLAY ATMOS · HEADPHONES' : 'PLAY ATMOS · HDMI'}
+        {busy || status?.state === 'loading' ? 'PREPARING AUDIO…' : active ? 'STOP AUDIO' : amazonAc4 ? 'TRY AC-4 · WINDOWS' : mode === 'headphones' ? 'PLAY ATMOS · HEADPHONES' : 'PLAY ATMOS · HDMI'}
       </button>
       <button type="button" onClick={openSetup} aria-expanded={setupOpen}
         title="Choose Atmos output: Windows spatial headphones or HDMI receiver"
@@ -168,18 +171,21 @@ export default function AtmosPlayButton({ track, onPlay }) {
           <label htmlFor={'atmos-mode-' + String(track?.id)}>Output mode</label>
           <select id={'atmos-mode-' + String(track?.id)} value={mode} onChange={event => {
             const selected = event.target.value
+            if (amazonAc4 && selected === 'hdmi') return
             setMode(selected)
             try { localStorage.setItem('lokal-atmos-output-mode', selected) } catch {}
           }} className="rounded border border-white/25 bg-neutral-900 p-2 text-white">
-            <option value="headphones">Headphones · Windows Spatial Sound</option>
-            <option value="hdmi">HDMI · native bitstream passthrough</option>
+            <option value="headphones">Windows native media · default output</option>
+            <option value="hdmi" disabled={amazonAc4}>HDMI · E-AC-3 JOC passthrough (Tidal only)</option>
           </select>
           {mode === 'headphones' ? (
             <>
-              <span className="text-white/65">Uses the default Windows audio output and its Media Foundation decoder. Enable Dolby Atmos for Headphones through Dolby Access and Windows Settings → System → Sound → your headphones → Spatial sound.</span>
+              <span className="text-white/65">Uses the default Windows audio output and its Media Foundation decoder, including installed AC-4 codec support. Enable Dolby Atmos for Headphones through Dolby Access and Windows Settings → System → Sound → your headphones → Spatial sound.</span>
               <span>{capability?.headphones?.available ? 'Windows native headphone route available' : 'Windows native headphone route unavailable in this build'}</span>
-              <span className="text-white/55">Playback does not prove JOC objects were rendered. If Windows falls back to stereo, Lokal will not claim verified Atmos output.</span>
-              <span className="text-amber-200/80">If Windows Media Foundation cannot open the file: check whether this PC has an E-AC-3-capable decoder. Windows 11 24H2 and newer no longer bundle AC-3 by default (E-AC-3/JOC support must be verified separately). For Windows N, install the Media Feature Pack under Settings → Apps → Optional features. Dolby Access and enabling Spatial Sound are separate requirements and do not guarantee the decoder is installed.</span>
+              <span className="text-white/55">Playback does not prove Dolby Atmos spatial objects were rendered. If Windows falls back to stereo, Lokal will not claim verified Atmos output.</span>
+              <span className="text-amber-200/80">If Windows Media Foundation cannot open the file: check whether this PC has an E-AC-3- or AC-4-capable decoder. Windows 11 24H2 and newer no longer bundle AC-3 by default (E-AC-3/JOC support must be verified separately). For Windows N, install the Media Feature Pack under Settings → Apps → Optional features. Dolby Access and enabling Spatial Sound are separate requirements and do not guarantee the decoder is installed.</span>
+              <a href="https://www.majorgeeks.com/files/details/dolby_ac_3ac_4_installer.html"
+                target="_blank" rel="noopener noreferrer" className="self-start text-violet-200 underline">Review optional AC-3/AC-4 codec installation guide</a>
               <a href="https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/supported-codecs"
                 target="_blank" rel="noopener noreferrer" className="self-start text-violet-200 underline">Windows audio codec support (Microsoft)</a>
             </>

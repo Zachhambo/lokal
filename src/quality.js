@@ -44,14 +44,20 @@ export function atmosAvailable(track) {
       .some(value => typeof value === 'string' && /^(?:DOLBY[_ -]?ATMOS|ATMOS)$/i.test(value.trim())) ||
     [track?.audio_modes, track?.audioModes]
       .some(value => {
-        const modes = Array.isArray(value) ? value : [value]
+        const modes = Array.isArray(value) ? value.flatMap(v => String(v).split(/[,;|]/)) : String(value ?? '').split(/[,;|]/)
         return modes.some(mode => /^(?:DOLBY[_ -]?ATMOS|ATMOS)$/i.test(String(mode || '').trim()))
       })
 }
 
+/** An explicit AC-4 request is offered by the Amazon package even when
+ * search metadata omits per-track Atmos availability. This is NOT a badge. */
+export function atmosRequestable(track) {
+  return atmosAvailable(track) || track?.atmos_requestable === true || Number(track?.atmos_requestable) === 1
+}
+
 export const ATMOS_AVAILABLE = {
   label: 'Dolby Atmos',
-  hint: 'Dolby Atmos version advertised by Tidal. Does not mean the current stream or output is Atmos.',
+  hint: 'Dolby Atmos edition advertised by the catalogue. Does not prove the actual encoded stream or spatial output.',
   className: 'bg-black text-white border-white/25',
 }
 

@@ -425,6 +425,7 @@ function ensureSourceAlbumIdColumn(db) {
   const columns = db.pragma('table_info(tracks)')
   if (!columns.some(column => column.name === 'source_album_id')) db.exec('ALTER TABLE tracks ADD COLUMN source_album_id TEXT')
   if (!columns.some(column => column.name === 'atmos_available')) db.exec('ALTER TABLE tracks ADD COLUMN atmos_available INTEGER')
+  if (!columns.some(column => column.name === 'atmos_requestable')) db.exec('ALTER TABLE tracks ADD COLUMN atmos_requestable INTEGER')
   sourceAlbumColumnDatabases.add(db)
 }
 
@@ -445,9 +446,9 @@ function saveOnlineTracks(db, items = []) {
   // quality...) is kept for the details panel; it fills in, never erases.
   const upsert = db.prepare(`
     INSERT INTO tracks (id, file_path, file_hash, title, artist, album, album_artist, duration, source_url, artwork_url, last_modified,
-      year, track_num, genre, isrc, codec, lossless, bit_depth, sample_rate, bitrate, source_album_id, atmos_available)
+      year, track_num, genre, isrc, codec, lossless, bit_depth, sample_rate, bitrate, source_album_id, atmos_available, atmos_requestable)
     VALUES (@id, @file_path, @id, @title, @artist, @album, @album_artist, @duration, @source_url, @artwork_url, @now,
-      @year, @track_num, @genre, @isrc, @codec, @lossless, @bit_depth, @sample_rate, @bitrate, @source_album_id, @atmos_available)
+      @year, @track_num, @genre, @isrc, @codec, @lossless, @bit_depth, @sample_rate, @bitrate, @source_album_id, @atmos_available, @atmos_requestable)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title, artist = excluded.artist, album = excluded.album,
       album_artist = excluded.album_artist, duration = excluded.duration,
@@ -458,7 +459,8 @@ function saveOnlineTracks(db, items = []) {
       bit_depth = COALESCE(excluded.bit_depth, tracks.bit_depth), sample_rate = COALESCE(excluded.sample_rate, tracks.sample_rate),
       bitrate = COALESCE(excluded.bitrate, tracks.bitrate),
       source_album_id = COALESCE(excluded.source_album_id, tracks.source_album_id),
-      atmos_available = COALESCE(excluded.atmos_available, tracks.atmos_available)
+      atmos_available = COALESCE(excluded.atmos_available, tracks.atmos_available),
+      atmos_requestable = COALESCE(excluded.atmos_requestable, tracks.atmos_requestable)
     WHERE tracks.file_path LIKE 'ghost://%'
   `)
   const get = db.prepare('SELECT * FROM tracks WHERE id = ?')
@@ -482,6 +484,10 @@ function saveOnlineTracks(db, items = []) {
       atmos_available: item.atmos_available === true || Number(item.atmos_available) === 1 ||
         require('../mornye/atmos').hasAtmosMetadata(item) ? 1 :
         item.atmos_available === false || item.atmos_available === 0 ? 0 : null,
+      // Per-addon AC-4 requestability is separate from catalogue Atmos.
+      // Null means unknown: never erase a previously persisted positive flag.
+      atmos_requestable: item.atmos_requestable === true || Number(item.atmos_requestable) === 1 ? 1 :
+        item.atmos_requestable === false || item.atmos_requestable === 0 ? 0 : null,
       // Search results call it thumbnail; a row played again (a fallback to
       // another source) has artwork_url: keep its cover either way.
       artwork_url: [item.thumbnail, item.artwork_url].map(value => String(value || '')).find(value => /^https:\/\//.test(value))?.slice(0, 1000) || null,
