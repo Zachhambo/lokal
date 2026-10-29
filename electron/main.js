@@ -559,7 +559,7 @@ function createWindow() {
   }
 }
 app.name = 'Lokal'
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!gotTheLock) return;
   try { require('../server/index.js') } catch (e) { console.error('Server already running or port blocked:', e.message) }
   app.name = 'Lokal'
@@ -572,6 +572,15 @@ app.whenReady().then(() => {
     app.setAppUserModelId('com.lokal.music');
   }
   try { initDB() } catch (e) { console.error('DB:', e.message) }
+  // The embedded Amazon (New) extension is usable offline from the first
+  // launch. Install before renderer/source discovery; the legacy Amazon
+  // provider remains separate with its existing login and preferences.
+  try {
+    await require('./mornye/packages').service(getDB()).ensureBundledAmazonNew()
+  } catch (e) {
+    console.error('Bundled Amazon (New) installation:', e.message)
+  }
+
   try {
     const db = getDB()
     const plural = db.prepare("SELECT value FROM settings WHERE key = 'music_folders'").get()?.value

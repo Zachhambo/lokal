@@ -37,7 +37,7 @@ function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = fals
   if (isAtmosQuality(quality)) {
     if (!allowAtmos || purpose !== 'download') throw new Error('Dolby Atmos requires the explicit Download Dolby Atmos action')
     const options = addon?.manifest?.qualityOptions || []
-    const amazon = /^amazon(?:-web)?$/i.test(addon?.name || '')
+    const amazon = /^amazon(?:-(?:new|web))?$/i.test(addon?.name || '')
     const offered = options.find(q => String(q?.id || '').toLowerCase() === (amazon ? 'ac4' : 'dolby_atmos')) ||
       options.find(q => isAtmosQuality(q?.id))
     if (!offered) throw new Error('This addon does not offer Dolby Atmos downloads')

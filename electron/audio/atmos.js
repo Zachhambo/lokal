@@ -368,7 +368,7 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       const key = sources.addons.keyOfProvider(provider)
       const service = require('../mornye/packages').service(getDB())
       const addon = key && service.find(key)
-      const amazon = /^amazon(?:-web)?$/i.test(addon?.name || '')
+      const amazon = /^amazon(?:-(?:new|web))?$/i.test(addon?.name || '')
       if (!addon || (!amazon && !/tidal/i.test(addon.name || ''))) return { error: 'Choose an Amazon or Tidal Mornye track' }
       if (amazon && !(addon.manifest?.qualityOptions || []).some(q => q.id === 'ac4')) return { error: 'This Amazon addon does not offer AC-4 audio' }
       if (amazon && mode !== 'headphones') return { error: 'Amazon AC-4 uses Windows native media and the default Windows output. Select Headphones / Windows Spatial Sound, not E-AC-3 HDMI passthrough.' }
