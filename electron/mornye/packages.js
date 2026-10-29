@@ -82,7 +82,7 @@ function albumIdOf(track) {
 const { hasAtmosMetadata } = require('./atmos')
 const { addonDownloadQuality, isAtmosQuality } = require('./playbackQuality')
 const { probeAtmosFile } = require('../quality/atmos')
-const { needsCrossProviderEnrichment } = require('./providerFastPath')
+const { shouldRetryEnrichment } = require('./providerFastPath')
 
 /** Keep album metadata string-valued before passing it into file taggers. */
 function normalizeTrackMetadata(track) {
@@ -491,11 +491,10 @@ class PackageService {
       }
       phase('availability')
       let available=await checkAvailability()
-      // Cross-provider matches can genuinely need enrichment, but a direct
-      // provider ID should never trigger a second metadata lookup. Retry only
-      // after a failed availability result, on the same Play/Save pipeline.
-      if(!available?.available&&runtime.methods.includes('enrichTrack')&&
-          needsCrossProviderEnrichment({addon,track})){
+      // Retry one failed authoritative ticket after optional enrichment, for
+      // every provider (including an exact Tidal ID). Play and Save follow
+      // the same path, with the same bounded timeout and no special skips.
+      if(shouldRetryEnrichment({available,hasEnrichment:runtime.methods.includes('enrichTrack')})){
         phase('cross_provider_enrichment')
         const enriched=await runtime.invoke('enrichTrack',[track],{timeoutMs:20000,signal:combined})
         if(enriched&&typeof enriched==='object'&&!Array.isArray(enriched)){
