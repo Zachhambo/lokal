@@ -51,7 +51,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
   const highlight = recommendationKey(highlightTitle)
 
   const playWithAtmos = async track => {
-    if (isOnlineTrack(track) && atmosAvailable(track)) {
+    if (isOnlineTrack(track) && atmosRequestable(track)) {
       const source = streamRef(track) || track
       try {
         const capability = await api.atmosCapabilities()
@@ -128,7 +128,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
             </div>
             {showAlbum && <p className="hidden truncate text-xs text-muted @lg:block">{track.album || ''}</p>}
             <span className="flex items-center justify-end gap-3">
-              {atmosAvailable(track) && <AtmosPlayButton track={{ ...track, ...anchorOf(track) }} />}
+              {atmosRequestable(track) && <AtmosPlayButton track={{ ...track, ...anchorOf(track) }} />}
               {own && <span title={t('In your library')} className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent"><CheckCircle2 size={11} /> {t('In library')}</span>}
               {markOwned && !own && <button type="button" onContextMenu={event => { event.preventDefault(); event.stopPropagation(); openMenu(event, track) }} onClick={event => { event.stopPropagation(); downloadOnline([track]) }} title={t('Download {title}', { title: track.title })} aria-label={t('Download {title}', { title: track.title })} className="text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 focus:opacity-100"><Download size={14} /></button>}
               <span className="text-xs tabular-nums text-subtle">{time(track.duration)}</span>
