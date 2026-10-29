@@ -83,6 +83,40 @@ export function formatLabel(track) {
   return track.bitrate ? `${name} · ${track.bitrate} kbps` : name
 }
 
+/**
+ * Detailed *source* resolution for optional song badges. Match Mobile's
+ * lokalSongResolutionLabel: never invent a lossy PCM bit depth, codec-only
+ * labels aren't enough to replace a quality tier, and missing readings fall
+ * back to the existing tier. These are file/source facts, not output claims.
+ */
+export function fullResolutionLabel(track) {
+  if (!track || String(track.file_path || '').startsWith('ghost://')) return null
+  if (Number(track.atmos_verified) === 1) return 'E-AC-3 JOC · Dolby Atmos'
+  const codec = codecName(track.codec).toUpperCase()
+  const isLossless = Number(track.lossless) === 1 ||
+    /^(?:FLAC|WAV|ALAC|AIFF|AIF|APE|WAVPACK)$/.test(codec)
+  const bits = Number(track.bit_depth)
+  const rate = Number(track.sample_rate)
+  const kbps = Number(track.bitrate)
+  const parts = []
+  if (isLossless && Number.isInteger(bits) && bits >= 8 && bits <= 64) parts.push(`${bits}-bit`)
+  if (Number.isFinite(rate) && rate >= 8000 && rate <= 768000) {
+    const khz = rate / 1000
+    parts.push(`${Number(khz.toFixed(1))} kHz`)
+  }
+  if (!isLossless && Number.isFinite(kbps) && kbps > 0 && kbps <= 10000) {
+    parts.unshift(`${Number(kbps.toFixed(0))} kbps`)
+  }
+  if (!parts.length) return null
+  const knownCodec = codec && !['UNKNOWN', 'ONLINE', 'N/A', 'OTHER'].includes(codec)
+  return [knownCodec ? codec : '', parts.join(' / ')].filter(Boolean).join(' · ')
+}
+
+/** Tier remains the fallback if the full resolution has not been read yet. */
+export function qualityTagLabel(track, tier, fullResolution = false) {
+  return (fullResolution ? fullResolutionLabel(track) : null) || TIERS[tier]?.label || null
+}
+
 /** What the spectrum check found, in words (null if not checked). */
 export function verdictText(track) {
   const cutoff = Number(track?.spectral_cutoff) ? `${track.spectral_cutoff / 1000} kHz` : ''
