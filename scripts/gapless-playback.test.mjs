@@ -45,6 +45,8 @@ test('preparation does not interfere with crossfade, pause, repeat one, Cast or 
   const base = { mode: 'off', current: jfk, next: defector, remaining: 5 }
   for (const options of [
     { mode: 'crossfade' },
+    { enabled: false },
+
     { mode: 'automix' },
     { repeat: 'one' },
     { playing: false },
@@ -66,6 +68,7 @@ test('preparation does not interfere with crossfade, pause, repeat one, Cast or 
 
 test('gapless staging shares the existing source-aware, cancellable two-deck handoff', () => {
   const source = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(source, /enabled: state\.crossfade\?\.gapless !== false/, 'the player must respect the saved switch')
   assert.match(source, /plan === null && shouldPrepareGapless\(/,
     'AutoMix must stage an album whose plan is intentionally null')
   assert.match(source, /mode: 'off',[\s\S]*?triggerCrossfade\(nextTrack, gaplessHandoffPlan\(dur\)\)/,
@@ -78,4 +81,12 @@ test('gapless staging shares the existing source-aware, cancellable two-deck han
   assert.match(source, /if \(!usePlayerStore\.getState\(\)\.isPlaying \|\| \(fadeOutEl\.paused && !fadeOutEl\.ended\)\)/,
     'preparation must not start a paused song automatically')
   assert.match(source, /if \(left <= 0\.03 \|\| fadeOutEl\.ended\) \{ beginCrossfade\(\); return \}/)
+})
+
+test('Playback settings offer a persistent Gapless toggle independent of transition mode', () => {
+  const source = readFileSync(new URL('../src/pages/Settings.jsx', import.meta.url), 'utf8')
+  assert.match(source, /Row label=\{t\('Gapless Playback'\)\}/)
+  assert.match(source, /set\('gapless_playback', crossfade\.gapless \? '0' : '1'\)/)
+  assert.match(source, /aria-pressed=\{crossfade\.gapless\}/)
+  assert.match(source, /k === 'gapless_playback'.*setCrossfadeOptions\(readCrossfadeSettings\(/)
 })
