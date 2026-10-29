@@ -37,6 +37,9 @@ export function readCrossfadeSettings(settings = {}) {
     mode,
     automix: mode === 'automix',
     automixSameAlbum: settings?.automix_same_album === '1',
+    // Independent from crossfade/AutoMix. Enabled by default for local file
+    // joins, with an explicit Playback toggle to restore end-event behavior.
+    gapless: settings?.gapless_playback !== '0',
     // Experimental, explicit opt-in: only verified offline Demucs pairs.
     stemClips: mode === 'automix' && settings?.automix_stem_clips === '1',
     autoPrepare: mode === 'automix' && settings?.automix_auto_prepare === '1',
