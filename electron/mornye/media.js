@@ -42,7 +42,11 @@ function prepare(db,key,id,{force=false}={}){
   job.liveReady=new Promise(resolve=>{job.markLive=resolve})
   const addon=service(db).find(key)
   const quality=stereoPlaybackQuality(addon,service(db).settings(addon))
-  const fetchAudio=()=>service(db).download(key,id,{purpose:'playback',quality,signal:job.controller.signal,onLive:info=>liveUpdate(job,info),onProgress:update=>{job.progress=update.percent ?? job.progress;job.message=job.live?.ready?'Playing while it downloads…':update.message || 'Preparing audio…'}})
+  // Do not probe a growing file for providers that only deliver a usable
+  // result after segment assembly/decryption. They use this same downloader,
+  // then hand the completed validated file to the player.
+  const liveAllowed=addon.name.toLowerCase().replace(/-web$/,'')==='qobuz'
+  const fetchAudio=()=>service(db).download(key,id,{purpose:'playback',quality,signal:job.controller.signal,onLive:liveAllowed?info=>liveUpdate(job,info):undefined,onProgress:update=>{job.progress=update.percent ?? job.progress;job.message=job.live?.ready?'Playing while it downloads…':update.message || 'Preparing audio…'}})
   // A worker that ran out of memory is retried once, in a fresh worker.
   job.promise=fetchAudio().catch(error=>{if(job.controller.signal.aborted||!/memory limit|out of memory/i.test(error?.message))throw error;logFailure(db,key,id,error);job.message='Retrying…';return fetchAudio()}).then(async result=>{
     try{
