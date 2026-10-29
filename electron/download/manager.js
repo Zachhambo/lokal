@@ -1078,7 +1078,9 @@ class DownloadManager {
       const outputDir = require('../storageLocations').downloadDirectory(job.settings, job.opts.outputDir)
       fs.ensureDirSync(outputDir)
       const title = String(job.title || 'Addon Track').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0,180)
-      const ext = job.opts.explicitAtmosDownload ? '.atmos.m4a' : path.extname(artifact.file)
+      const ext = job.opts.explicitAtmosDownload
+        ? (artifact.info?.codec === 'ac4' ? '.ac4.mp4' : '.atmos.m4a')
+        : path.extname(artifact.file)
       let target = path.join(outputDir, `${title}${ext}`)
       for (let suffix = 1; fs.existsSync(target); suffix++) target = path.join(outputDir, `${title} (${suffix})${ext}`)
       await fs.copy(artifact.file, target, { overwrite: false, errorOnExist: true })
