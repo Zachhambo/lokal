@@ -2371,6 +2371,14 @@ activeCategory === 'data' ? usersTried
         
       {inCategory('appearance') && (
       <Section title={t("Now Playing")}>
+        <Row label={t("Full resolution tags in full player")}
+          desc={t("Show known codec, bit depth, sample rate or bitrate instead of the quality tier beneath the album name. Keep the fullscreen badge white.")}>
+          <button type="button" aria-pressed={settings.resolution_tags_in_full_player === '1'}
+            onClick={() => set('resolution_tags_in_full_player', settings.resolution_tags_in_full_player === '1' ? '0' : '1')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.resolution_tags_in_full_player === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {settings.resolution_tags_in_full_player === '1' ? t('On') : t('Off')}
+          </button>
+        </Row>
         <Row label={t("Colour Background")} desc={t("Colour the side panel and full screen player from the album cover. Off: a dark background.")}>
           <button
             onClick={() => set('artwork_backdrop', settings.artwork_backdrop === '0' ? '1' : '0')}
@@ -2442,6 +2450,19 @@ activeCategory === 'data' ? usersTried
             </>
           )
         })()}
+      </Section>
+      )}
+
+      {inCategory('appearance') && (
+      <Section title={t("Song Lists")}>
+        <Row label={t("Full resolution tags in lists")}
+          desc={t("Show measured codec, bit depth, sample rate or bitrate instead of the quality tier in library song lists and the compact player. Keep the existing quality colors.")}>
+          <button type="button" aria-pressed={settings.resolution_tags_in_lists === '1'}
+            onClick={() => set('resolution_tags_in_lists', settings.resolution_tags_in_lists === '1' ? '0' : '1')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.resolution_tags_in_lists === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {settings.resolution_tags_in_lists === '1' ? t('On') : t('Off')}
+          </button>
+        </Row>
       </Section>
       )}
 
