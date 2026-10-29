@@ -55,8 +55,8 @@ function normalizeGenreName(value) {
   const raw = String(value || '').replace(/\s+/g, ' ').trim()
   const key = taxonomyKey(raw)
   if (!key || /^\d+$/.test(key) || NOISE.has(key)) return null
-  // A meaningful unfamiliar tag should not become Other automatically.
-  // It can form its own category if at least two tracks share that label.
+  // Exact known styles win; one clear broad-family hint wins next.
+  // Unknown or conflicting names remain Other, even when many songs use them.
   return ALIASES.get(key) || inferredGenreFamily(raw) || OTHER
 }
 
@@ -74,7 +74,7 @@ function splitGenres(value) {
   return out
 }
 
-/** Same Unicode/case/punctuation identity for broad and custom categories. */
+/** Same Unicode/case/punctuation identity for canonical genre categories. */
 function genreKey(name) {
   return taxonomyKey(name)
 }
