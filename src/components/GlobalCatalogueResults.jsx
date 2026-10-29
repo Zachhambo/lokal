@@ -6,7 +6,7 @@ import { playRecommendationPool } from '../recommendationPlayback'
 import { resolveOnline, downloadOnline } from '../onlineActions'
 import { addToPlaylistMany, addToQueueMany, playNextMany } from '../trackActions'
 import { openRadio } from '../radioActions'
-import { artistIdFromName } from '../artistId'
+import { createGlobalArtistOpener } from '../globalArtistNavigation.mjs'
 import { useAppStore, usePlayerStore } from '../store/player'
 import ContextMenu, { useContextMenu } from './ContextMenu'
 import { showToast, showLoadingToast } from './Toaster'
@@ -126,11 +126,11 @@ export default function GlobalCatalogueResults({
     usePlayerStore.getState().setLiked(track.id, liked)
     showToast(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs')
   })
-  const navigateGlobalArtist = rawName => {
-    const name = String(rawName || '').trim()
-    if (!name) return
-    nav(`/artist/${artistIdFromName(name)}`, { state: { name } })
-  }
+  // Both the card and its context menu share this opener. Catalogue cards
+  // carry their source and artist ID, so same-named local artists cannot
+  // intercept navigation to a different catalogue identity.
+  const openArtist = createGlobalArtistOpener(nav, onLocalArtistClick)
+  const navigateGlobalArtist = name => openArtist('online', name)
   const openSongMenu = (event, song) => menu.open(event, [
     { label: 'Play', icon: Play, onSelect: () => play(song) },
     { label: 'Play next', icon: Clock, onSelect: () => withResolvedSong(song, track => playNextMany([track])) },
@@ -152,9 +152,6 @@ export default function GlobalCatalogueResults({
     (album.artist || album.album_artist) && { label: 'Go to artist', icon: User, onSelect: () => navigateGlobalArtist(album.artist || album.album_artist) },
     { label: 'Start album radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'album', title: album.title, artist: album.artist || album.album_artist }, useAppStore.getState().user?.id) },
   ])
-  const openArtist = (origin, artist) => origin === 'library'
-    ? onLocalArtistClick?.(artist)
-    : navigateGlobalArtist(artist.name || artist.title)
   const openArtistMenu = (event, origin, artist) => menu.open(event, [
     { label: 'Open artist', icon: ExternalLink, onSelect: () => openArtist(origin, artist) },
     { label: 'Start artist radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'artist', artist: artist.name || artist.title }, useAppStore.getState().user?.id) },
