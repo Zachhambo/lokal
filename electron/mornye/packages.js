@@ -166,6 +166,21 @@ class PackageService {
     return {ffmpeg:settings.ffmpeg_path || 'ffmpeg',ffprobe:settings.ffprobe_path || 'ffprobe'}
   }
   find(key) {const row=this.db.prepare('SELECT * FROM mornye_packages WHERE key=?').get(key);return row?{...row,manifest:JSON.parse(row.manifest_json),methods:JSON.parse(row.methods_json)}:null}
+  /** Included in Electron's packaged files; never requires a third-party
+   * registry or changes the existing Amazon user's credentials/settings.
+   * Installed packages newer than the bundled copy are preserved.
+   */
+  async ensureBundledAmazonNew() {
+    const existing = this.find(keyOf('amazon-new'))
+    if (existing && compareVersions(existing.manifest.version, '2.3.15') >= 0) return existing
+    const bytes = await fsp.readFile(path.join(__dirname, 'bundled', 'amazon-new.sflx'))
+    const checksum = crypto.createHash('sha256').update(bytes).digest('hex')
+    if (checksum !== 'ae1ac4dbeb9028939e39bda1a58fabaedf41e8adc37b9b3fc61ee10c9a5bdca7') {
+      throw new Error('Bundled Amazon (New) archive checksum mismatch')
+    }
+    return this.install({ buffer: bytes })
+  }
+
   settings(addon) {
     // Settings saved by another build can be unreadable (the OS credential vault
     // key changed): the addon then shows its defaults rather than failing to list.
