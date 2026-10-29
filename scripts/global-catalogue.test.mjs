@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+import { artistIdFromName } from '../src/artistId.js'
 
 const require = createRequire(import.meta.url)
 const { globalSearch, preferredGlobalSearch, normalise } = require('../electron/online/globalCatalogue.js')
@@ -97,4 +99,22 @@ test('Apple setting never touches the Spotify session', async () => {
   })
   assert.equal(result.catalogue, 'apple')
   assert.equal(result.fallback, undefined)
+})
+
+
+test('Global Online artist cards navigate to the artist page, not another search', () => {
+  const component = readFileSync(new URL('../src/components/GlobalCatalogueResults.jsx', import.meta.url), 'utf8')
+  // Route by the shared Unicode-safe library ID rather than using an Apple/
+  // Spotify metadata ID as though it were an internal artist ID.
+  assert.match(component, /nav\(`\/artist\/\$\{artistIdFromName\(name\)\}`, \{ state: \{ name \} \} \)/)
+  assert.match(component, /const openArtist = \(origin, artist\) => origin === 'library'[\s\S]*?onLocalArtistClick\?\.\(artist\)[\s\S]*?: navigateGlobalArtist\(artist\.name \|\| artist\.title\)/)
+  assert.match(component, /onClick=\{\(\) => openArtist\(origin, row\)\}/)
+  assert.match(component, /onSelect: \(\) => openArtist\(origin, artist\)/)
+  // Song/album context shortcuts must take the same navigation path.
+  assert.match(component, /navigateGlobalArtist\(song\.artist\)/)
+  assert.match(component, /navigateGlobalArtist\(album\.artist \|\| album\.album_artist\)/)
+  assert.doesNotMatch(component, /setQuery\(artist\.(?:title|name)/)
+  assert.equal(artistIdFromName('Björk'), 'a-björk')
+  assert.equal(artistIdFromName('東京事変'), 'a-東京事変')
+  assert.equal(artistIdFromName('Earth, Wind & Fire'), 'a-earth-wind-fire')
 })
