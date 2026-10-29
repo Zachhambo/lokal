@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, Heart, Plus, Camera, FolderOpen, Trash2, Music, LibraryBig, Clock, ListEnd, GripVertical, X, Check, Edit2, Search, Download, AlertCircle, Gem, Disc3, User, ListMinus, MoreHorizontal, Globe, Radio, ChevronUp, ChevronDown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { showToast, showLoadingToast } from './Toaster'
-import { canGetLossless, openLossless, formatLabel, isSuspect, tierOf, TIERS, losslessMenuItem, losslessManyMenuItem } from '../quality'
+import { canGetLossless, openLossless, formatLabel, qualityTagLabel, isSuspect, tierOf, TIERS, losslessMenuItem, losslessManyMenuItem } from '../quality'
+import { useFullResolutionTags } from '../resolutionTagPreferences'
 import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -145,6 +146,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   const setColumn = useTrackColumnsStore(state => state.setColumn)
   const resetColumns = useTrackColumnsStore(state => state.resetColumns)
   const columns = trackColumnPreferences(savedColumns, showQuality, !!playlistId || !!onSortChange)
+  const fullResolutionTags = useFullResolutionTags()
   const listRef = useRef(null)
   const [listWidth, setListWidth] = useState(0)
   useLayoutEffect(() => {
@@ -202,7 +204,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   const anyStreamed = useMemo(() => tracks.some(t => isStreamed(t)), [tracks])
   const anyLiked = useMemo(() => tracks.some(track => likedIds.has(track.id)), [tracks, likedIds])
   const actionSlots = (showPlayNext ? 1 : 0) + (anyStreamed || resolveTracks ? 1 : 0) + (showAddToQueue ? 1 : 0) + (onQuickAdd ? 1 : 0) + 4
-  const layout = trackColumnLayout(listWidth, columns, { playlist: !!playlistId && !!onReorder, actionSlots, likedTrack: anyLiked, extraColumns })
+  const layout = trackColumnLayout(listWidth, columns, { playlist: !!playlistId && !!onReorder, actionSlots, likedTrack: anyLiked, extraColumns, fullResolution: fullResolutionTags })
   const mergedTracks = tracks.map(track => trackOverrides[track.id] ? { ...track, ...trackOverrides[track.id] } : track)
   const navigate = useNavigate()
   const menu = useContextMenu()
@@ -879,7 +881,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
         <span>{t(layout.album ? 'Title' : 'Title / Album')}</span>
         {layout.album && <span className="truncate">{t("Album")}</span>}
         {layout.source && <span className="flex justify-center" title={t("Source")}><Globe size={12} aria-hidden="true" /><span className="sr-only">{t("Source")}</span></span>}
-        {layout.quality && <span className="text-center">{t("Quality")}</span>}
+        {layout.quality && <span className="text-center truncate">{t(fullResolutionTags ? "Resolution" : "Quality")}</span>}
         {extraColumns.map(column => layout[column.key] && <span key={column.key} className="truncate text-right tracking-normal">{column.label}</span>)}
         {layout.added && <SortableHeader column="added" label={t("date added")} sort={sort} onSortChange={onSortChange} className="justify-end truncate text-right tracking-normal">{t('Date added')}</SortableHeader>}
         {layout.time && <SortableHeader column="time" label={t("duration")} sort={sort} onSortChange={onSortChange} className="justify-end text-right">{t('Time')}</SortableHeader>}
@@ -1012,13 +1014,15 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
             {layout.quality && (() => {
               // Same badge as the Audio Quality page; opens that page on its list.
               const tier = isStreamed(track) || isGhost ? 'unknown' : (isSuspect(track) ? 'suspect' : tierOf(track))
-              if (tier === 'unknown') return <span title={t("Quality unknown")} className="text-center text-xs text-muted/50">—</span>
+              const label = qualityTagLabel(track, tier, fullResolutionTags && !isGhost && !isStreamed(track))
+              if (tier === 'unknown' && !label) return <span title={t("Quality unknown")} className="text-center text-xs text-muted/50">—</span>
               const info = TIERS[tier]
               return (
                 <button onClick={e => { e.stopPropagation(); navigate('/quality', { state: { tier } }) }}
                   title={`${info.label}: ${info.desc}${formatLabel(track) ? ` (${formatLabel(track)})` : ''}`}
-                  className={`justify-self-center rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${info.className}`}>
-                  {info.label}
+                  aria-label={`${fullResolutionTags && label !== info.label ? 'Audio resolution' : 'Audio quality'}: ${label}`}
+                  className={`min-w-0 max-w-full truncate justify-self-center rounded-full border px-1.5 py-px text-[9px] font-semibold leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${info.className}`}>
+                  {label}
                 </button>
               )
             })()}
