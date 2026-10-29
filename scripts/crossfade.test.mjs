@@ -23,6 +23,18 @@ test('song transitions: off, crossfade or AutoMix (a crossfade length from befor
   assert.equal(readCrossfadeSettings({ song_transitions: 'crossfade' }).beforeEnd, 6)
 })
 
+test('Gapless Playback is separately persisted from Off, Crossfade and AutoMix', () => {
+  assert.equal(readCrossfadeSettings({}).gapless, true,
+    'enabled by default for seamless local album playback')
+  assert.equal(readCrossfadeSettings({ gapless_playback: '0' }).gapless, false)
+  assert.equal(readCrossfadeSettings({ gapless_playback: '1' }).gapless, true)
+  for (const mode of ['off', 'crossfade', 'automix']) {
+    const options = readCrossfadeSettings({ song_transitions: mode, gapless_playback: '0' })
+    assert.equal(options.gapless, false, mode)
+    assert.equal(options.mode, mode, 'toggling gapless must not change transition mode')
+  }
+})
+
 test('fade-in and fade-out curves hit their endpoints and move one way', () => {
   for (const curve of ['logarithmic', 'linear']) {
     const up = Array.from(fadeCurve(0, 1, curve))

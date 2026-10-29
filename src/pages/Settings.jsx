@@ -793,7 +793,7 @@ export default function Settings() {
     touchedSettingsRef.current.add(k)
     setSettings(s => ({ ...s, [k]: v }))
     queueSettings({ [k]: v })
-    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'automix_same_album' || k === 'automix_stem_clips' || k === 'automix_auto_prepare' || k === 'automix_engine_path') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
+    if (k.startsWith('crossfade_') || k === 'song_transitions' || k === 'gapless_playback' || k === 'automix_same_album' || k === 'automix_stem_clips' || k === 'automix_auto_prepare' || k === 'automix_engine_path') usePlayerStore.getState().setCrossfadeOptions(readCrossfadeSettings({ ...settings, [k]: v }))
     if (k === 'replaygain_mode') usePlayerStore.getState().setReplayGainMode(v)
   }
   const crossfade = readCrossfadeSettings(settings)
@@ -1756,7 +1756,7 @@ activeCategory === 'data' ? usersTried
         </Row>
         <Row label={t("Song Transitions")} desc={crossfade.mode === 'automix'
           ? t('AutoMix listens to both songs and blends them like a DJ: on the beat when their tempos are close (the next one sped up or slowed a touch, pitch kept), on the song\'s own fade-out otherwise, with silence at either end cut. Albums play as made.')
-          : crossfade.mode === 'crossfade' ? t('The next song starts before the current one ends, by the amounts below.') : t('Each song plays to its end, then the next starts.')}>
+          : crossfade.mode === 'crossfade' ? t('The next song starts before the current one ends, by the amounts below.') : t('Songs are not mixed. When Gapless Playback is on, the next local song is prepared to avoid a pause at the boundary.')}>
           <div role="radiogroup" aria-label={t("Song transitions")} className="flex rounded-lg bg-card border border-border p-0.5">
             {[['off', 'Off'], ['crossfade', 'Crossfade'], ['automix', 'AutoMix']].map(([value, label]) => (
               <button key={value} type="button" role="radio" aria-checked={crossfade.mode === value} onClick={() => set('song_transitions', value)}
@@ -1765,6 +1765,14 @@ activeCategory === 'data' ? usersTried
               </button>
             ))}
           </div>
+        </Row>
+        <Row label={t('Gapless Playback')}
+          desc={t('Keep the next local song prepared to minimize pauses between tracks (including consecutive album tracks). Crossfade and AutoMix transitions keep their existing behavior. Does not modify audio files.')}>
+          <button type="button" aria-pressed={crossfade.gapless}
+            onClick={() => set('gapless_playback', crossfade.gapless ? '0' : '1')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${crossfade.gapless ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {crossfade.gapless ? t('On') : t('Off')}
+          </button>
         </Row>
         {crossfade.mode === 'automix' && (
           <Row label={t("Mix Songs on the Same Album")} desc={t("Off: an album's songs, played in order, go one into the next as made (live albums, continuous mixes).")}>
