@@ -8,7 +8,7 @@ import { playbackAvailability } from '../src/recommendations.js'
 
 const require = createRequire(import.meta.url)
 const { progressiveMedia } = require('../electron/mornye/progressiveMedia')
-const { skipPlaybackEnrichment } = require('../electron/mornye/providerFastPath')
+const { needsCrossProviderEnrichment } = require('../electron/mornye/providerFastPath')
 const media = require('../electron/mornye/media')
 
 const flacHeader = () => {
@@ -124,31 +124,19 @@ test('ready Qobuz transfer survives metadata availability and remains readable',
   }
 })
 
-test('provider lookups skip only canonical remembered playback tracks', () => {
-  const entry = (name,manifest={}) => ({ name, manifest })
-  assert.equal(skipPlaybackEnrichment({
-    addon:entry('qobuz-web',{skipMetadataEnrichment:true}),
-    track:{id:'123',name:'Track',provider_id:'qobuz'},remembered:true,purpose:'playback',
-  }),true)
-  for (const provider of ['tidal-web','deezer','amazon']) {
-    const id = provider === 'amazon' ? 'B012345678' : '12345'
-    const owner = provider.replace(/-web$/,'')
-    assert.equal(skipPlaybackEnrichment({
-      addon:entry(provider),track:{id,name:'Track',provider_id:owner},
-      remembered:true,purpose:'playback',
-    }),true,provider)
+test('one availability-first path for playback and download, with no Tidal exception', () => {
+  const addon = name => ({ name })
+  for(const name of ['tidal-web','qobuz-web','deezer','amazon']) {
+    const id=name==='amazon'?'B012345678':'12345'
+    const provider=name.replace(/-web$/,'')
+    assert.equal(needsCrossProviderEnrichment({
+      addon:addon(name),track:{id,name:'Song',provider_id:provider},
+    }),false,name)
   }
-  assert.equal(skipPlaybackEnrichment({
-    addon:entry('qobuz-web',{skipMetadataEnrichment:true}),
-    track:{id:'123',name:'Track',provider_id:'tidal'},
-    remembered:true,purpose:'playback',
-  }),false)
-  assert.equal(skipPlaybackEnrichment({
-    addon:entry('deezer'),track:{id:'123',name:'Track',provider_id:'spotify'},
-    remembered:true,purpose:'playback',
-  }),false)
-  assert.equal(skipPlaybackEnrichment({
-    addon:entry('qobuz-web',{skipMetadataEnrichment:true}),
-    track:{id:'123',name:'Track'},remembered:true,purpose:'download',
-  }),false)
+  assert.equal(needsCrossProviderEnrichment({
+    addon:addon('tidal-web'),track:{id:'123',name:'Song',provider_id:'spotify'},
+  }),true)
+  assert.equal(needsCrossProviderEnrichment({
+    addon:addon('qobuz-web'),track:{id:'123',name:'Song'},
+  }),true)
 })
