@@ -98,7 +98,7 @@ function normalizeTrackMetadata(track) {
 
 function trackOf(track, provider, addon = null) {
   const artists=Array.isArray(track.artists)?track.artists.map(a=>typeof a==='string'?a:a.name).filter(Boolean):[String(track.artists || track.artist || '')].filter(Boolean)
-  return {provider,id:String(track.id),title:String(track.name || track.title || '').slice(0,500),artist:artists.join(', '),artists,artistIds:track.artist_id?[String(track.artist_id)]:[],album:albumNameOf(track),albumId:albumIdOf(track),track_num:Number(track.track_number || track.trackNumber)||null,disc_num:Number(track.disc_number || track.discNumber)||null,year:Number(String(track.release_date || '').slice(0,4))||null,isrc:track.isrc || null,genre:track.genre || null,duration:(Number(track.duration_ms ?? track.durationMs)||0)/1000 || null,thumbnail:track.cover_url || track.coverUrl || (typeof track.images==='string'?track.images:null),quality:track.audio_quality || null,atmos_available:hasAtmosMetadata(track)?1:0,atmos_requestable:/^amazon(?:-web)?$/i.test(addon?.name || '') && (addon?.manifest?.qualityOptions || []).some(q => q.id === 'ac4')?1:0,spotify_id:track.spotify_id || track.spotifyId || null,deezer_id:track.deezer_id || track.deezerId || null,qobuz_id:track.qobuz_id || track.qobuzId || null,tidal_id:track.tidal_id || track.tidalId || null,kind:'song'}
+  return {provider,id:String(track.id),title:String(track.name || track.title || '').slice(0,500),artist:artists.join(', '),artists,artistIds:track.artist_id?[String(track.artist_id)]:[],album:albumNameOf(track),albumId:albumIdOf(track),track_num:Number(track.track_number || track.trackNumber)||null,disc_num:Number(track.disc_number || track.discNumber)||null,year:Number(String(track.release_date || '').slice(0,4))||null,isrc:track.isrc || null,genre:track.genre || null,duration:(Number(track.duration_ms ?? track.durationMs)||0)/1000 || null,thumbnail:track.cover_url || track.coverUrl || (typeof track.images==='string'?track.images:null),quality:track.audio_quality || null,atmos_available:hasAtmosMetadata(track)?1:0,atmos_requestable:/^amazon(?:-(?:new|web))?$/i.test(addon?.name || '') && (addon?.manifest?.qualityOptions || []).some(q => q.id === 'ac4')?1:0,spotify_id:track.spotify_id || track.spotifyId || null,deezer_id:track.deezer_id || track.deezerId || null,qobuz_id:track.qobuz_id || track.qobuzId || null,tidal_id:track.tidal_id || track.tidalId || null,kind:'song'}
 }
 
 // Move legacy on-disk state without overwriting any Mornye data already present.
@@ -482,10 +482,11 @@ class PackageService {
       if(!track&&runtime.methods.includes('getTrack'))track=await runtime.invoke('getTrack',[String(id)],{signal:combined})
       track ||= {id:String(id),name:'',artists:'',duration_ms:0,provider_id:addon.name}
       const providerName=addon.name.replace(/-web$/,'')
+      const isAmazonProvider = /^amazon(?:-new)?$/i.test(providerName)
       // A source track may not have an Amazon album ID until checkAvailability()
       // resolves it to an Amazon ASIN. Reuse this fallback before and after matching.
       const resolveAmazonAlbum = async () => {
-        if(providerName!=='amazon'||albumNameOf(track)||!runtime.methods.includes('getAlbum')) return
+        if(!isAmazonProvider||albumNameOf(track)||!runtime.methods.includes('getAlbum')) return
         const albumId=albumIdOf(track)
         if(!albumId) return
         try {
@@ -509,9 +510,9 @@ class PackageService {
       }
       const checkAvailability=()=>{
         const options={track,duration_ms:track.duration_ms || 0}
-        const directFields={qobuz:'qobuz_id',tidal:'tidal_id',deezer:'deezer_id',soundcloud:'spotify_id',amazon:'spotify_id'}
+        const directFields={qobuz:'qobuz_id',tidal:'tidal_id',deezer:'deezer_id',soundcloud:'spotify_id',amazon:'spotify_id','amazon-new':'spotify_id'}
         const directField=directFields[providerName]
-        if(directField)options[directField]=String(track[directField] || (providerName === 'amazon' || providerName === 'soundcloud' ? track.id : id))
+        if(directField)options[directField]=String(track[directField] || (isAmazonProvider || providerName === 'soundcloud' ? track.id : id))
         return runtime.methods.includes('checkAvailability')
           ?runtime.invoke('checkAvailability',[track.isrc || '',track.name || '',track.artists || '',options],{timeoutMs:25000,signal:combined})
           :Promise.resolve({available:true,track_id:String(id)})
@@ -544,7 +545,7 @@ class PackageService {
       const matchedTrackId=available.track_id || available.trackId
       // Cross-provider matches often start with only Spotify metadata. Once Amazon
       // returns its ASIN, load Amazon's canonical track before the addon downloads.
-      if(providerName==='amazon'&&matchedTrackId&&!albumNameOf(track)&&runtime.methods.includes('getTrack')) {
+      if(isAmazonProvider&&matchedTrackId&&!albumNameOf(track)&&runtime.methods.includes('getTrack')) {
         try {
           const amazonTrack=await runtime.invoke('getTrack',[String(matchedTrackId)],{timeoutMs:60000,signal:combined})
           if(amazonTrack&&typeof amazonTrack==='object'&&!Array.isArray(amazonTrack)) {
@@ -565,7 +566,7 @@ class PackageService {
       const prepared={...(available.prepared_context || available.preparedContext || {}),host_track:track}
       // The Amazon extension prefers web_metadata over host_track, so keep both
       // in sync with the resolved Amazon metadata instead of the original track.
-      if(providerName==='amazon') prepared.web_metadata=track
+      if(isAmazonProvider) prepared.web_metadata=track
       const chosen=addonDownloadQuality(addon,this.settings(addon),{quality,allowAtmos,purpose})
       const downloadingAtmos=isAtmosQuality(chosen)
       phase('download_start')
