@@ -2542,7 +2542,8 @@ export default function App() {
             // Queue edits during the preload window must not start a track
             // that is no longer actually next. A manual skip already cancels
             // this operation through the current-track change.
-            if (live.currentTrack?.id !== outgoingTrack?.id ||
+            if (live.crossfade?.gapless === false ||
+                live.currentTrack?.id !== outgoingTrack?.id ||
                 upcomingTrack(live)?.id !== nextTrack.id) {
               cancelCrossfade()
               fadeInEl.pause()
