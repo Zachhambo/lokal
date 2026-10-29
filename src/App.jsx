@@ -2537,6 +2537,22 @@ export default function App() {
         try { fadeInEl.playbackRate = (plan.rate || 1) * playbackSpeed() } catch {}
         const waitForStart = () => {
           if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
+          if (plan.kind === 'gapless') {
+            const live = usePlayerStore.getState()
+            // Queue edits during the preload window must not start a track
+            // that is no longer actually next. A manual skip already cancels
+            // this operation through the current-track change.
+            if (live.currentTrack?.id !== outgoingTrack?.id ||
+                upcomingTrack(live)?.id !== nextTrack.id) {
+              cancelCrossfade()
+              fadeInEl.pause()
+              fadeInEl.removeAttribute('src')
+              fadeInEl.load()
+              fadeInEl.dataset.lokalTrackPending = ''
+              fadeInEl.dataset.lokalTrackId = ''
+              return
+            }
+          }
           const cueStart = preparedStemClip?.outStart ?? plan.start
           const left = cueStart - fadeOutEl.currentTime
           // A paused song must not hand off simply because the preparation
