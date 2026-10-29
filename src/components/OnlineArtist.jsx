@@ -93,7 +93,7 @@ export function useOnlineArtist(fallbackName, enabled = true, { anchor = null, h
       // A click from an add-on's Artists tab already identifies the source and
       // artist ID. Load that exact artist before any name-based lookup, which
       // could otherwise open a namesake from YouTube Music or another source.
-      if (anchor?.artistId && anchor?.provider) {
+      if (anchor?.artistId && String(anchor?.provider || '').startsWith('a-')) {
         const direct = await loadAddonArtist(fallbackName, { anchor, hints }).catch(() => null)
         if (!isCurrent()) return
         if (direct) {
@@ -261,7 +261,7 @@ export function OnlineArtistSections({ data, path, libraryTracks = null, library
   )
 }
 
-export default function OnlineArtist({ id, name: givenName, anchor = null }) {
+export default function OnlineArtist({ id, name: givenName, anchor = null, catalogueIdentity = null }) {
   const { t } = useTranslation()
   const nav = useNavigate()
   const userId = useAppStore(state => state.user?.id)
@@ -270,12 +270,15 @@ export default function OnlineArtist({ id, name: givenName, anchor = null }) {
   // marked "In library" here; the page itself stays as it is.
   const [libraryTracks, setLibraryTracks] = useState([])
   useEffect(() => {
+    // The slug can refer to a different library namesake. Without a proven
+    // identity match, never mark its songs as owned by a catalogue artist.
+    if (catalogueIdentity) { setLibraryTracks([]); return }
     let current = true
     const read = () => Promise.resolve(api.getArtist(id)).then(found => { if (current) setLibraryTracks(Array.isArray(found?.tracks) ? found.tracks : []) }).catch(() => {})
     read()
     window.addEventListener('lokal:refresh', read)
     return () => { current = false; window.removeEventListener('lokal:refresh', read) }
-  }, [id])
+  }, [id, catalogueIdentity?.catalogue, catalogueIdentity?.artistId])
   const { songs, albums, name } = data
   const [busy, setBusy] = useState(false)
   // The artist's picture, big (click it).
