@@ -27,9 +27,9 @@ function fakeDb(rows) {
 }
 
 test('genre synonyms and subgenres fold into broad canonical categories', () => {
-  assert.equal(normalizeGenreName('VGM'), 'Video Game Music')
-  assert.equal(normalizeGenreName('video game'), 'Video Game Music')
-  assert.equal(normalizeGenreName('Video Game Soundtrack'), 'Video Game Music')
+  assert.equal(normalizeGenreName('VGM'), 'Soundtrack')
+  assert.equal(normalizeGenreName('video game'), 'Soundtrack')
+  assert.equal(normalizeGenreName('Video Game Soundtrack'), 'Soundtrack')
   assert.equal(normalizeGenreName('Original Soundtrack'), 'Soundtrack')
   assert.equal(normalizeGenreName('EDM'), 'Electronic')
   assert.equal(normalizeGenreName('Techno'), 'Electronic')
@@ -48,7 +48,8 @@ test('genre synonyms and subgenres fold into broad canonical categories', () => 
 test('genre editor treats synonyms as one choice while preserving the first raw label', () => {
   assert.equal(uiGenreKey('VGM'), uiGenreKey('Video Game Music'))
   assert.equal(uiGenreKey('Video Game'), uiGenreKey('Video Game Music'))
-  assert.deepEqual(splitUiGenres('VGM, Video Game, Video Game Music'), ['VGM'])
+  assert.deepEqual(splitUiGenres('VGM, Video Game, Video Game Music, Soundtrack, Original Soundtrack'), ['VGM'])
+  assert.equal(uiGenreKey('Video Game Music'), uiGenreKey('Soundtrack'))
 })
 
 test('invalid and non-genre metadata values are ignored', () => {
@@ -79,7 +80,8 @@ test('Genres summary consolidates all known styles and repeated unknowns into br
   registerGenreFunctions(db)
   const summary = genreSummary(db)
   const byName = Object.fromEntries(summary.genres.map(item => [item.name, item]))
-  assert.equal(byName['Video Game Music'].count, 2)
+  assert.equal(byName.Soundtrack.count, 2)
+  assert.equal(byName['Video Game Music'], undefined)
   assert.equal(byName.Rock.count, 3)
   assert.equal(byName.Electronic.count, 3)
   assert.equal(byName.Other.count, 2, 'only genuinely one-off unknown tags remain in Other')
@@ -88,8 +90,9 @@ test('Genres summary consolidates all known styles and repeated unknowns into br
   assert.equal(byName['Future Jazz'], undefined)
   assert.equal(summary.none, 2)
   assert.equal(summary.genres.filter(item => item.count === 1).map(item => item.name).join(','), 'Classical')
-  assert.equal(db.hasGenre('VGM', '', 'Video Game Music'), 1)
-  assert.equal(db.hasGenre('video game', '', 'Video Game Music'), 1)
+  assert.equal(db.hasGenre('VGM', '', 'Soundtrack'), 1)
+  assert.equal(db.hasGenre('VGM', '', 'Video Game Music'), 1, 'Legacy filter aliases still work')
+  assert.equal(db.hasGenre('video game', '', 'Soundtrack'), 1)
   assert.equal(db.hasGenre('Baroque', '', 'Other'), 0)
   assert.equal(db.hasGenre('Baroque', '', 'Classical'), 1)
   assert.equal(db.hasGenre('future-jazz', '', 'Jazz'), 1)
@@ -146,7 +149,7 @@ test('unknown but recognizable subgenre names resolve to broad families', () => 
     ['traditional Celtic folk', 'Folk'], ['concert orchestral classical', 'Classical'],
     ['J-pop', 'Pop'], ['indie shoegaze', 'Rock'],
     ['alternative jazz', 'Jazz'], ['alternative techno', 'Electronic'],
-    ['indie', 'Indie / Alternative'], ['anime theme', 'Anime'], ['videogame soundtrack', 'Video Game Music'],
+    ['indie', 'Indie / Alternative'], ['anime theme', 'Anime'], ['videogame soundtrack', 'Soundtrack'],
   ]
   for (const [tag, genre] of examples) {
     assert.equal(normalizeGenreName(tag), genre, tag)
@@ -172,4 +175,25 @@ test('ambiguous, unknown and misleading names never spawn custom categories', ()
   assert.deepEqual(genres.map(x => x.name), ['Electronic', 'Other'])
   assert.equal(db.hasGenre('Unlisted niche genre', '', 'Other'), 1)
   assert.equal(db.hasGenre('Deep deep techno', '', 'Electronic'), 1)
+})
+
+
+test('game music and film scores share one Soundtrack category without duplicate counts', () => {
+  const db = fakeDb([
+    { id: 'vgm', genre: 'VGM', genres: '', artwork_path: '/covers/1.jpg' },
+    { id: 'movie', genre: 'Original Motion Picture Soundtrack', genres: '', artwork_path: '/covers/2.jpg' },
+    { id: 'multi', genre: 'VGM', genres: 'Soundtrack; Video Game Music', artwork_path: '/covers/3.jpg' },
+    { id: 'game', genre: 'Video Game Original Soundtrack', genres: '', artwork_path: '/covers/4.jpg' },
+  ])
+  registerGenreFunctions(db)
+  const summary = genreSummary(db)
+  assert.deepEqual(summary.genres.map(genre => [genre.name, genre.count]), [['Soundtrack', 4]])
+  assert.deepEqual(trackGenres({ genre: 'VGM', genres: 'Soundtrack; Video Game Music' }), ['Soundtrack'])
+  for (const name of ['Soundtrack', 'VGM', 'Video Game Music']) {
+    assert.equal(db.hasGenre('VGM', 'Soundtrack', name), 1, name)
+  }
+  assert.equal(db.hasGenre('VGM', 'Soundtrack', 'Rock'), 0)
+  assert.deepEqual(splitUiGenres('VGM; Soundtrack'), ['VGM'], 'Raw tag text remains intact')
+  assert.equal(normalizeGenreName('anime soundtrack'), 'Anime',
+    'Other recognized specialist genres retain their own category')
 })
