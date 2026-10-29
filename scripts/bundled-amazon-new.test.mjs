@@ -24,11 +24,11 @@ const amazon = {
 test('embedded Amazon (New) archive contains the working source and is independently versioned', () => {
   const bytes = fs.readFileSync(path.join(root, 'electron/mornye/bundled/amazon-new.sflx'))
   assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),
-    'ae1ac4dbeb9028939e39bda1a58fabaedf41e8adc37b9b3fc61ee10c9a5bdca7')
+    '967bc8cf940cf39029ef7e33f55bf37c5f686028332570ef484579ebc75c5543')
   const parsed = readArchive(bytes)
   assert.equal(parsed.manifest.name, 'amazon-new')
   assert.equal(parsed.manifest.displayName, 'Amazon (New)')
-  assert.equal(parsed.manifest.version, '2.3.15')
+  assert.equal(parsed.manifest.version, '2.3.16')
   assert.ok(parsed.code.includes('amazonTrackAudioModes'))
   assert.notEqual(keyOf('amazon-new'), keyOf('amazon'),
     'Do not share login or settings namespaces with legacy Amazon')
