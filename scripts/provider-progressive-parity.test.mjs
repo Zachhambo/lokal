@@ -48,7 +48,7 @@ const validM4aMoov = () => {
   return box('moov', box('trak', mdia))
 }
 
-test('validated Qobuz, Deezer and Tidal direct FLAC can be played while growing', () => {
+test('complete FLAC headers are recognizable; only caller-selected Qobuz exposes live playback', () => {
   const head = Buffer.concat([flacHeader(), Buffer.alloc(65536 - 42)])
   for (const provider of ['qobuz','deezer','tidal','amazon']) {
     assert.deepEqual(progressiveMedia(head, 'audio.flac'), {
