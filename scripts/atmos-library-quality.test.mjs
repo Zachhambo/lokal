@@ -86,6 +86,19 @@ test('single-file imports verify Atmos before their quality transaction', () => 
   assert.match(single, /currentQuality\.atmos_verified = await quality\.probeAtmosFile\(filePath, \{ codec: currentQuality\.codec \}\)/)
 })
 
+test('Audio Quality summary arranges all six categories in balanced responsive rows', () => {
+  const page = readFileSync(new URL('../src/pages/Quality.jsx', import.meta.url), 'utf8')
+  assert.match(page, /grid-cols-2 gap-2 @sm:grid-cols-3 @4xl:grid-cols-6/,
+    'two across on small screens, three on medium, six across on wide desktop')
+  assert.doesNotMatch(page, /@lg:grid-cols-5/,
+    'five columns leave the sixth category orphaned at desktop widths')
+  assert.match(page, /\['atmos', 'hires', 'lossless', 'high', 'low', 'suspect'\]\.map\(tier =>/,
+    'Atmos and the Suspect diagnostic both remain visible and selectable')
+  assert.match(page, /onClick=\{\(\) => setFilter\(tier\)\}/)
+  assert.match(page, /line-clamp-2/,
+    'allow the category descriptions to use two lines instead of clipping')
+})
+
 test('Quality page offers lossless replacement only for eligible tracks', () => {
   const page = readFileSync(new URL('../src/pages/Quality.jsx', import.meta.url), 'utf8')
   assert.match(page, /\{canGetLossless\(track\) && \(/)
