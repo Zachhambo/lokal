@@ -29,7 +29,9 @@ function normalizeGenreName(value) {
   const raw = String(value || '').replace(/\s+/g, ' ').trim()
   const key = taxonomyKey(raw)
   if (!key || /^\d+$/.test(key) || NOISE.has(key)) return null
-  return ALIASES.get(key) || OTHER
+  // A meaningful unfamiliar tag should not become Other automatically.
+  // It can form its own category if at least two tracks share that label.
+  return ALIASES.get(key) || raw
 }
 
 /** "Rock / Pop; Indie" -> separate canonical categories, without repeats. */
@@ -46,9 +48,9 @@ function splitGenres(value) {
   return out
 }
 
-/** Compares labels regardless of case and spacing. */
+/** Same Unicode/case/punctuation identity for broad and custom categories. */
 function genreKey(name) {
-  return String(name || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+  return taxonomyKey(name)
 }
 
 /** Every raw tag of a track row mapped into broad, deduplicated categories. */
@@ -66,8 +68,9 @@ function trackGenres(row) {
   return out
 }
 
-// Rare, otherwise-valid categories are folded into Other for the current DB.
-// The original genre strings are kept on the track and in the audio-file tags.
+// Only unknown *singleton* categories are folded into Other. Known genres
+// remain visible even for one recording; repeated unknown labels form their
+// own user-defined genres. Raw audio metadata is never changed.
 const rareGenreKeysByDb = new WeakMap()
 
 function visibleGenres(genres, rareKeys = new Set()) {
@@ -100,10 +103,11 @@ function registerGenreFunctions(db) {
 }
 
 /**
- * Genres page categories, counted by distinct track and artwork. Categories
- * used by only one track are merged into Other; if Other itself has fewer than
- * two tracks, those tags are treated as unclassified instead of getting a
- * one-track card.
+ * Genres page categories, counted by distinct track and artwork. Recognized
+ * genres are always shown, even if there is only one song. Unknown labels
+ * repeated on at least two tracks become useful custom groups, while truly
+ * one-off unknown labels fall into Other. If Other has fewer than two tracks,
+ * its contents remain accessible as unclassified No genre instead.
  */
 function genreSummary(db) {
   registerGenreFunctions(db)
@@ -117,7 +121,10 @@ function genreSummary(db) {
     }
   }
 
-  const rareKeys = new Set([...counts].filter(([key, count]) => key !== OTHER_KEY && count < MIN_GENRE_TRACKS).map(([key]) => key))
+  const knownKeys = new Set([...ALIASES.values()].map(genreKey))
+  const rareKeys = new Set([...counts]
+    .filter(([key, count]) => key !== OTHER_KEY && !knownKeys.has(key) && count < MIN_GENRE_TRACKS)
+    .map(([key]) => key))
   const rareOnly = tracks.map(({ genres }) => visibleGenres(genres, rareKeys))
   const otherTracks = rareOnly.reduce((count, names) => count + (names.includes(OTHER) ? 1 : 0), 0)
   if (otherTracks < MIN_GENRE_TRACKS) rareKeys.add(OTHER_KEY)
