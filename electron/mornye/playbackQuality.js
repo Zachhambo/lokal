@@ -4,7 +4,7 @@
 // Ordinary HTMLAudioElement streaming is never a native JOC transport. Keep
 // its quality selection independent of a user's Atmos download preference.
 function isAtmosQuality(value) {
-  return /^(?:DOLBY[_ -]?ATMOS|ATMOS)$/i.test(String(value || '').trim())
+  return /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(value || '').trim())
 }
 
 function stereoPlaybackQuality(addon, settings = {}) {
@@ -13,7 +13,7 @@ function stereoPlaybackQuality(addon, settings = {}) {
   const options = addon?.manifest?.qualityOptions || []
   const stereo = options.filter(opt => opt?.id && !isAtmosQuality(opt.id) &&
     !isAtmosQuality(opt.kind) && !isAtmosQuality(opt.name) &&
-    !isAtmosQuality(opt.label))
+    !isAtmosQuality(opt.label) && opt.kind !== 'spatial')
   const rank = opt => {
     const id = String(opt.id).toUpperCase()
     if (id === 'HI_RES_LOSSLESS') return 0
@@ -35,14 +35,17 @@ function stereoPlaybackQuality(addon, settings = {}) {
 function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = false, purpose = 'download' } = {}) {
   if (isAtmosQuality(quality)) {
     if (!allowAtmos || purpose !== 'download') throw new Error('Dolby Atmos requires the explicit Download Dolby Atmos action')
-    const offered = (addon?.manifest?.qualityOptions || []).find(q => isAtmosQuality(q?.id))
+    const options = addon?.manifest?.qualityOptions || []
+    const amazon = /^amazon(?:-web)?$/i.test(addon?.name || '')
+    const offered = options.find(q => String(q?.id || '').toLowerCase() === (amazon ? 'ac4' : 'dolby_atmos')) ||
+      options.find(q => isAtmosQuality(q?.id))
     if (!offered) throw new Error('This addon does not offer Dolby Atmos downloads')
     return offered.id
   }
   if (quality) return quality
   if (settings.downloadQuality && !isAtmosQuality(settings.downloadQuality)) return settings.downloadQuality
   const available = (addon?.manifest?.qualityOptions || []).filter(q => q?.id &&
-    ![q.id, q.name, q.label, q.kind].some(isAtmosQuality))
+    q.kind !== 'spatial' && ![q.id, q.name, q.label, q.kind].some(isAtmosQuality))
   const preferred = available.find(q => String(q.id).toUpperCase() === 'HI_RES_LOSSLESS') ||
     available.find(q => String(q.id).toUpperCase() === 'LOSSLESS') ||
     available.find(q => q.kind === 'lossless') || available[0]
