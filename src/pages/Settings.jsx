@@ -1756,7 +1756,7 @@ activeCategory === 'data' ? usersTried
         </Row>
         <Row label={t("Song Transitions")} desc={crossfade.mode === 'automix'
           ? t('AutoMix listens to both songs and blends them like a DJ: on the beat when their tempos are close (the next one sped up or slowed a touch, pitch kept), on the song\'s own fade-out otherwise, with silence at either end cut. Albums play as made.')
-          : crossfade.mode === 'crossfade' ? t('The next song starts before the current one ends, by the amounts below.') : t('Each song plays to its end, then the next starts.')}>
+          : crossfade.mode === 'crossfade' ? t('The next song starts before the current one ends, by the amounts below.') : t('Songs are not mixed. When Gapless Playback is on, the next local song is prepared to avoid a pause at the boundary.')}>
           <div role="radiogroup" aria-label={t("Song transitions")} className="flex rounded-lg bg-card border border-border p-0.5">
             {[['off', 'Off'], ['crossfade', 'Crossfade'], ['automix', 'AutoMix']].map(([value, label]) => (
               <button key={value} type="button" role="radio" aria-checked={crossfade.mode === value} onClick={() => set('song_transitions', value)}
