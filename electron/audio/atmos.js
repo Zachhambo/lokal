@@ -121,10 +121,11 @@ async function inspectAtmosFile(filename, ffprobeBinary) {
   let streams
   try { streams = JSON.parse(stdout).streams } catch { throw new Error('FFprobe returned invalid audio metadata.') }
   const audio = streams?.[0]
+  if (audio?.codec_name === 'ac4') return { codec: 'AC-4', spatialVerified: false }
   if (audio?.codec_name !== 'eac3' || !/dolby atmos/i.test(audio?.profile || '')) {
-    throw new Error('This file is not confirmed as Dolby Digital Plus Atmos (E-AC-3 JOC). Normal Play supports non-Atmos audio.')
+    throw new Error('This file is not confirmed as Dolby Digital Plus Atmos (E-AC-3 JOC) or AC-4 audio.')
   }
-  return { codec: 'E-AC-3 JOC' }
+  return { codec: 'E-AC-3 JOC', spatialVerified: true }
 }
 
 // Offer a guided, opt-in repair only for Windows native headphone decoding
@@ -134,7 +135,7 @@ const WINDOWS_CODEC_GUIDE = 'https://www.majorgeeks.com/files/details/dolby_ac_3
 function isWindowsDecoderError(error, mode, platform = process.platform) {
   if (platform !== 'win32' || mode !== 'headphones') return false
   const message = String(error?.message || error || '')
-  return /Windows Media Foundation could not play this Dolby Atmos file|Windows audio did not start|E-AC-3 decoder/i.test(message)
+  return /Windows Media Foundation could not play this Dolby Atmos file|Windows audio did not start|E-AC-3 decoder|AC-4 decoder/i.test(message)
 }
 async function offerWindowsCodecHelp(error, mode, platform = process.platform, electron = null) {
   if (!isWindowsDecoderError(error, mode, platform)) return false
@@ -143,7 +144,7 @@ async function offerWindowsCodecHelp(error, mode, platform = process.platform, e
     type: 'warning',
     title: 'Dolby audio needs attention',
     message: 'Windows could not decode this Dolby Atmos track.',
-    detail: 'Your PC may be missing an E-AC-3 decoder. You can review the codec installation guide, then return to Lokal and retry the track. Dolby Access and Spatial Sound settings may also need configuration. Installing a codec does not guarantee Atmos rendering.\n\nTechnical details: ' + String(error?.message || error).slice(0, 600),
+    detail: 'Your PC may be missing an E-AC-3 or AC-4 decoder. You can review the codec installation guide, then return to Lokal and retry the track. Dolby Access and Spatial Sound settings may also need configuration. Installing a codec does not guarantee Atmos rendering.\n\nTechnical details: ' + String(error?.message || error).slice(0, 600),
     buttons: ['Open codec installation guide', 'Not now'],
     defaultId: 0,
     cancelId: 1,
@@ -248,15 +249,15 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
     return { ok: true }
   })
 
-  const launchFile = async ({ filename, session, provider, id, device, binary, mode }) => {
+  const launchFile = async ({ filename, session, provider, id, device, binary, mode, codec = 'E-AC-3 JOC' }) => {
     if (!fs.existsSync(filename) || !path.isAbsolute(filename)) throw new Error('Atmos audio file is unavailable')
     if (mode === 'headphones') {
       session.mode = 'headphones'
       await headphones.startHeadphones(filename, { signal: session.controller?.signal })
       if (active !== session) throw new Error('Atmos request was cancelled')
-      // MediaPlayer can decode E-AC-3 even when Spatial Sound is switched
-      // off, so do not report "Atmos rendered" based on an opened source.
-      notify({ state: 'playing', provider, id, codec: 'E-AC-3 JOC',
+      // Windows native media uses the installed E-AC-3 or AC-4 decoder.
+      // Playing the file does not prove Atmos spatial objects were rendered.
+      notify({ state: 'playing', provider, id, codec,
         mode: 'headphones', output: 'Windows native media / spatial processing unverified' })
       session.monitor = setInterval(async () => {
         if (active !== session) return
@@ -276,7 +277,7 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
         }
       }, 500)
       session.monitor.unref?.()
-      return { ok: true, codec: 'E-AC-3 JOC', mode: 'headphones', spatialVerified: false,
+      return { ok: true, codec, mode: 'headphones', spatialVerified: false,
         output: 'Windows native media (verify Spatial Sound in Windows Settings)' }
     }
     session.mode = 'hdmi'
@@ -367,14 +368,18 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       const key = sources.addons.keyOfProvider(provider)
       const service = require('../mornye/packages').service(getDB())
       const addon = key && service.find(key)
-      if (!addon || !/tidal/i.test(addon.name || '')) return { error: 'Choose a Tidal Mornye track' }
+      const amazon = /^amazon(?:-web)?$/i.test(addon?.name || '')
+      if (!addon || (!amazon && !/tidal/i.test(addon.name || ''))) return { error: 'Choose an Amazon or Tidal Mornye track' }
+      if (amazon && !(addon.manifest?.qualityOptions || []).some(q => q.id === 'ac4')) return { error: 'This Amazon addon does not offer AC-4 audio' }
+      if (amazon && mode !== 'headphones') return { error: 'Amazon AC-4 uses Windows native media and the default Windows output. Select Headphones / Windows Spatial Sound, not E-AC-3 HDMI passthrough.' }
+      if (amazon && process.platform !== 'win32') return { error: 'Amazon AC-4 native decoding currently requires the Windows audio codec route.' }
       await stop()
       if (generation !== startGeneration) return { error: 'This Atmos request was superseded by a newer request.' }
       session = { proc: null, artifact: null, controller: new AbortController() }
       active = session
       notify({ state: 'loading', provider, id: String(id) })
       const artifact = await service.download(key, id, {
-        quality: 'DOLBY_ATMOS', purpose: 'download', allowAtmos: true, signal: session.controller.signal,
+        quality: amazon ? 'ac4' : 'DOLBY_ATMOS', purpose: 'download', allowAtmos: true, signal: session.controller.signal,
         onProgress: ({ percent, message }) => {
           if (active !== session) return
           const value = Number(percent)
@@ -385,10 +390,12 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       })
       session.artifact = artifact
       if (active !== session) throw new Error('Atmos request was cancelled')
-      if (!hasAtmosMetadata(artifact.metadata) || artifact.info?.codec !== 'eac3') {
+      if (amazon) {
+        if (artifact.info?.codec !== 'ac4') throw new Error('Amazon did not deliver AC-4 audio; stereo was not substituted.')
+      } else if (!hasAtmosMetadata(artifact.metadata) || artifact.info?.codec !== 'eac3') {
         throw new Error('Tidal supplied stereo instead of an E-AC-3 Atmos stream')
       }
-      return await launchFile({ filename: artifact.file, session, provider, id: String(id), device, binary, mode })
+      return await launchFile({ filename: artifact.file, session, provider, id: String(id), device, binary, mode, codec: amazon ? 'AC-4' : 'E-AC-3 JOC' })
     } catch (error) {
       if (active === session) await stop()
       else { try { await session?.artifact?.cleanup() } catch {} }
@@ -411,13 +418,14 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       const chosen = await dialog.showOpenDialog({
         title: 'Open Dolby Atmos audio',
         properties: ['openFile'],
-        filters: [{ name: 'Dolby Atmos audio', extensions: ['m4a', 'mp4', 'ec3', 'eac3'] }],
+        filters: [{ name: 'Dolby encoded audio', extensions: ['m4a', 'mp4', 'ec3', 'eac3'] }],
       })
       if (chosen.canceled || !chosen.filePaths?.[0]) return { cancelled: true }
       const filename = chosen.filePaths[0]
       if (!fs.statSync(filename).isFile()) return { error: 'Choose an audio file.' }
       const { findFfprobe } = require('../ipc/tools')
-      await inspectAtmosFile(filename, findFfprobe())
+      const inspected = await inspectAtmosFile(filename, findFfprobe())
+      if (inspected.codec === 'AC-4' && mode !== 'headphones') throw new Error('AC-4 requires Windows native media output; select Headphones / Windows Spatial Sound.')
       const generation = ++startGeneration
       await stop()
       if (generation !== startGeneration) return { error: 'This Atmos request was superseded by a newer request.' }
@@ -425,7 +433,7 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       active = session
       const id = 'local:' + path.basename(filename)
       notify({ state: 'loading', provider: 'local', id, message: 'Preparing local Atmos file…' })
-      const launched = await launchFile({ filename, session, provider: 'local', id, device, binary, mode })
+      const launched = await launchFile({ filename, session, provider: 'local', id, device, binary, mode, codec: inspected.codec })
       return { ...launched, id, title: path.parse(filename).name, file: filename, mode }
     } catch (error) {
       if (active === session) await stop()
