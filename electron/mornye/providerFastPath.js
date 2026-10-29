@@ -1,14 +1,11 @@
 'use strict'
 
-// The availability check is the authoritative provider authorization and
-// lookup for both Play and Save. Only an unsuccessful cross-catalogue match
-// should retry after enriching the track metadata; this is not a playback
-// bypass, and no provider (including Tidal) has a special exemption.
-function needsCrossProviderEnrichment({ addon, track } = {}) {
-  if (!track || !addon) return false
-  const name = value => String(value || '').trim().toLowerCase().replace(/-web$/, '')
-  return !(name(addon.name) && name(track.provider_id) === name(addon.name)
-    && String(track.id || '').trim() && String(track.name || '').trim())
+// Play and Save use the same authorized availability-first acquisition.
+// A negative first result may be retried once after enrichment, regardless
+// of where the selected catalogue row came from. There are no Tidal or
+// other provider-specific exclusions, and a positive ticket never retries.
+function shouldRetryEnrichment({ available, hasEnrichment } = {}) {
+  return available?.available !== true && hasEnrichment === true
 }
 
-module.exports = { needsCrossProviderEnrichment }
+module.exports = { shouldRetryEnrichment }
