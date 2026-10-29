@@ -58,7 +58,22 @@ function prepare(db,key,id,{force=false}={}){
       if(!MIME[ext])throw new Error('Unsupported cached audio container')
       const file=path.join(dir,`${hash}.${ext}`)
       job.controller.signal.throwIfAborted()
-      await fsp.copyFile(source,`${file}.tmp`);job.controller.signal.throwIfAborted();await fsp.rename(`${file}.tmp`,file)
+      // Once the downloader has finished and verified a non-live recording,
+      // move its exact bytes into the playback cache instead of copying a
+      // second full track before Play can start. External cache volumes need
+      // the previous copy fallback (EXDEV on Linux/macOS/Windows).
+      const staging=`${file}.tmp`
+      if(!job.live?.ready){
+        try{await fsp.rename(source,staging)}
+        catch(error){
+          if(!['EXDEV','EPERM','EACCES'].includes(error.code))throw error
+          await fsp.copyFile(source,staging)
+        }
+      }else{
+        // A Qobuz reader may still have the original growing-file path open.
+        await fsp.copyFile(source,staging)
+      }
+      job.controller.signal.throwIfAborted();await fsp.rename(staging,file)
       job.status='done';job.progress=100;job.result={type:'file',file,mime:MIME[ext],headers:{},format:ext}
       // The cache joins Lokal's shared limit; installed code and credentials do not.
       require('../cache').trim({keep:[file]})
