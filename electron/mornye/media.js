@@ -38,9 +38,10 @@ function prepare(db,key,id,{force=false}={}){
   const map=state(db),hash=cacheKey(db,key,id)
   const existing=[...map.values()].find(job=>job.hash===hash&&job.status==='running')
   if(existing)return {pending:true,operationId:existing.id}
-  const job={id:crypto.randomUUID(),hash,key,itemId:id,status:'running',progress:0,controller:new AbortController()};map.set(job.id,job)
+  const job={id:crypto.randomUUID(),hash,key,itemId:id,status:'running',progress:0,startedAt:Date.now(),controller:new AbortController()};map.set(job.id,job)
   job.liveReady=new Promise(resolve=>{job.markLive=resolve})
   const addon=service(db).find(key)
+  const startedAt=Date.now()
   const quality=stereoPlaybackQuality(addon,service(db).settings(addon))
   // Do not probe a growing file for providers that only deliver a usable
   // result after segment assembly/decryption. They use this same downloader,
@@ -75,6 +76,7 @@ function prepare(db,key,id,{force=false}={}){
       }
       job.controller.signal.throwIfAborted();await fsp.rename(staging,file)
       job.status='done';job.progress=100;job.result={type:'file',file,mime:MIME[ext],headers:{},format:ext}
+      console.info(`[Mornye] ${addon.name} playback stage=playback_ready elapsedMs=${Date.now()-startedAt}`)
       // The cache joins Lokal's shared limit; installed code and credentials do not.
       require('../cache').trim({keep:[file]})
     }finally{await result.cleanup()}
@@ -112,6 +114,7 @@ function liveUpdate(job,{part,file,total,written,done}){
     if(playable){
       Object.assign(live,playable,{ready:true})
       job.message='Playing while it downloads…'
+      console.info(`[Mornye] qobuz playback stage=live_ready elapsedMs=${Date.now()-job.startedAt}`)
       job.markLive()
     }
   }catch{
