@@ -310,12 +310,12 @@ class PackageService {
       }finally{runtime?.close();await fsp.rm(staged,{recursive:true,force:true})}
     })
   }
-  createRuntime(addon,code,{root,grants=[],onProgress,onTransfer,signal,heapMb}={}) {
+  createRuntime(addon,code,{root,grants=[],onProgress,onTransfer,onByteProgress,signal,heapMb}={}) {
     let network=this.networks.get(addon.key)
     if(!network){network=new ExtensionNetwork(addon.manifest.permissions);this.restoreConnection(addon.key,network);this.networks.set(addon.key,network)}
     let session
     if(addon.manifest.signedSession){const scope=hash(JSON.stringify(addon.manifest.signedSession));session=this.sessions.get(scope);if(!session){session=new SignedSession(addon.manifest.signedSession,this.storage,network,addon.key);this.sessions.set(scope,session)}}
-    const host=new ExtensionHost({addon,storage:this.storage,network,session,root:root || path.join(this.root,'data',addon.key,'files'),grants,tools:this.tools(),db:this.db,onProgress,onTransfer,signal})
+    const host=new ExtensionHost({addon,storage:this.storage,network,session,root:root || path.join(this.root,'data',addon.key,'files'),grants,tools:this.tools(),db:this.db,onProgress,onTransfer,onByteProgress,signal})
     const runtime=new ExtensionRuntime(code,{permissions:addon.manifest.permissions,signedSession:addon.manifest.signedSession,settings:this.settings(addon),rawFfmpeg:addon.manifest.capabilities?.rawFfmpeg,heapMb},host)
     runtime.ready.catch(()=>{})
     return runtime
@@ -454,12 +454,25 @@ class PackageService {
       if(!sawBytes&&written>0){sawBytes=true;phase('first_byte')}
       if(liveProvider&&purpose==='playback')onLive?.(info)
     }
+    let lastByteActivity=0
+    const onByteProgress=bytes=>{
+      if(!Number.isFinite(bytes)||bytes<=0)return
+      if(!sawBytes){sawBytes=true;phase('first_byte')}
+      // Byte delivery is authoritative even for segmented transfers with no
+      // finished segment yet, or when optional post-processing is enabled.
+      // Throttle timer resets; do not throttle bytes or player callbacks.
+      const now=Date.now()
+      if(now-lastByteActivity>=250){lastByteActivity=now;recordActivity()}
+    }
     const relayProgress=update=>{
       const percent=Number(update?.percent)
-      if(Number.isFinite(percent)&&percent>lastPercent){lastPercent=percent;recordActivity()}
+      if(Number.isFinite(percent)){
+        if(percent>lastPercent)recordActivity()
+        lastPercent=percent // retries can restart at zero
+      }
       onProgress?.(update)
     }
-    const runtime=this.createRuntime(addon,fs.readFileSync(path.join(this.root,'packages',key,'index.js'),'utf8'),{grants:[staged],onProgress:relayProgress,onTransfer,signal:combined,heapMb:512})
+    const runtime=this.createRuntime(addon,fs.readFileSync(path.join(this.root,'packages',key,'index.js'),'utf8'),{grants:[staged],onProgress:relayProgress,onTransfer,onByteProgress,signal:combined,heapMb:512})
     try{
       phase('initialize')
       await runtime.ready;await runtime.invoke('initialize',[this.settings(addon)],{signal:combined})
@@ -510,10 +523,17 @@ class PackageService {
       // the same path, with the same bounded timeout and no special skips.
       if(shouldRetryEnrichment({available,hasEnrichment:runtime.methods.includes('enrichTrack')})){
         phase('cross_provider_enrichment')
-        const enriched=await runtime.invoke('enrichTrack',[track],{timeoutMs:20000,signal:combined})
-        if(enriched&&typeof enriched==='object'&&!Array.isArray(enriched)){
-          const values=Object.fromEntries(Object.entries(enriched).filter(([,value])=>value!==undefined&&value!==null&&value!==''&&value!==0&&!(typeof value==='string'&&!value.trim())&&!(Array.isArray(value)&&value.length===0)))
-          track={...track,...values}
+        try{
+          const enriched=await runtime.invoke('enrichTrack',[track],{timeoutMs:20000,signal:combined})
+          if(enriched&&typeof enriched==='object'&&!Array.isArray(enriched)){
+            const values=Object.fromEntries(Object.entries(enriched).filter(([,value])=>value!==undefined&&value!==null&&value!==''&&value!==0&&!(typeof value==='string'&&!value.trim())&&!(Array.isArray(value)&&value.length===0)))
+            track={...track,...values}
+          }
+        }catch(error){
+          // Enrichment is optional; do not turn a failed availability ticket
+          // into an enrichment error unless the worker cannot continue.
+          if(combined.aborted||runtime.closed)throw error
+          console.warn('[Mornye] Optional enrichment failed; checking availability again')
         }
         phase('availability_retry')
         available=await checkAvailability()
