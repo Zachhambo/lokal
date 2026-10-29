@@ -1,7 +1,7 @@
 import { useTranslation } from '../i18n'
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Volume2, Film, Clapperboard, Gamepad2, Image as ImageIcon } from 'lucide-react'
+import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Volume2, Film, Clapperboard, Gamepad2, Eye, EyeOff, Image as ImageIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
@@ -305,6 +305,9 @@ export default function FullscreenPlayer() {
   const showMusicVideo = useMusicVideoView(s => s.show)
   const clipName = clipNow && (clipNow.tall || clipNow.source === 'spotify') ? 'Canvas' : 'Moving Cover'
   const [showSearch, setShowSearch] = useState(false)
+  // The artwork details have one explicit visibility control, independent
+  // of the mouse-idle chrome. Preserve the choice across songs and modes.
+  const [trackDetailsVisible, setTrackDetailsVisible] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
   // Which side panel is open, driven purely by the two buttons below -- not
   // by whether the current track actually has lyrics. It used to require
@@ -858,6 +861,14 @@ export default function FullscreenPlayer() {
                 className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm disabled:opacity-30">
                 <Gamepad2 size={16} />
               </button>
+              <button type="button" onClick={() => setTrackDetailsVisible(visible => !visible)}
+                title={trackDetailsVisible ? t('Hide track details') : t('Show track details')}
+                aria-label={trackDetailsVisible ? t('Hide track details') : t('Show track details')}
+                aria-pressed={!trackDetailsVisible}
+                data-fullscreen-details-toggle=""
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm">
+                {trackDetailsVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
               <button onClick={toggleScreen} title={screenFull ? 'Exit full screen' : 'Fill the whole screen'} aria-label={screenFull ? 'Exit full screen' : 'Fill the whole screen'}
                 className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm">
                 {screenFull ? <Minimize size={15} /> : <Expand size={15} />}
@@ -875,11 +886,11 @@ export default function FullscreenPlayer() {
                 Turntable mode the scene is a full-stage canvas, so anchor
                 the badge just below the main header instead. */}
             {showFullscreenQuality && (
-              <div data-fullscreen-quality-tag aria-hidden={chromeHidden}
-                className={`pointer-events-none z-20 flex h-0 justify-center ${turntableMode ? 'absolute inset-x-0 top-20' : 'relative flex-shrink-0'}`}
+              <div data-fullscreen-quality-tag aria-hidden={!trackDetailsVisible}
+                className={`pointer-events-none z-20 flex h-0 justify-center transition-opacity duration-300 ${trackDetailsVisible ? 'opacity-100' : 'opacity-0'} ${turntableMode ? 'absolute inset-x-0 top-20' : 'relative flex-shrink-0'}`}
                 style={turntableMode ? undefined : { width: coverSize }}>
                 <span
-                  className={`absolute ${turntableMode ? 'top-0' : 'bottom-3'} left-1/2 -translate-x-1/2 max-w-full truncate whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white ${chromeFade}`}
+                  className={`absolute ${turntableMode ? 'top-0' : 'bottom-3'} left-1/2 -translate-x-1/2 max-w-full truncate whitespace-nowrap rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white`}
                   title={fullscreenQualityLabel}
                   aria-label={settings.resolution_tags_in_full_player === '1'
                     ? `Audio resolution: ${fullscreenQualityLabel}`
@@ -993,7 +1004,8 @@ export default function FullscreenPlayer() {
               </div>
             )}
 
-            <div className={`relative mt-6 flex items-center gap-3 ${turntableMode && chromeHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-300`} style={{ width: turntableMode ? 'min(42rem, calc(100vw - 4rem))' : coverSize }}>
+            <div data-fullscreen-track-seekbar="" aria-hidden={!trackDetailsVisible} inert={!trackDetailsVisible}
+              className={`relative mt-6 flex items-center gap-3 ${trackDetailsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'} transition-opacity duration-300`} style={{ width: turntableMode ? 'min(42rem, calc(100vw - 4rem))' : coverSize }}>
               <MixingMark className="absolute -top-4 left-1/2 -translate-x-1/2 pointer-events-none !text-white/80" />
               <span className="w-11 text-right text-sm tabular-nums text-white/75">{fmt(progress)}</span>
               <div ref={barRef} className="group/bar relative h-3.5 flex-1 cursor-pointer overflow-hidden rounded-full bg-white/20 backdrop-blur-[2px] drop-shadow-[0_1px_4px_rgba(0,0,0,0.25)]"
@@ -1005,7 +1017,8 @@ export default function FullscreenPlayer() {
 
             {/* In at once, fading: never waiting on the old title's way out (see PlayerBar). */}
             <motion.div key={currentTrack?.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              className={`mt-5 text-center transition-opacity duration-300 ${turntableMode && chromeHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'}`} style={{ width: turntableMode ? 'min(42rem, calc(100vw - 4rem))' : coverSize }}>
+              data-fullscreen-track-metadata="" aria-hidden={!trackDetailsVisible}
+              className={`mt-5 text-center transition-opacity duration-300 ${trackDetailsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} style={{ width: turntableMode ? 'min(42rem, calc(100vw - 4rem))' : coverSize }}>
               <h2 className="text-3xl font-bold text-white leading-tight truncate">{currentTrack?.title || '—'}</h2>
               <p className="mt-1.5 text-lg text-white/70 truncate">{currentTrack?.artist}</p>
               {currentTrack?.album && <p className="mt-0.5 text-sm text-white/40 truncate">{currentTrack.album}</p>}
