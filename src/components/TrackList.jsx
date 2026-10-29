@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, Heart, Plus, Camera, FolderOpen, Trash2, Music, LibraryBig, Clock, ListEnd, GripVertical, X, Check, Edit2, Search, Download, AlertCircle, Gem, Disc3, User, ListMinus, MoreHorizontal, Globe, Radio, ChevronUp, ChevronDown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { showToast, showLoadingToast } from './Toaster'
-import { canGetLossless, openLossless, formatLabel, qualityTagLabel, isSuspect, tierOf, TIERS, losslessMenuItem, losslessManyMenuItem } from '../quality'
+import { canGetLossless, openLossless, formatLabel, fullResolutionLabel, qualityTagLabel, isSuspect, tierOf, TIERS, losslessMenuItem, losslessManyMenuItem } from '../quality'
 import { useFullResolutionTags } from '../resolutionTagPreferences'
 import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import { usePlayerStore, useAppStore } from '../store/player'
@@ -1014,8 +1014,10 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
             {layout.quality && (() => {
               // Same badge as the Audio Quality page; opens that page on its list.
               const tier = isStreamed(track) || isGhost ? 'unknown' : (isSuspect(track) ? 'suspect' : tierOf(track))
-              const label = qualityTagLabel(track, tier, fullResolutionTags && !isGhost && !isStreamed(track))
-              if (tier === 'unknown' && !label) return <span title={t("Quality unknown")} className="text-center text-xs text-muted/50">—</span>
+              const allowResolution = fullResolutionTags && !isGhost && !isStreamed(track)
+              const measured = allowResolution ? fullResolutionLabel(track) : null
+              if (tier === 'unknown' && !measured) return <span title={t("Quality unknown")} className="text-center text-xs text-muted/50">—</span>
+              const label = qualityTagLabel(track, tier, allowResolution)
               const info = TIERS[tier]
               return (
                 <button onClick={e => { e.stopPropagation(); navigate('/quality', { state: { tier } }) }}
