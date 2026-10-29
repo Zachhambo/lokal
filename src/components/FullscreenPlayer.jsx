@@ -23,6 +23,7 @@ import { contextLabel, isContextNavigable, navigateToContext } from '../playback
 import { trackArtURL, trackFullArtURL } from '../onlineTracks'
 import { useVolumeWheel } from '../volumeWheel'
 import { usePerformanceMode } from '../performanceMode'
+import { isSuspect, tierOf, qualityTagLabel } from '../quality'
 import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
 import { computeFullscreenLyricsExpansion } from '../fullscreenLyricsLayout.mjs'
 
@@ -981,6 +982,18 @@ export default function FullscreenPlayer() {
               <h2 className="text-3xl font-bold text-white leading-tight truncate">{currentTrack?.title || '—'}</h2>
               <p className="mt-1.5 text-lg text-white/70 truncate">{currentTrack?.artist}</p>
               {currentTrack?.album && <p className="mt-0.5 text-sm text-white/40 truncate">{currentTrack.album}</p>}
+              {currentTrack && (() => {
+                const tier = isSuspect(currentTrack) ? 'suspect' : tierOf(currentTrack)
+                const tag = qualityTagLabel(currentTrack, tier, settings.resolution_tags_in_full_player === '1')
+                if (!tag || (tier === 'unknown' && tag === 'Not read')) return null
+                return (
+                  <div className="mt-2 flex justify-center" data-fullscreen-quality-tag>
+                    <span className="max-w-full truncate rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-medium tracking-wide text-white" title={tag} aria-label={settings.resolution_tags_in_full_player === '1' ? `Audio resolution: ${tag}` : `Audio quality: ${tag}`}>
+                      {tag}
+                    </span>
+                  </div>
+                )
+              })()}
             </motion.div>
           </div>
 
