@@ -8,4 +8,9 @@ function shouldRetryEnrichment({ available, hasEnrichment } = {}) {
   return available?.available !== true && hasEnrichment === true
 }
 
-module.exports = { shouldRetryEnrichment }
+// Keep the live download-byte gate and the growing-file reader in sync.
+function isLiveProvider(addon) {
+  return String(addon?.name || '').toLowerCase().replace(/-web$/, '') === 'qobuz'
+}
+
+module.exports = { shouldRetryEnrichment, isLiveProvider }
