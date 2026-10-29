@@ -144,7 +144,9 @@ test('unknown but recognizable subgenre names resolve to broad families', () => 
     ['Afrobeat percussion', 'World'], ['modern samba', 'Latin'],
     ['traditional mariachi', 'Latin'], ['modern bluegrass', 'Country'],
     ['traditional Celtic folk', 'Folk'], ['concert orchestral classical', 'Classical'],
-    ['J-pop', 'Pop'], ['anime theme', 'Anime'], ['videogame soundtrack', 'Video Game Music'],
+    ['J-pop', 'Pop'], ['indie shoegaze', 'Rock'],
+    ['alternative jazz', 'Jazz'], ['alternative techno', 'Electronic'],
+    ['indie', 'Indie / Alternative'], ['anime theme', 'Anime'], ['videogame soundtrack', 'Video Game Music'],
   ]
   for (const [tag, genre] of examples) {
     assert.equal(normalizeGenreName(tag), genre, tag)
