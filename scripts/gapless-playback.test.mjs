@@ -32,7 +32,7 @@ test('disabled transitions prepare local PCM at the end without an ordinary fade
   }), true)
   const plan = gaplessHandoffPlan(54)
   assert.equal(plan.kind, 'gapless')
-  assert.equal(plan.start + plan.length, 54)
+  assert.ok(Math.abs(plan.start + plan.length - 54) < 1e-6)
   assert.equal(plan.inOffset, 0, 'the next song must begin from its first frame')
   assert.ok(plan.length < 0.1, 'a tiny decoder overlap, not a visible multi-second fade')
   assert.equal(plan.rate, 1, 'do not pitch- or tempo-shift an album')
@@ -75,6 +75,8 @@ test('gapless staging shares the existing source-aware, cancellable two-deck han
     'transitions Off must stage locally rather than wait for ended')
   assert.match(source, /localNext: !!nextTrack\?\.file_path && !streamRef\(nextTrack\)/,
     'do not prematurely open online sources and verification prompts')
+  assert.match(source, /upcomingTrack\(live\)\?\.id !== nextTrack\.id/,
+    'queue edits during preload must cancel the now-stale transition')
   assert.match(source, /fadeInEl\.addEventListener\('canplay', onReady\)/)
   assert.match(source, /fadeOutEl\.addEventListener\('ended', onEnded\)/)
   assert.match(source, /cancelCrossfade\(\)/)
