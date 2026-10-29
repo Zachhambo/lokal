@@ -7,7 +7,7 @@ const OTHER = 'Other'
 const OTHER_KEY = 'other'
 const MIN_GENRE_TRACKS = 2
 
-const { groups: GROUPS, noise: NOISE_VALUES } = require('./genreTaxonomy.json')
+const { groups: GROUPS, hints: FAMILY_HINTS, noise: NOISE_VALUES } = require('./genreTaxonomy.json')
 const NOISE = new Set(NOISE_VALUES)
 
 function taxonomyKey(value) {
@@ -24,14 +24,45 @@ for (const [canonical, aliases] of GROUPS) {
   for (const alias of aliases) ALIASES.set(taxonomyKey(alias), canonical)
 }
 
+// Generic music subgenres (e.g. "deep melodic techno") can be classified by
+// meaningful *whole words* even when their full name is not an exact alias.
+// A collision between families is ambiguous and stays Other. Both platforms
+// use the same family hint data; no online lookup or metadata changes.
+function genreWords(value) {
+  return String(value || '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim().replace(/\s+/g, ' ')
+}
+const NORMALIZED_HINTS = FAMILY_HINTS.map(([family, hints]) => [
+  family, hints.map(genreWords).filter(Boolean),
+])
+function inferredGenreFamily(raw) {
+  const words = genreWords(raw)
+  if (!words) return null
+  const padded = ' ' + words + ' '
+  let result = null
+  for (const [family, hints] of NORMALIZED_HINTS) {
+    if (!hints.some(hint => padded.includes(' ' + hint + ' '))) continue
+    // "indie" and "alternative" usually modify the actual genre
+    // (e.g. "experimental indie shoegaze"). They are only a fallback
+    // family when no stronger musical style was recognized.
+    if (family === 'Indie / Alternative' && result) continue
+    if (result === 'Indie / Alternative') { result = family; continue }
+    if (result && result !== family) return null
+    result = family
+  }
+  return result
+}
+
 /** Convert a raw tag to a broad display/filter category, or null for junk. */
 function normalizeGenreName(value) {
   const raw = String(value || '').replace(/\s+/g, ' ').trim()
   const key = taxonomyKey(raw)
   if (!key || /^\d+$/.test(key) || NOISE.has(key)) return null
-  // A meaningful unfamiliar tag should not become Other automatically.
-  // It can form its own category if at least two tracks share that label.
-  return ALIASES.get(key) || raw
+  // Exact known styles win; one clear broad-family hint wins next.
+  // Unknown or conflicting names remain Other, even when many songs use them.
+  return ALIASES.get(key) || inferredGenreFamily(raw) || OTHER
 }
 
 /** "Rock / Pop; Indie" -> separate canonical categories, without repeats. */
@@ -48,7 +79,7 @@ function splitGenres(value) {
   return out
 }
 
-/** Same Unicode/case/punctuation identity for broad and custom categories. */
+/** Same Unicode/case/punctuation identity for canonical genre categories. */
 function genreKey(name) {
   return taxonomyKey(name)
 }
@@ -68,9 +99,9 @@ function trackGenres(row) {
   return out
 }
 
-// Only unknown *singleton* categories are folded into Other. Known genres
-// remain visible even for one recording; repeated unknown labels form their
-// own user-defined genres. Raw audio metadata is never changed.
+// Recognized subgenres are consistently mapped to broad canonical genres,
+// even if only one song is tagged. Genuinely ambiguous or unrecognized tags
+// end up in Other, never in a new catch-all custom-genre card.
 const rareGenreKeysByDb = new WeakMap()
 
 function visibleGenres(genres, rareKeys = new Set()) {
@@ -104,10 +135,10 @@ function registerGenreFunctions(db) {
 
 /**
  * Genres page categories, counted by distinct track and artwork. Recognized
- * genres are always shown, even if there is only one song. Unknown labels
- * repeated on at least two tracks become useful custom groups, while truly
- * one-off unknown labels fall into Other. If Other has fewer than two tracks,
- * its contents remain accessible as unclassified No genre instead.
+ * genres are always shown, even if there is only one song. Unrecognized or
+ * conflicting subgenre labels go into Other, even if repeated, rather than
+ * creating dozens of almost-identical cards. Other with fewer than two songs
+ * stays accessible as the unclassified No genre category.
  */
 function genreSummary(db) {
   registerGenreFunctions(db)
