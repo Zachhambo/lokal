@@ -75,3 +75,30 @@ test('an addon ghost keeps advertised Atmos after saving, refresh and playback r
     db.close()
   }
 })
+
+test('Amazon AC-4 requestability is persisted independently from Atmos catalogue modes', () => {
+  const db = tracksDatabase()
+  try {
+    const item = {
+      provider: 'a-0123456789', id: 'amazon-ac4-track', title: 'Amazon song',
+      artist: 'Artist', duration: 189, atmos_available: 0,
+      atmos_requestable: 1,
+    }
+    const [saved] = sources.saveOnlineTracks(db, [item])
+    assert.equal(saved.atmos_available, 0)
+    assert.equal(saved.atmos_requestable, 1)
+    const [reloaded] = sources.saveOnlineTracks(db, [{
+      provider: item.provider, id: item.id, title: item.title, artist: item.artist,
+    }])
+    assert.equal(reloaded.atmos_available, 0,
+      'AC-4 option must not become a confirmed catalogue Atmos badge')
+    assert.equal(reloaded.atmos_requestable, 1,
+      'queue ghost must retain opt-in AC-4 requestability when refreshed without metadata')
+    const [stereoOnly] = sources.saveOnlineTracks(db, [{
+      ...item, id: 'amazon-stereo-only', atmos_requestable: 0,
+    }])
+    assert.equal(stereoOnly.atmos_requestable, 0)
+  } finally {
+    db.close()
+  }
+})
