@@ -82,7 +82,7 @@ function albumIdOf(track) {
 const { hasAtmosMetadata } = require('./atmos')
 const { addonDownloadQuality, isAtmosQuality } = require('./playbackQuality')
 const { probeAtmosFile } = require('../quality/atmos')
-const { skipPlaybackEnrichment } = require('./providerFastPath')
+const { needsCrossProviderEnrichment } = require('./providerFastPath')
 
 /** Keep album metadata string-valued before passing it into file taggers. */
 function normalizeTrackMetadata(track) {
@@ -434,31 +434,26 @@ class PackageService {
     // Playback can start on the file as it arrives (media.js decides whether
     // it's playable as is): only when no post-processing hook will rewrite it.
     const hooks=addon.manifest.postProcessing?.enabled&&(addon.manifest.postProcessing.hooks || []).some(hook=>hook.defaultEnabled)
-    const onTransfer=purpose==='playback'&&onLive&&!hooks?onLive:undefined
+    // The same bytes and authorization path are used for saving and playing.
+    // Only Qobuz exposes growing media to the player; segmented, encrypted
+    // and converted providers finish downloading before playback starts.
+    const liveProvider=addon.name.toLowerCase().replace(/-web$/,'')==='qobuz'
+    const startedAt=Date.now()
+    const phase=stage=>console.info(`[Mornye] ${addon.name} ${purpose} stage=${stage} elapsedMs=${Date.now()-startedAt}`)
+    let sawBytes=false
+    const onTransfer=hooks?undefined:info=>{
+      if(!sawBytes&&Number(info?.written)>0){sawBytes=true;phase('first_byte')}
+      if(liveProvider&&purpose==='playback')onLive?.(info)
+    }
     const runtime=this.createRuntime(addon,fs.readFileSync(path.join(this.root,'packages',key,'index.js'),'utf8'),{grants:[staged],onProgress,onTransfer,signal:combined,heapMb:512})
     try{
+      phase('initialize')
       await runtime.ready;await runtime.invoke('initialize',[this.settings(addon)],{signal:combined})
+      phase('availability_prepare')
       const rememberedRow=this.db.prepare('SELECT metadata_json FROM mornye_tracks WHERE provider=? AND id=?').get(`a-${key}`,String(id))
       let track=JSON.parse(rememberedRow?.metadata_json || 'null')
       if(!track&&runtime.methods.includes('getTrack'))track=await runtime.invoke('getTrack',[String(id)],{signal:combined})
       track ||= {id:String(id),name:'',artists:'',duration_ms:0,provider_id:addon.name}
-      // Search results may be sparse; Mornye providers such as Amazon
-      // expose enrichTrack() to resolve canonical release metadata before the
-      // availability check and prepared download context are built.
-      if(!skipPlaybackEnrichment({ addon, track, remembered:!!rememberedRow, purpose }) &&
-          runtime.methods.includes('enrichTrack')) {
-        try {
-          const enriched=await runtime.invoke('enrichTrack',[track],{timeoutMs:60000,signal:combined})
-          if(enriched && typeof enriched==='object' && !Array.isArray(enriched)) {
-            const values=Object.fromEntries(Object.entries(enriched).filter(([,value])=>value!==undefined&&value!==null&&value!==''&&value!==0&&!(typeof value==='string'&&!value.trim())&&!(Array.isArray(value)&&value.length===0)))
-            track={...track,...values}
-          }
-        } catch(error) {
-          // Enrichment is optional, but a timed-out/aborted worker cannot be
-          // reused safely for checkAvailability() or download().
-          if(combined.aborted || runtime.closed) throw error
-        }
-      }
       const providerName=addon.name.replace(/-web$/,'')
       // A source track may not have an Amazon album ID until checkAvailability()
       // resolves it to an Amazon ASIN. Reuse this fallback before and after matching.
@@ -485,13 +480,34 @@ class PackageService {
           console.warn('[Mornye] Amazon album lookup failed:', error.message || error)
         }
       }
-      await resolveAmazonAlbum()
-      const options={track,duration_ms:track.duration_ms || 0}
-      const directFields={qobuz:'qobuz_id',tidal:'tidal_id',deezer:'deezer_id',soundcloud:'spotify_id',amazon:'spotify_id'}
-      const directField=directFields[providerName]
-      if(directField) options[directField]=String(track[directField] || (providerName === 'amazon' || providerName === 'soundcloud' ? track.id : id))
-      const available=runtime.methods.includes('checkAvailability')?await runtime.invoke('checkAvailability',[track.isrc || '',track.name || '',track.artists || '',options],{signal:combined}):{available:true,track_id:String(id)}
+      const checkAvailability=()=>{
+        const options={track,duration_ms:track.duration_ms || 0}
+        const directFields={qobuz:'qobuz_id',tidal:'tidal_id',deezer:'deezer_id',soundcloud:'spotify_id',amazon:'spotify_id'}
+        const directField=directFields[providerName]
+        if(directField)options[directField]=String(track[directField] || (providerName === 'amazon' || providerName === 'soundcloud' ? track.id : id))
+        return runtime.methods.includes('checkAvailability')
+          ?runtime.invoke('checkAvailability',[track.isrc || '',track.name || '',track.artists || '',options],{timeoutMs:25000,signal:combined})
+          :Promise.resolve({available:true,track_id:String(id)})
+      }
+      phase('availability')
+      let available=await checkAvailability()
+      // Cross-provider matches can genuinely need enrichment, but a direct
+      // provider ID should never trigger a second metadata lookup. Retry only
+      // after a failed availability result, on the same Play/Save pipeline.
+      if(!available?.available&&runtime.methods.includes('enrichTrack')&&
+          needsCrossProviderEnrichment({addon,track})){
+        phase('cross_provider_enrichment')
+        const enriched=await runtime.invoke('enrichTrack',[track],{timeoutMs:20000,signal:combined})
+        if(enriched&&typeof enriched==='object'&&!Array.isArray(enriched)){
+          const values=Object.fromEntries(Object.entries(enriched).filter(([,value])=>value!==undefined&&value!==null&&value!==''&&value!==0&&!(typeof value==='string'&&!value.trim())&&!(Array.isArray(value)&&value.length===0)))
+          track={...track,...values}
+        }
+        phase('availability_retry')
+        available=await checkAvailability()
+      }
       if(!available?.available)throw new Error(available?.reason || 'The addon cannot download this track')
+      // Optional album metadata must not precede provider authorization.
+      await resolveAmazonAlbum()
       const matchedTrackId=available.track_id || available.trackId
       // Cross-provider matches often start with only Spotify metadata. Once Amazon
       // returns its ASIN, load Amazon's canonical track before the addon downloads.
@@ -519,7 +535,9 @@ class PackageService {
       if(providerName==='amazon') prepared.web_metadata=track
       const chosen=addonDownloadQuality(addon,this.settings(addon),{quality,allowAtmos,purpose})
       const downloadingAtmos=isAtmosQuality(chosen)
+      phase('download_start')
       const result=await runtime.invoke('download',[available.track_id || available.trackId || String(id),chosen,path.join(staged,'audio.flac'),{preparedContext:prepared,resolutionTimeoutMs:60000}],{timeoutMs:24*3600000,signal:combined})
+      phase('download_complete')
       if(!result?.success)throw Object.assign(new Error(result?.error_message || result?.error || 'Addon download failed'),{authUrl:result?.auth_url,errorType:result?.error_type})
       let file=safePath(runtime.host.root,result.file_path || result.filePath || result.path,runtime.host.grants)
       if(!fs.statSync(file).isFile()||!fs.statSync(file).size)throw new Error('Addon produced an empty file')
