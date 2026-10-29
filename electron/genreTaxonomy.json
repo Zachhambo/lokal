@@ -1,39 +1,6 @@
 {
   "groups": [
     [
-      "Video Game Music",
-      [
-        "vgm",
-        "video game",
-        "video games",
-        "video game music",
-        "videogame music",
-        "video games music",
-        "video game soundtrack",
-        "video game soundtracks",
-        "videogame soundtrack",
-        "video game ost",
-        "videogame ost",
-        "game music",
-        "video game score",
-        "game soundtrack",
-        "game ost",
-        "game score",
-        "video game original soundtrack",
-        "video game remix",
-        "video game remixes",
-        "game background music",
-        "game bgm",
-        "game music soundtrack",
-        "gaming music",
-        "chiptune game music",
-        "videogame",
-        "game soundtracks",
-        "vgm remix",
-        "video game themes"
-      ]
-    ],
-    [
       "Soundtrack",
       [
         "soundtrack",
@@ -56,7 +23,31 @@
         "саундтрек",
         "movie music",
         "television score",
-        "cinematic score"
+        "cinematic score",
+        "Video Game Music",
+        "vgm",
+        "video game",
+        "video games",
+        "video games music",
+        "video game soundtrack",
+        "video game soundtracks",
+        "video game ost",
+        "game music",
+        "video game score",
+        "game soundtrack",
+        "game ost",
+        "game score",
+        "video game original soundtrack",
+        "video game remix",
+        "video game remixes",
+        "game background music",
+        "game bgm",
+        "game music soundtrack",
+        "gaming music",
+        "chiptune game music",
+        "game soundtracks",
+        "vgm remix",
+        "video game themes"
       ]
     ],
     [
@@ -663,19 +654,6 @@
   ],
   "hints": [
     [
-      "Video Game Music",
-      [
-        "video game",
-        "videogame",
-        "game soundtrack",
-        "game music",
-        "game score",
-        "game ost",
-        "gaming music",
-        "vgm"
-      ]
-    ],
-    [
       "Soundtrack",
       [
         "soundtrack",
@@ -684,7 +662,14 @@
         "television score",
         "cinematic score",
         "motion picture score",
-        "original score"
+        "original score",
+        "video game",
+        "game soundtrack",
+        "game music",
+        "game score",
+        "game ost",
+        "gaming music",
+        "vgm"
       ]
     ],
     [
