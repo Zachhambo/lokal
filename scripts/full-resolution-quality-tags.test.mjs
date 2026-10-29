@@ -74,7 +74,45 @@ test('every song row and compact player use the list option; fullscreen has its 
   assert.match(bar, /const fullResolutionTags = useFullResolutionTags\(\)/)
   assert.match(bar, /qualityTagLabel\(currentTrack, qualityTier, fullResolutionTags\)/)
   assert.match(fullscreen, /qualityTagLabel\(currentTrack, tier, settings\.resolution_tags_in_full_player === '1'\)/)
-  assert.match(fullscreen, /\{currentTrack\.album\}<\/p>[\s\S]*?data-fullscreen-quality-tag/)
-  assert.match(fullscreen, /border-white\/25 bg-white\/10/)
-  assert.match(fullscreen, /if \(!tag \|\| \(tier === 'unknown' && tag === 'Not read'\)\) return null/)
+  assert.match(fullscreen, /data-fullscreen-quality-tag[\\s\\S]*?border-white\\/25 bg-white\\/10/,
+    'the white full-resolution tag is anchored above the cover, not under album metadata')
+  assert.match(fullscreen, /showFullscreenQuality && \(/)
+  assert.match(fullscreen, /fullscreenQualityTier === 'unknown' && fullscreenQualityLabel === 'Not read'/)
+  assert.ok(fullscreen.indexOf('data-fullscreen-quality-tag') < fullscreen.indexOf('fullscreen-cover-stage'),
+    'badge must be above the artwork in the cover stage')
+  assert.ok(fullscreen.indexOf('data-fullscreen-quality-tag') < fullscreen.indexOf('{currentTrack.album}</p>'),
+    'badge must not be placed beneath the album')
+  assert.match(fullscreen, /trackDetailsVisible \? 'opacity-100' : 'opacity-0'/)
+})
+
+test('fullscreen header eye button shows and hides artwork details as one group', () => {
+  const fullscreen = readFileSync(new URL('../src/components/FullscreenPlayer.jsx', import.meta.url), 'utf8')
+  assert.match(fullscreen, /const \[trackDetailsVisible, setTrackDetailsVisible\] = useState\(true\)/)
+  assert.match(fullscreen, /data-fullscreen-details-toggle/)
+  assert.match(fullscreen, /onClick=\{\(\) => setTrackDetailsVisible\(visible => !visible\)\}/)
+  assert.match(fullscreen, /trackDetailsVisible \? <EyeOff size=\{15\} \/> : <Eye size=\{15\} \/>/)
+  assert.ok(fullscreen.indexOf('data-fullscreen-details-toggle') < fullscreen.indexOf('onClick={toggleScreen}'),
+    'eye toggle must be adjacent to the monitor fullscreen button in the same header action group')
+
+  for (const marker of ['data-fullscreen-quality-tag', 'data-fullscreen-track-seekbar',
+    'data-fullscreen-track-metadata']) {
+    assert.match(fullscreen, new RegExp(marker + '[^\\n]*aria-hidden=\\{!trackDetailsVisible\\}'),
+      marker + ' should hide accessibly when details are disabled')
+  }
+  assert.match(fullscreen, /data-fullscreen-track-seekbar="" aria-hidden=\{!trackDetailsVisible\} inert=\{!trackDetailsVisible\}/)
+  const meta = fullscreen.slice(fullscreen.indexOf('data-fullscreen-track-metadata'), fullscreen.indexOf('</motion.div>', fullscreen.indexOf('data-fullscreen-track-metadata')))
+  assert.match(meta, /\{currentTrack\?\.title/)
+  assert.match(meta, /\{currentTrack\?\.artist/)
+  assert.match(meta, /\{currentTrack\.album\}/)
+
+  const tag = fullscreen.slice(fullscreen.indexOf('data-fullscreen-quality-tag'), fullscreen.indexOf('</div>', fullscreen.indexOf('data-fullscreen-quality-tag')))
+  assert.doesNotMatch(tag, /chromeHidden|chromeFade/,
+    'quality badge must stay visible after mouse-idle timeout')
+  const seek = fullscreen.slice(fullscreen.indexOf('data-fullscreen-track-seekbar'), fullscreen.indexOf('</div>', fullscreen.indexOf('data-fullscreen-track-seekbar')))
+  assert.doesNotMatch(seek, /chromeHidden/,
+    'seek bar must be controlled by eye toggle, not idle mouse')
+  assert.doesNotMatch(meta, /chromeHidden/,
+    'title, artist and album must be controlled by eye toggle, not idle mouse')
+  assert.match(fullscreen, /className=\{\x60pointer-events-none z-20 flex h-0/,
+    'badge should not add layout height or make the cover jump when toggled')
 })
