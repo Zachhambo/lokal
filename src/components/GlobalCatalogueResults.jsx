@@ -6,12 +6,11 @@ import { playRecommendationPool } from '../recommendationPlayback'
 import { resolveOnline, downloadOnline } from '../onlineActions'
 import { addToPlaylistMany, addToQueueMany, playNextMany } from '../trackActions'
 import { openRadio } from '../radioActions'
-import { artistPath } from '../releaseActions'
+import { artistIdFromName } from '../artistId'
 import { useAppStore, usePlayerStore } from '../store/player'
 import ContextMenu, { useContextMenu } from './ContextMenu'
 import { showToast, showLoadingToast } from './Toaster'
 import { onlineAlbumPath } from '../onlineBrowse'
-import { useSearchStore } from '../store/search'
 import QualityImage from './QualityImage'
 import SearchArtistPortrait from './SearchArtistPortrait'
 import { includesResultCategory, mergeSearchArtists, mergeSearchAlbums } from '../searchResultCategory.mjs'
@@ -127,6 +126,11 @@ export default function GlobalCatalogueResults({
     usePlayerStore.getState().setLiked(track.id, liked)
     showToast(liked ? 'Added to Liked Songs' : 'Removed from Liked Songs')
   })
+  const navigateGlobalArtist = rawName => {
+    const name = String(rawName || '').trim()
+    if (!name) return
+    nav(`/artist/${artistIdFromName(name)}`, { state: { name } })
+  }
   const openSongMenu = (event, song) => menu.open(event, [
     { label: 'Play', icon: Play, onSelect: () => play(song) },
     { label: 'Play next', icon: Clock, onSelect: () => withResolvedSong(song, track => playNextMany([track])) },
@@ -137,7 +141,7 @@ export default function GlobalCatalogueResults({
     { label: 'Download song', icon: Download, onSelect: () => downloadOnline([song]) },
     { separator: true },
     song.album && { label: 'Go to album', icon: Disc3, onSelect: () => nav(onlineAlbumPath({ artist: song.artist, album: song.album }), { state: { artwork: song.artwork_url } }) },
-    song.artist && { label: 'Go to artist', icon: User, onSelect: () => nav(artistPath(song.artist), { state: { name: song.artist } }) },
+    song.artist && { label: 'Go to artist', icon: User, onSelect: () => navigateGlobalArtist(song.artist) },
     { label: 'Start radio', icon: Radio, onSelect: () => openRadio(nav, song, useAppStore.getState().user?.id) },
   ])
   const openAlbum = (origin, album) => origin === 'library'
@@ -145,12 +149,12 @@ export default function GlobalCatalogueResults({
     : nav(onlineAlbumPath({ artist: album.artist, album: album.title }), { state: { artwork: album.artwork_url } })
   const openAlbumMenu = (event, origin, album) => menu.open(event, [
     { label: 'Open album', icon: ExternalLink, onSelect: () => openAlbum(origin, album) },
-    (album.artist || album.album_artist) && { label: 'Go to artist', icon: User, onSelect: () => nav(artistPath(album.artist || album.album_artist), { state: { name: album.artist || album.album_artist } }) },
+    (album.artist || album.album_artist) && { label: 'Go to artist', icon: User, onSelect: () => navigateGlobalArtist(album.artist || album.album_artist) },
     { label: 'Start album radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'album', title: album.title, artist: album.artist || album.album_artist }, useAppStore.getState().user?.id) },
   ])
   const openArtist = (origin, artist) => origin === 'library'
     ? onLocalArtistClick?.(artist)
-    : useSearchStore.getState().setQuery(artist.title || artist.name)
+    : navigateGlobalArtist(artist.name || artist.title)
   const openArtistMenu = (event, origin, artist) => menu.open(event, [
     { label: 'Open artist', icon: ExternalLink, onSelect: () => openArtist(origin, artist) },
     { label: 'Start artist radio', icon: Radio, onSelect: () => openRadio(nav, { type: 'artist', artist: artist.name || artist.title }, useAppStore.getState().user?.id) },
