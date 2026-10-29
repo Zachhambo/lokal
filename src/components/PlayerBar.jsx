@@ -391,7 +391,7 @@ export default function PlayerBar() {
                         {streamLabel(currentTrack)}
                       </span>
                       {quality && <span title={nativeAtmosHint || `Source-reported catalogue quality: ${quality.info.label}${quality.format ? ` (${quality.format})` : ''}. Actual stream may differ.`}
-                        className={`rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase ${quality.info.className}`}>
+                        className={`inline-block max-w-[200px] truncate align-middle rounded-full border px-1.5 py-px text-[9px] font-semibold ${quality.info.className}`}>
                         {qualityDisplay}
                       </span>}
                     </div>
@@ -408,8 +408,8 @@ export default function PlayerBar() {
                 // The Audio Quality page's pill (same colours), what it means on hover.
                 <button onClick={() => nav('/quality', { state: { tier: qualityTier } })}
                   title={`${quality.info.label}: ${quality.info.desc}${quality.format ? ` (${quality.format})` : ''}${quality.info.hint ? `\n${quality.info.hint}` : ''}`}
-                  aria-label={`Audio quality: ${quality.info.label}, ${quality.info.desc}`}
-                  className={`mt-1 block rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${quality.info.className}`}>
+                  aria-label={`${fullResolutionTags && qualityDisplay !== quality.info.label ? 'Audio resolution' : 'Audio quality'}: ${qualityDisplay}, ${quality.info.desc}`}
+                  className={`mt-1 block w-fit max-w-[200px] truncate rounded-full border px-1.5 py-px text-[9px] font-semibold leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${quality.info.className}`}>
                   {qualityDisplay}
                 </button>
               )}
