@@ -8,7 +8,7 @@ import { artistCreditParts, keepCommaSet } from '../src/artistNames.js'
 const source = readFileSync(new URL('../src/components/TrackList.jsx', import.meta.url), 'utf8')
 
 test('shared TrackList links artist credits and both inline and standalone album columns', () => {
-  assert.match(source, /import ArtistNames from '\.\/ArtistNames'/)
+  assert.match(source, /import ArtistNames, \{ useKeepCommaArtists \} from '\.\/ArtistNames'/)
   assert.match(source, /columns\.artist && <ArtistNames track=\{track\}/)
   assert.match(source, /!layout\.album && <>[\s\S]*?<TrackAlbumLink track=\{track\} navigate=\{navigate\} inline/)
   assert.match(source, /layout\.album && \([\s\S]*?<TrackAlbumLink track=\{track\} navigate=\{navigate\}/)
@@ -28,7 +28,7 @@ test('song right-click actions include both artist and album destinations for on
 
 test('library song album navigation carries artist and highlight into the album page', () => {
   const calls = []
-  const row = { id: 'track-32', title: 'Title', artist: 'Artist', album: 'Album', album_artist: 'Album Artist', artwork_path: '/cover.png' }
+  const row = { id: 'track-32', title: 'Title', artist: 'Artist', album: 'Album', album_artist: 'Album Artist', artwork_path: '/cover.png', file_path: '/music/title.flac' }
   assert.equal(navigateToTrackAlbum((...args) => calls.push(args), row), true)
   assert.equal(calls[0][0], '/albums')
   assert.equal(calls[0][1].state.album.title, 'Album')
@@ -39,7 +39,7 @@ test('library song album navigation carries artist and highlight into the album 
 })
 
 test('song artist navigation preserves comma names and resolves the primary credit', () => {
-  const row = { id: 'track-33', title: 'Title', artist: 'Earth, Wind & Fire', album: 'I Am' }
+  const row = { id: 'track-33', title: 'Title', artist: 'Earth, Wind & Fire', album: 'I Am', file_path: '/music/title.flac' }
   const primaryName = trackArtistParts(row, keepCommaSet()).find(part => part.artist)?.artist
   assert.equal(primaryName, 'Earth, Wind & Fire')
   const calls = []
@@ -47,7 +47,7 @@ test('song artist navigation preserves comma names and resolves the primary cred
   assert.equal(calls[0][0], '/artist/a-earth-wind-fire')
   assert.equal(calls[0][1].state.name, 'Earth, Wind & Fire')
 
-  const collaboration = { id: 'track-44', title: 'Collab', artist: 'Main Artist (feat. Guest Singer)' }
+  const collaboration = { id: 'track-44', title: 'Collab', artist: 'Main Artist (feat. Guest Singer)', file_path: '/music/collab.flac' }
   const main = trackArtistParts(collaboration, keepCommaSet()).find(part => part.artist)?.artist
   assert.equal(main, 'Main Artist')
   const collabCalls = []
@@ -56,7 +56,7 @@ test('song artist navigation preserves comma names and resolves the primary cred
 })
 
 test('artist-credit links can navigate each featured performer, not play the row', () => {
-  const row = { id: 'track-34', title: 'Some Song', artist: 'Main Artist (feat. Guest Singer)' }
+  const row = { id: 'track-34', title: 'Some Song', artist: 'Main Artist (feat. Guest Singer)', file_path: '/music/track.flac' }
   const parts = artistCreditParts(row.artist, keepCommaSet())
   assert.deepEqual(parts.filter(part => part.artist).map(part => part.artist), ['Main Artist', 'Guest Singer'])
   const calls = []
