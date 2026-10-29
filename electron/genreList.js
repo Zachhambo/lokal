@@ -44,6 +44,11 @@ function inferredGenreFamily(raw) {
   let result = null
   for (const [family, hints] of NORMALIZED_HINTS) {
     if (!hints.some(hint => padded.includes(' ' + hint + ' '))) continue
+    // "indie" and "alternative" usually modify the actual genre
+    // (e.g. "experimental indie shoegaze"). They are only a fallback
+    // family when no stronger musical style was recognized.
+    if (family === 'Indie / Alternative' && result) continue
+    if (result === 'Indie / Alternative') { result = family; continue }
     if (result && result !== family) return null
     result = family
   }
