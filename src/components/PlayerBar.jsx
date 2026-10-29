@@ -20,7 +20,8 @@ import Modal from './Modal'
 import AudioPipelineModal from './AudioPipelineModal'
 import { trackArtURL, isStreamed, streamLabel } from '../onlineTracks'
 import SaveToLibraryButton from './SaveToLibraryButton'
-import { TIERS, formatLabel, isSuspect, tierOf, losslessMenuItem } from '../quality'
+import { TIERS, formatLabel, qualityTagLabel, isSuspect, tierOf, losslessMenuItem } from '../quality'
+import { useFullResolutionTags } from '../resolutionTagPreferences'
 import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import AudioOutputPicker from './AudioOutputPicker'
 import MixingMark from './MixingMark'
@@ -52,6 +53,7 @@ function fmt(s) { return `${Math.floor((s||0)/60)}:${Math.floor((s||0)%60).toStr
 export default function PlayerBar() {
   const { t } = useTranslation()
   const glass = useAppearanceFlag('glass_player_bar')
+  const fullResolutionTags = useFullResolutionTags()
   const showWaveform = useAppearanceFlag('player_waveform')
   const [playerVisualizer, setPlayerVisualizer] = useState(() => peekSettings()?.player_visualizer || null)
   const visualizerRequest = useRef(0)
@@ -309,6 +311,7 @@ export default function PlayerBar() {
   const quality = qualityTier !== 'unknown'
     ? { info: TIERS[qualityTier], format: nativeAtmos ? 'E-AC-3 JOC' : formatLabel(currentTrack) }
     : null
+  const qualityDisplay = quality && qualityTagLabel(currentTrack, qualityTier, fullResolutionTags)
   const nativeAtmosHint = nativeAtmos
     ? isBuffering || !isPlaying
       ? 'Dolby Atmos source selected; native output not yet playing.'
@@ -388,8 +391,8 @@ export default function PlayerBar() {
                         {streamLabel(currentTrack)}
                       </span>
                       {quality && <span title={nativeAtmosHint || `Source-reported catalogue quality: ${quality.info.label}${quality.format ? ` (${quality.format})` : ''}. Actual stream may differ.`}
-                        className={`rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase ${quality.info.className}`}>
-                        {quality.info.label}
+                        className={`inline-block max-w-[200px] truncate align-middle rounded-full border px-1.5 py-px text-[9px] font-semibold ${quality.info.className}`}>
+                        {qualityDisplay}
                       </span>}
                     </div>
                   )}
@@ -405,9 +408,9 @@ export default function PlayerBar() {
                 // The Audio Quality page's pill (same colours), what it means on hover.
                 <button onClick={() => nav('/quality', { state: { tier: qualityTier } })}
                   title={`${quality.info.label}: ${quality.info.desc}${quality.format ? ` (${quality.format})` : ''}${quality.info.hint ? `\n${quality.info.hint}` : ''}`}
-                  aria-label={`Audio quality: ${quality.info.label}, ${quality.info.desc}`}
-                  className={`mt-1 block rounded-full border px-1.5 py-px text-[9px] font-semibold uppercase leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${quality.info.className}`}>
-                  {quality.info.label}
+                  aria-label={`${fullResolutionTags && qualityDisplay !== quality.info.label ? 'Audio resolution' : 'Audio quality'}: ${qualityDisplay}, ${quality.info.desc}`}
+                  className={`mt-1 block w-fit max-w-[200px] truncate rounded-full border px-1.5 py-px text-[9px] font-semibold leading-[14px] tracking-wide transition-opacity hover:opacity-80 ${quality.info.className}`}>
+                  {qualityDisplay}
                 </button>
               )}
             </motion.div>

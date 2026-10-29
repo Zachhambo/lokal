@@ -2,6 +2,7 @@
 // electron/quality/index.js).
 
 import { peekSettings } from './api'
+import { measuredResolutionLabel } from './resolutionLabel.mjs'
 
 const OPUS_LIKE = /^(?:opus|vorbis)/i
 
@@ -16,6 +17,7 @@ export function codecName(codec) {
   if (/vorbis/i.test(c)) return 'Vorbis'
   if (/alac/i.test(c)) return 'ALAC'
   if (/flac/i.test(c)) return 'FLAC'
+  if (/wavpack/i.test(c)) return 'WavPack'
   if (/pcm|wave?/i.test(c)) return 'WAV'
   if (/aiff/i.test(c)) return 'AIFF'
   if (/wavpack/i.test(c)) return 'WavPack'
@@ -81,6 +83,21 @@ export function formatLabel(track) {
     return detail ? `${name} · ${detail}` : name
   }
   return track.bitrate ? `${name} · ${track.bitrate} kbps` : name
+}
+
+/**
+ * Detailed *source* resolution for optional song badges. Match Mobile's
+ * lokalSongResolutionLabel: never invent a lossy PCM bit depth, codec-only
+ * labels aren't enough to replace a quality tier, and missing readings fall
+ * back to the existing tier. These are file/source facts, not output claims.
+ */
+export function fullResolutionLabel(track) {
+  return measuredResolutionLabel(track, codecName(track?.codec))
+}
+
+/** Tier remains the fallback if the full resolution has not been read yet. */
+export function qualityTagLabel(track, tier, fullResolution = false) {
+  return (fullResolution ? fullResolutionLabel(track) : null) || TIERS[tier]?.label || null
 }
 
 /** What the spectrum check found, in words (null if not checked). */
