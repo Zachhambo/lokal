@@ -175,10 +175,10 @@ class PackageService {
    */
   async ensureBundledAmazonNew() {
     const existing = this.find(keyOf('amazon-new'))
-    if (existing && compareVersions(existing.manifest.version, '2.3.15') >= 0) return existing
+    if (existing && compareVersions(existing.manifest.version, '2.3.16') >= 0) return existing
     const bytes = await fsp.readFile(path.join(__dirname, 'bundled', 'amazon-new.sflx'))
     const checksum = crypto.createHash('sha256').update(bytes).digest('hex')
-    if (checksum !== 'ae1ac4dbeb9028939e39bda1a58fabaedf41e8adc37b9b3fc61ee10c9a5bdca7') {
+    if (checksum !== '967bc8cf940cf39029ef7e33f55bf37c5f686028332570ef484579ebc75c5543') {
       throw new Error('Bundled Amazon (New) archive checksum mismatch')
     }
     return this.install({ buffer: bytes })
