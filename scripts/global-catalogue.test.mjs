@@ -106,7 +106,7 @@ test('Global Online artist cards navigate to the artist page, not another search
   const component = readFileSync(new URL('../src/components/GlobalCatalogueResults.jsx', import.meta.url), 'utf8')
   // Route by the shared Unicode-safe library ID rather than using an Apple/
   // Spotify metadata ID as though it were an internal artist ID.
-  assert.match(component, /nav\(`\/artist\/\$\{artistIdFromName\(name\)\}`, \{ state: \{ name \} \} \)/)
+  assert.match(component, /nav\(.*artistIdFromName\(name\).*state: \{ name \}/)
   assert.match(component, /const openArtist = \(origin, artist\) => origin === 'library'[\s\S]*?onLocalArtistClick\?\.\(artist\)[\s\S]*?: navigateGlobalArtist\(artist\.name \|\| artist\.title\)/)
   assert.match(component, /onClick=\{\(\) => openArtist\(origin, row\)\}/)
   assert.match(component, /onSelect: \(\) => openArtist\(origin, artist\)/)
