@@ -1,7 +1,7 @@
 // An Atmos edition is a separate user action, not the configured stereo tier.
 // Validate the advertised mode before saving; pin to the same Mornye addon.
 import { api } from './api.js'
-import { atmosAvailable } from './quality.js'
+import { atmosRequestable } from './quality.js'
 import { isAddonProvider, streamRef, saveToLibrary } from './onlineTracks.js'
 
 export function atmosDownloadRef(track, source = null) {
@@ -9,7 +9,7 @@ export function atmosDownloadRef(track, source = null) {
     (track?.provider && track?.id != null
       ? { provider: track.provider, id: String(track.id) } : null)
   return ref && isAddonProvider(ref.provider) && String(ref.id || '')
-    && atmosAvailable(track) ? ref : null
+    && atmosRequestable(track) ? ref : null
 }
 
 /** A result may not yet be saved as a queue ghost; onlineSave pins its exact
