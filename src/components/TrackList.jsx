@@ -31,8 +31,9 @@ import QualityImage from './QualityImage'
 import { playRecommendationPool } from '../recommendationPlayback'
 import { playbackFallbackMessage } from '../recommendations'
 import { navigateToTrackAlbum } from '../playbackContext'
-import { navigateToTrackArtist } from '../artistLink'
-import ArtistNames from './ArtistNames'
+import { navigateToArtistName, trackArtistParts } from '../artistLink'
+import { keepCommaSet } from '../artistNames'
+import ArtistNames, { useKeepCommaArtists } from './ArtistNames'
 import { downloadGhostResult as queueGhostResult, ghostDownloadSuggestions, redownloadMissingTrack } from '../ghostDownloads'
 import HoverScrollTitle from './HoverScrollTitle'
 import { useGhostDownloadSources } from './useGhostDownloadSources'
@@ -124,6 +125,7 @@ function TrackAlbumLink({ track, navigate, className = '', fallback = '—', inl
 
 export default function TrackList({ tracks = [], showQuality = false, onRemove = null, showPlayNext = true, showAddToQueue = true, playlistId = null, onReorder = null, onQuickAdd = null, reduceMotion = false, context = null, highlightTrackId = null, highlightRequestKey = null, extraColumns = [], resolveTracks = null, sort = null, onSortChange = null, trackNumbers = null, toolbarStart = null }) {
   const { t } = useTranslation()
+  const keepCommaArtists = useKeepCommaArtists()
   const resolvedPlaybackRef = useRef(0)
   const resolvedToastRef = useRef(null)
   useEffect(() => () => { resolvedPlaybackRef.current++; resolvedToastRef.current?.close() }, [])
@@ -617,6 +619,15 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
    * lossless, save, quick add), so on a narrow page, where those buttons only
    * show on hover, the ⋯ button (and a right click) still reaches them all.
    */
+  const openTrackArtist = track => {
+    // Use the same configurable credit splitting as the visible artist
+    // links: both "Earth, Wind & Fire" and "Main (feat. Guest)" must open
+    // their actual primary artist, not a comma-cut or unsplit credit.
+    const firstArtist = trackArtistParts(track, keepCommaSet(keepCommaArtists))
+      .find(part => part.artist)?.artist
+    return navigateToArtistName(navigate, track, firstArtist || track?.artist)
+  }
+
   const openTrackMenu = (event, track) => {
     setMenuFor(null) // a right click; the ⋯ marks its row after this
     const ids = selection.contextSelect(track.id)
@@ -644,7 +655,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
       !one && losslessManyMenuItem(list, Gem),
       { separator: true },
       one?.album && { label: 'Go to album', icon: Disc3, onSelect: () => navigateToTrackAlbum(navigate, one) },
-      one?.artist && { label: 'Go to artist', icon: User, onSelect: () => navigateToTrackArtist(navigate, one) },
+      one?.artist && { label: 'Go to artist', icon: User, onSelect: () => openTrackArtist(one) },
       !resolveTracks && (one ? { label: 'Edit info', icon: Edit2, onSelect: () => setEditingTrack(one) } : { label: `Edit${count}`, icon: Edit2, onSelect: () => setShowBatchEdit(true) }),
       one && !resolveTracks && api.isElectron && !oneGhost && !isStreamed(one) && one.file_path && !String(one.file_path).startsWith('ghost://') && { label: 'Open in file manager', icon: FolderOpen, onSelect: () => api.showItemInFolder(one.file_path) },
       !resolveTracks && one && api.isElectron && { label: 'Replace artwork', icon: Camera, onSelect: () => replaceArtwork(one, { stopPropagation() {} }) },
