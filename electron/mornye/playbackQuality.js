@@ -9,7 +9,8 @@ function isAtmosQuality(value) {
 
 function stereoPlaybackQuality(addon, settings = {}) {
   const configured = settings.downloadQuality
-  if (!isAtmosQuality(configured)) return configured || undefined
+  const selected = (addon?.manifest?.qualityOptions || []).find(opt => opt.id === configured)
+  if (!isAtmosQuality(configured) && selected?.kind !== 'spatial') return configured || undefined
   const options = addon?.manifest?.qualityOptions || []
   const stereo = options.filter(opt => opt?.id && !isAtmosQuality(opt.id) &&
     !isAtmosQuality(opt.kind) && !isAtmosQuality(opt.name) &&
@@ -43,7 +44,8 @@ function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = fals
     return offered.id
   }
   if (quality) return quality
-  if (settings.downloadQuality && !isAtmosQuality(settings.downloadQuality)) return settings.downloadQuality
+  const savedOption = (addon?.manifest?.qualityOptions || []).find(opt => opt.id === settings.downloadQuality)
+  if (settings.downloadQuality && !isAtmosQuality(settings.downloadQuality) && savedOption?.kind !== 'spatial') return settings.downloadQuality
   const available = (addon?.manifest?.qualityOptions || []).filter(q => q?.id &&
     q.kind !== 'spatial' && ![q.id, q.name, q.label, q.kind].some(isAtmosQuality))
   const preferred = available.find(q => String(q.id).toUpperCase() === 'HI_RES_LOSSLESS') ||
