@@ -9,6 +9,24 @@ const require = createRequire(import.meta.url)
 const { targetFolder, placeDownload } = require('../electron/downloadFolder.js')
 const { DatabaseSync } = require('node:sqlite')
 
+test('AC-4 folder placement preserves bytes and its edition suffix on name collisions', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-ac4-folder-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const db = new DatabaseSync(':memory:')
+  t.after(() => db.close())
+  db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+  const original = Buffer.from('synthetic encoded AC-4 MP4 bytes')
+  for (let i = 0; i < 2; i++) {
+    const source = path.join(root, 'song.ac4.m4a')
+    fs.writeFileSync(source, original)
+    const placed = placeDownload(db, source, 'Downloads', {}, root)
+    assert.equal(placed.error, undefined)
+    assert.equal(placed.trackNum, null)
+    assert.equal(path.basename(placed.filePath), i ? 'song (2).ac4.m4a' : 'song.ac4.m4a')
+    assert.deepEqual(fs.readFileSync(placed.filePath), original)
+  }
+})
+
 function mp3(filePath) {
   const frame = Buffer.alloc(417)
   frame.set([0xff, 0xfb, 0x90, 0x64])

@@ -1,7 +1,7 @@
 // Audio quality of a track, for display (the backend keeps the same tiers,
 // electron/quality/index.js).
 
-import { peekSettings } from './api'
+import { peekSettings } from './api.js'
 import { measuredResolutionLabel } from './resolutionLabel.mjs'
 
 const OPUS_LIKE = /^(?:opus|vorbis)/i

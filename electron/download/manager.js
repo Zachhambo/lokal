@@ -16,6 +16,7 @@
 //     while yt-dlp carries on with the next one.
 
 const { spawn } = require('child_process')
+const { AC4_CODEC_SQL } = require('../quality/editionDuplicates')
 const path = require('path')
 const os = require('os')
 const fs = require('fs-extra')
@@ -313,7 +314,7 @@ class DownloadManager {
   /** The library track downloaded from the online song `ref`, or null. */
   libraryTrackWithRef(ref, { atmos = false } = {}) {
     try {
-      const track = this.db().prepare("SELECT id, title, file_path, atmos_verified FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' AND COALESCE(atmos_verified, 0) = ? LIMIT 1").get(ref, atmos ? 1 : 0)
+      const track = this.db().prepare(`SELECT id, title, file_path, atmos_verified FROM tracks WHERE source_ref = ? AND file_path NOT LIKE 'ghost://%' AND ((COALESCE(atmos_verified, 0) = 1 OR (${AC4_CODEC_SQL})) = ?) LIMIT 1`).get(ref, atmos ? 1 : 0)
       return track && fs.existsSync(track.file_path) ? track : null
     } catch { return null }
   }
@@ -1078,8 +1079,9 @@ class DownloadManager {
       const outputDir = require('../storageLocations').downloadDirectory(job.settings, job.opts.outputDir)
       fs.ensureDirSync(outputDir)
       const title = String(job.title || 'Addon Track').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0,180)
+      // M4A retains the MP4 container and is recognized by the library scanner.
       const ext = job.opts.explicitAtmosDownload
-        ? (artifact.info?.codec === 'ac4' ? '.ac4.mp4' : '.atmos.m4a')
+        ? (artifact.info?.codec === 'ac4' ? '.ac4.m4a' : '.atmos.m4a')
         : path.extname(artifact.file)
       let target = path.join(outputDir, `${title}${ext}`)
       for (let suffix = 1; fs.existsSync(target); suffix++) target = path.join(outputDir, `${title} (${suffix})${ext}`)

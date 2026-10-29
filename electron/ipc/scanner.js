@@ -2073,7 +2073,7 @@ async function indexSingleFile(filePath, opts = {}) {
   // imports where the scanner is invoked before the normal quality migration).
   quality.ensureColumns(db)
   const dupe = findAudioEditionDuplicate(db, {
-    title, artist, album, duration, atmosVerified: audioQuality.atmos_verified,
+    title, artist, album, duration, atmosVerified: audioQuality.atmos_verified, codec: audioQuality.codec,
   })
   if (dupe) {
     // A previous download may have left its database row behind after the

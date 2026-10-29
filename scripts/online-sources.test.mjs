@@ -21,6 +21,7 @@ function tracksDatabase() {
       year INTEGER,
       genre TEXT,
       duration REAL,
+      bitrate INTEGER,
       source_url TEXT,
       artwork_url TEXT,
       last_modified INTEGER

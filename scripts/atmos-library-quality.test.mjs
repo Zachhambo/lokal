@@ -9,7 +9,7 @@ const { atmosProbeCandidate, hasAtmosJocProfile, probeAtmosFile } = require('../
 const backend = require('../electron/quality')
 const { findAudioEditionDuplicate } = require('../electron/quality/editionDuplicates')
 const source = readFileSync(new URL('../src/quality.js', import.meta.url), 'utf8')
-  .replace("import { peekSettings } from './api'", 'const peekSettings = () => ({})')
+  .replace("import { peekSettings } from './api.js'", 'const peekSettings = () => ({})')
   // A data: URL cannot resolve relative imports. This test only exercises
   // the quality/Atmos tiers, not the resolution-label module itself.
   .replace("import { measuredResolutionLabel } from './resolutionLabel.mjs'", 'const measuredResolutionLabel = () => null')
@@ -113,9 +113,9 @@ test('duplicate matching treats stereo and verified Atmos as distinct library ed
   try {
     db.exec(`CREATE TABLE tracks (
       id TEXT PRIMARY KEY, title TEXT, artist TEXT, album TEXT,
-      duration REAL, file_path TEXT, atmos_verified INTEGER
+      duration REAL, file_path TEXT, atmos_verified INTEGER, codec TEXT
     )`)
-    const insert = db.prepare('INSERT INTO tracks VALUES (?, ?, ?, ?, ?, ?, ?)')
+    const insert = db.prepare('INSERT INTO tracks (id, title, artist, album, duration, file_path, atmos_verified) VALUES (?, ?, ?, ?, ?, ?, ?)')
     insert.run('stereo', 'To You', 'Muttonheads', 'Album', 203,
       '/music/stereo.flac', 0)
     const wanted = { title: 'To You', artist: 'Muttonheads', album: 'Album', duration: 203 }
@@ -127,6 +127,18 @@ test('duplicate matching treats stereo and verified Atmos as distinct library ed
     insert.run('atmos', 'To You', 'Muttonheads', 'Album', 203,
       '/music/joc.atmos.m4a', 1)
     assert.equal(findAudioEditionDuplicate(db, { ...wanted, atmosVerified: 1 })?.id, 'atmos')
+    assert.equal(findAudioEditionDuplicate(db, { ...wanted, codec: 'AC-4' }), undefined,
+      'neither stereo nor JOC may satisfy an AC-4 download')
+    db.prepare('INSERT INTO tracks VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      'ac4', 'To You', 'Muttonheads', 'Album', 203, '/music/song.ac4.mp4', null, 'AC-4')
+    assert.equal(findAudioEditionDuplicate(db, { ...wanted, codec: 'ac4' })?.id, 'ac4')
+    assert.equal(findAudioEditionDuplicate(db, { ...wanted, codec: 'FLAC' })?.id, 'stereo')
+    const measured = backend.qualityFields({ format: {
+      container: 'M4A', trackInfo: [{ codecName: '<ac-4>' }],
+    } })
+    assert.equal(measured.codec, 'AC-4')
+    assert.equal(measured.atmos_verified, null)
+    assert.notEqual(frontend.tierOf(measured), 'atmos')
     assert.equal(findAudioEditionDuplicate(db, { ...wanted, atmosVerified: 0 })?.id, 'stereo')
     insert.run('ghost', 'To You', 'Muttonheads', 'Album', 203,
       'ghost://addon/123/song', 1)

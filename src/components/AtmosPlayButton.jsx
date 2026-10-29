@@ -6,14 +6,15 @@ import { usePlayerStore } from '../store/player'
 // The HDMI route uses mpv compressed passthrough. Headphones use native
 // Windows MediaPlayer/Media Foundation with the installed Spatial Sound engine.
 export default function AtmosPlayButton({ track, onPlay }) {
-  const amazonAc4 = !!track?.atmos_requestable
+  const amazonAc4 = track?.atmos_requestable === true || Number(track?.atmos_requestable) === 1
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState(() => {
-    try { return track?.atmos_requestable ? 'headphones' : (localStorage.getItem('lokal-atmos-output-mode') === 'headphones' ? 'headphones' : 'hdmi') }
-    catch { return track?.atmos_requestable ? 'headphones' : 'hdmi' }
+  const [preferredMode, setMode] = useState(() => {
+    try { return localStorage.getItem('lokal-atmos-output-mode') === 'headphones' ? 'headphones' : 'hdmi' }
+    catch { return 'hdmi' }
   })
+  const mode = amazonAc4 ? 'headphones' : preferredMode
   const [setupOpen, setSetupOpen] = useState(false)
   const [capability, setCapability] = useState(null)
   const [devices, setDevices] = useState([])
@@ -139,7 +140,8 @@ export default function AtmosPlayButton({ track, onPlay }) {
   }
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
+    <span className="inline-flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}
+      onDoubleClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
       <button type="button" disabled={busy} onClick={start}
         title={amazonAc4
           ? 'Try Amazon AC-4 using the installed Windows Media Foundation decoder. Atmos rendering is unverified.'

@@ -20,6 +20,7 @@ const { spawn, execFileSync } = require('child_process')
 const LOSSLESS_CODEC = /^(?:ALAC|APE|Monkey|WavPack|TTA|DSD|DST|MLP|TrueHD|FLAC|PCM|WAVE?|AIFF)/i
 const OPUS_LIKE = /^(?:opus|vorbis)/i
 const { probeAtmosFile } = require('./atmos')
+const { isAc4Codec } = require('./editionDuplicates')
 
 // ---------------------------------------------------------------- reading
 
@@ -33,7 +34,10 @@ function normalizeIsrc(value) {
 /** The quality fields of a file, from music-metadata's result. */
 function qualityFields(meta) {
   const format = meta?.format || {}
-  const codec = String(format.codec || format.container || '').trim() || null
+  // music-metadata reports unknown MP4 sample entries in trackInfo. AC-4
+  // is currently one of these; retain its measured codec instead of 'M4A'.
+  const ac4 = format.trackInfo?.some(track => isAc4Codec(track?.codecName))
+  const codec = ac4 ? 'AC-4' : String(format.codec || format.container || '').trim() || null
   const lossless = format.lossless === true || LOSSLESS_CODEC.test(codec || '')
   return {
     codec,

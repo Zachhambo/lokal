@@ -27,8 +27,6 @@ import AtmosPlayButton from './AtmosPlayButton'
 import { atmosDownloadRef, downloadAtmosVersion } from '../atmosDownloads'
 import { useTranslation } from '../i18n'
 
-let onlineDolbyRequestSerial = 0
-
 /** A song to tell its album or artist by (an addon's own result, when it's from one). */
 const anchorOf = track => {
   const ref = streamRef(track) || (/^a-/.test(track.provider || '') ? { provider: track.provider, id: track.id } : null)
@@ -93,7 +91,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
     })
     const target = queue[selectedIndex]
     if (!target || !streamRef(target)) return { error: 'Could not prepare the selected Dolby source' }
-    const requestId = ++onlineDolbyRequestSerial
+    const requestId = crypto.randomUUID()
     queue[selectedIndex] = {
       ...target,
       atmosNative: true,
@@ -113,13 +111,19 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
         current.atmosProvider === source.provider &&
         current.atmosSourceId === String(source.id)
     }
-    await awaitAtmosOutputRelease()
-    if (!selected()) return { error: 'Dolby request was superseded by another song' }
-    const result = await api.atmosPlay(source.provider, String(source.id), device, mode)
-    if (!result?.ok && selected()) {
-      usePlayerStore.setState({ isPlaying: false, isBuffering: false })
+    try {
+      await awaitAtmosOutputRelease()
+      if (!selected()) return { error: 'Dolby request was superseded by another song' }
+      const result = await api.atmosPlay(source.provider, String(source.id), device, mode)
+      if (!result?.ok && selected()) {
+        usePlayerStore.setState({ isPlaying: false, isBuffering: false })
+      }
+      if (!selected()) return { error: 'Dolby request was superseded by another song' }
+      return result || { error: 'Windows native Dolby output was refused' }
+    } catch (error) {
+      if (selected()) usePlayerStore.setState({ isPlaying: false, isBuffering: false })
+      return { error: error?.message || String(error) }
     }
-    return result || { error: 'Windows native Dolby output was refused' }
   }
 
   const withResolved = async (track, action) => {
