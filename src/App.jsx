@@ -2,7 +2,8 @@ import { NativeAudioBridge, readOutputPreferences, saveOutputPreferences } from 
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { effectiveReplayGainMode, replayGainMultiplier } from './audio/replayGain.mjs'
 import { readCrossfadeSettings, fadeCurve, crossfadeDurations, CROSSFADE_MIN_S } from './audio/crossfade'
-import { planTransition, AUTOMIX_PRELOAD_S } from './audio/automix'
+import { planTransition, AUTOMIX_PRELOAD_S, albumContinues } from './audio/automix'
+import { shouldPrepareGapless, gaplessHandoffPlan } from './audio/gapless'
 import { eligibleStemTransition, createStemPlayback } from './audio/stemPlayback'
 
 // handleTimeUpdate's AutoMix: a pair whose plan failed crossfades this long.
@@ -2538,6 +2539,12 @@ export default function App() {
           if (!isCrossfadingRef.current || token !== crossfadeTokenRef.current) return
           const cueStart = preparedStemClip?.outStart ?? plan.start
           const left = cueStart - fadeOutEl.currentTime
+          // A paused song must not hand off simply because the preparation
+          // timer fired. Poll the media clock until playback resumes.
+          if (!usePlayerStore.getState().isPlaying || (fadeOutEl.paused && !fadeOutEl.ended)) {
+            crossfadeTimeoutRef.current = setTimeout(waitForStart, 120)
+            return
+          }
           if (left <= 0.03 || fadeOutEl.ended) { beginCrossfade(); return }
           crossfadeTimeoutRef.current = setTimeout(waitForStart, Math.min(250, Math.max(5, left * 1000 / (fadeOutEl.playbackRate || 1) - 8)))
         }
@@ -3058,6 +3065,18 @@ export default function App() {
               !nextTrack.atmosNative && Math.abs(playbackSpeed() - 1) < 1e-4) {
             preparedStemFor(current, nextTrack)
           }
+          // Album continuation is supposed to be unaltered by AutoMix.
+          // Its old null plan delayed opening the next file until `ended`,
+          // making (JFK) -> Defector audibly pause between continuous tracks.
+          if (plan === null && shouldPrepareGapless({
+            mode: 'automix', sameAlbum: albumContinues(current, nextTrack),
+            current, next: nextTrack, remaining,
+            playing: state.isPlaying, repeat: state.repeat,
+            autoplay: localStorage.getItem('lokal-autoplay') !== '0',
+            localCurrent: !!current.file_path && !streamRef(current) && !!audioSrcFor(current),
+            localNext: !!nextTrack.file_path && !streamRef(nextTrack) && !!audioSrcFor(nextTrack),
+            castActive: state.castActive,
+          })) triggerCrossfade(nextTrack, gaplessHandoffPlan(dur))
           if (plan === AUTOMIX_FALLBACK) {
             // Planning failed or was too slow: an ordinary crossfade instead.
             if (remaining <= Math.max(CROSSFADE_MIN_S, state.crossfade?.fadeOut || cf || AUTOMIX_FALLBACK_S)) triggerCrossfade(nextTrack)
@@ -3075,6 +3094,19 @@ export default function App() {
       }
       
       if (nextTrack) triggerCrossfade(nextTrack)
+    } else if (!state.crossfade?.automix && cf <= CROSSFADE_MIN_S && state.repeat !== 'one') {
+      // Transitions Off is not permission for an audible decoder gap. Stage
+      // the next local song on the idle deck while this one finishes.
+      const nextTrack = upcomingTrack(state)
+      const current = currentTrackRef.current
+      if (shouldPrepareGapless({
+        mode: 'off', current, next: nextTrack, remaining,
+        playing: state.isPlaying, repeat: state.repeat,
+        autoplay: localStorage.getItem('lokal-autoplay') !== '0',
+        localCurrent: !!current?.file_path && !streamRef(current) && !!audioSrcFor(current),
+        localNext: !!nextTrack?.file_path && !streamRef(nextTrack) && !!audioSrcFor(nextTrack),
+        castActive: state.castActive,
+      })) triggerCrossfade(nextTrack, gaplessHandoffPlan(dur))
     }
 
     topUpRelated()
