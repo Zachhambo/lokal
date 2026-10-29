@@ -13,6 +13,9 @@ function hasAtmosMetadata(track) {
     track.audio_modes, track.audioModes,
     ...(Array.isArray(track.audio_modes) ? track.audio_modes : []),
     ...(Array.isArray(track.audioModes) ? track.audioModes : []),
+    track.audioQualities, track.audio_qualities,
+    ...(Array.isArray(track.audioQualities) ? track.audioQualities : []),
+    ...(Array.isArray(track.audio_qualities) ? track.audio_qualities : []),
   ]
   return values.some(isAtmosMode)
 }
