@@ -75,6 +75,7 @@ test('gapless staging shares the existing source-aware, cancellable two-deck han
     'transitions Off must stage locally rather than wait for ended')
   assert.match(source, /localNext: !!nextTrack\?\.file_path && !streamRef\(nextTrack\)/,
     'do not prematurely open online sources and verification prompts')
+  assert.match(source, /live\.crossfade\?\.gapless === false/, 'disabling the toggle also cancels a prepared transition')
   assert.match(source, /upcomingTrack\(live\)\?\.id !== nextTrack\.id/,
     'queue edits during preload must cancel the now-stale transition')
   assert.match(source, /fadeInEl\.addEventListener\('canplay', onReady\)/)
