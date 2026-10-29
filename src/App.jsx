@@ -3070,6 +3070,7 @@ export default function App() {
           // making (JFK) -> Defector audibly pause between continuous tracks.
           if (plan === null && shouldPrepareGapless({
             mode: 'automix', sameAlbum: albumContinues(current, nextTrack),
+            enabled: state.crossfade?.gapless !== false,
             current, next: nextTrack, remaining,
             playing: state.isPlaying, repeat: state.repeat,
             autoplay: localStorage.getItem('lokal-autoplay') !== '0',
@@ -3101,6 +3102,7 @@ export default function App() {
       const current = currentTrackRef.current
       if (shouldPrepareGapless({
         mode: 'off', current, next: nextTrack, remaining,
+        enabled: state.crossfade?.gapless !== false,
         playing: state.isPlaying, repeat: state.repeat,
         autoplay: localStorage.getItem('lokal-autoplay') !== '0',
         localCurrent: !!current?.file_path && !streamRef(current) && !!audioSrcFor(current),
