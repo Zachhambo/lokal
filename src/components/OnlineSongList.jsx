@@ -58,8 +58,12 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
         if (capability.available) {
           const state = usePlayerStore.getState()
           if (state.isPlaying) state.togglePlay()
-          const device = localStorage.getItem('lokal-atmos-output-device') || ''
-          const result = await api.atmosPlay(source.provider, String(source.id), device)
+          const amazonAc4 = Number(track.atmos_requestable) === 1
+          // Windows Media Foundation uses the default OS output; mpv's
+          // E-AC-3 HDMI bitstream route is not an AC-4 passthrough path.
+          const device = amazonAc4 ? '' : localStorage.getItem('lokal-atmos-output-device') || ''
+          const result = await api.atmosPlay(source.provider, String(source.id), device,
+            amazonAc4 ? 'headphones' : 'hdmi')
           if (result?.ok) return
           showToast(t("Dolby Atmos couldn't start: {error}. No other source selected.", { error: result?.error || t('output refused') }))
           return
