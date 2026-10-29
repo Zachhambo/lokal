@@ -608,9 +608,15 @@ class PackageService {
         if(processed.new_file_path || processed.newFilePath)file=safePath(runtime.host.root,processed.new_file_path || processed.newFilePath,runtime.host.grants)
       }
       info=await mediaInfo(file,tools,combined)
-      if(downloadingAtmos) {
-        // Verify the actual downloaded audio, not its filename or catalogue
-        // badge. Preserve the compressed JOC bitstream via remux, never FLAC.
+      if(downloadingAtmos && String(chosen).toLowerCase()==='ac4') {
+        // Amazon delivers AC-4 inside MP4. Validate the actual codec after
+        // decryption; never decode, FLAC-convert or remux its presentation.
+        // This verifies AC-4 encoding, not an Atmos object presentation.
+        if(info.codec!=='ac4') throw new Error('Amazon did not return the requested AC-4 audio. No stereo track was substituted.')
+        if(!/\.(?:mp4|m4a)$/i.test(file)) throw new Error('Amazon AC-4 must be delivered in an MP4 container')
+      }
+      if(downloadingAtmos && String(chosen).toLowerCase()!=='ac4') {
+        // Verify E-AC-3 JOC; plain E-AC-3 does not imply Dolby Atmos.
         if(info.codec!=='eac3' || await probeAtmosFile(file,{codec:info.codec,ffprobe:tools.ffprobe})!==1) {
           throw new Error('The addon did not supply verified E-AC-3 JOC Dolby Atmos audio; nothing was saved')
         }
