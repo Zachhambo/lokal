@@ -2,6 +2,7 @@
 // electron/quality/index.js).
 
 import { peekSettings } from './api'
+import { measuredResolutionLabel } from './resolutionLabel.mjs'
 
 const OPUS_LIKE = /^(?:opus|vorbis)/i
 
@@ -90,26 +91,7 @@ export function formatLabel(track) {
  * back to the existing tier. These are file/source facts, not output claims.
  */
 export function fullResolutionLabel(track) {
-  if (!track || String(track.file_path || '').startsWith('ghost://')) return null
-  if (Number(track.atmos_verified) === 1) return 'E-AC-3 JOC · Dolby Atmos'
-  const codec = codecName(track.codec).toUpperCase()
-  const isLossless = Number(track.lossless) === 1 ||
-    /^(?:FLAC|WAV|ALAC|AIFF|AIF|APE|WAVPACK)$/.test(codec)
-  const bits = Number(track.bit_depth)
-  const rate = Number(track.sample_rate)
-  const kbps = Number(track.bitrate)
-  const parts = []
-  if (isLossless && Number.isInteger(bits) && bits >= 8 && bits <= 64) parts.push(`${bits}-bit`)
-  if (Number.isFinite(rate) && rate >= 8000 && rate <= 768000) {
-    const khz = rate / 1000
-    parts.push(`${Number(khz.toFixed(1))} kHz`)
-  }
-  if (!isLossless && Number.isFinite(kbps) && kbps > 0 && kbps <= 10000) {
-    parts.unshift(`${Number(kbps.toFixed(0))} kbps`)
-  }
-  if (!parts.length) return null
-  const knownCodec = codec && !['UNKNOWN', 'ONLINE', 'N/A', 'OTHER'].includes(codec)
-  return [knownCodec ? codec : '', parts.join(' / ')].filter(Boolean).join(' · ')
+  return measuredResolutionLabel(track, codecName(track?.codec))
 }
 
 /** Tier remains the fallback if the full resolution has not been read yet. */
