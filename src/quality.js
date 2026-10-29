@@ -17,6 +17,7 @@ export function codecName(codec) {
   if (/vorbis/i.test(c)) return 'Vorbis'
   if (/alac/i.test(c)) return 'ALAC'
   if (/flac/i.test(c)) return 'FLAC'
+  if (/wavpack/i.test(c)) return 'WavPack'
   if (/pcm|wave?/i.test(c)) return 'WAV'
   if (/aiff/i.test(c)) return 'AIFF'
   if (/wavpack/i.test(c)) return 'WavPack'
