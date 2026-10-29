@@ -73,8 +73,8 @@ test('every song row and compact player use the list option; fullscreen has its 
   assert.match(rows, /fullResolution: fullResolutionTags/)
   assert.match(bar, /const fullResolutionTags = useFullResolutionTags\(\)/)
   assert.match(bar, /qualityTagLabel\(currentTrack, qualityTier, fullResolutionTags\)/)
-  assert.match(fullscreen, /qualityTagLabel\(currentTrack, tier, settings\.resolution_tags_in_full_player === '1'\)/)
-  assert.match(fullscreen, /data-fullscreen-quality-tag[\\s\\S]*?border-white\\/25 bg-white\\/10/,
+  assert.match(fullscreen, /qualityTagLabel\(currentTrack, fullscreenQualityTier, settings\.resolution_tags_in_full_player === '1'\)/)
+  assert.match(fullscreen, /data-fullscreen-quality-tag[\s\S]*?border-white\/25 bg-white\/10/,
     'the white full-resolution tag is anchored above the cover, not under album metadata')
   assert.match(fullscreen, /showFullscreenQuality && \(/)
   assert.match(fullscreen, /fullscreenQualityTier === 'unknown' && fullscreenQualityLabel === 'Not read'/)
