@@ -427,6 +427,13 @@ class PackageService {
   async download(key,id,{signal,onProgress,onLive,quality,purpose='download',allowAtmos=false}={}) {
     const addon=this.find(key);if(!addon||!addon.enabled)throw new Error('Addon is not available')
     const controller=new AbortController(),opId=crypto.randomUUID(),combined=signal?AbortSignal.any([signal,controller.signal]):controller.signal
+    let monitoringTransfer=false,transferStalled=false,inactivityTimer=null,lastPercent=-1,lastPart=null,lastWritten=0
+    const recordActivity=()=>{
+      if(!monitoringTransfer)return
+      clearTimeout(inactivityTimer)
+      inactivityTimer=setTimeout(()=>{transferStalled=true;controller.abort(new Error('Provider stopped delivering audio for 90 seconds'))},90000)
+      inactivityTimer.unref?.()
+    }
     this.operations.set(opId,{key,controller})
     const staged=path.join(this.root,'work',opId);await fsp.mkdir(staged,{recursive:true})
     // Downloads get more room than browsing: a worker that ran out mid-song
@@ -442,10 +449,17 @@ class PackageService {
     const phase=stage=>console.info(`[Mornye] ${addon.name} ${purpose} stage=${stage} elapsedMs=${Date.now()-startedAt}`)
     let sawBytes=false
     const onTransfer=hooks?undefined:info=>{
-      if(!sawBytes&&Number(info?.written)>0){sawBytes=true;phase('first_byte')}
+      const written=Number(info?.written)||0
+      if(info?.part!==lastPart||written>lastWritten){lastPart=info?.part;lastWritten=written;recordActivity()}
+      if(!sawBytes&&written>0){sawBytes=true;phase('first_byte')}
       if(liveProvider&&purpose==='playback')onLive?.(info)
     }
-    const runtime=this.createRuntime(addon,fs.readFileSync(path.join(this.root,'packages',key,'index.js'),'utf8'),{grants:[staged],onProgress,onTransfer,signal:combined,heapMb:512})
+    const relayProgress=update=>{
+      const percent=Number(update?.percent)
+      if(Number.isFinite(percent)&&percent>lastPercent){lastPercent=percent;recordActivity()}
+      onProgress?.(update)
+    }
+    const runtime=this.createRuntime(addon,fs.readFileSync(path.join(this.root,'packages',key,'index.js'),'utf8'),{grants:[staged],onProgress:relayProgress,onTransfer,signal:combined,heapMb:512})
     try{
       phase('initialize')
       await runtime.ready;await runtime.invoke('initialize',[this.settings(addon)],{signal:combined})
@@ -535,7 +549,14 @@ class PackageService {
       const chosen=addonDownloadQuality(addon,this.settings(addon),{quality,allowAtmos,purpose})
       const downloadingAtmos=isAtmosQuality(chosen)
       phase('download_start')
-      const result=await runtime.invoke('download',[available.track_id || available.trackId || String(id),chosen,path.join(staged,'audio.flac'),{preparedContext:prepared,resolutionTimeoutMs:60000}],{timeoutMs:24*3600000,signal:combined})
+      monitoringTransfer=true;recordActivity()
+      let result
+      try{
+        result=await runtime.invoke('download',[available.track_id || available.trackId || String(id),chosen,path.join(staged,'audio.flac'),{preparedContext:prepared,resolutionTimeoutMs:60000}],{timeoutMs:24*3600000,signal:combined})
+      }catch(error){
+        if(transferStalled)throw new Error('The provider stopped delivering audio for 90 seconds. Retry the track.')
+        throw error
+      }finally{monitoringTransfer=false;clearTimeout(inactivityTimer)}
       phase('download_complete')
       if(!result?.success)throw Object.assign(new Error(result?.error_message || result?.error || 'Addon download failed'),{authUrl:result?.auth_url,errorType:result?.error_type})
       let file=safePath(runtime.host.root,result.file_path || result.filePath || result.path,runtime.host.grants)
@@ -603,7 +624,7 @@ class PackageService {
       combined.throwIfAborted()
       return {file,staging:staged,metadata:normalizeTrackMetadata({...track,...result}),info,cleanup:()=>fsp.rm(staged,{recursive:true,force:true})}
     }catch(error){await fsp.rm(staged,{recursive:true,force:true});throw error}
-    finally{runtime.close();this.operations.delete(opId)}
+    finally{monitoringTransfer=false;clearTimeout(inactivityTimer);runtime.close();this.operations.delete(opId)}
   }
 }
 const services=new WeakMap()
