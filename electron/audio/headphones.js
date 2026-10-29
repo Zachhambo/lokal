@@ -32,9 +32,9 @@ function headphoneBridge(platform = process.platform) {
 // would discard JOC spatial objects while claiming Atmos playback succeeded.
 function headphoneDecoderFailure(nativeError) {
   const detail = String(nativeError ?? '').trim()
-  const cause = detail || 'The Windows decoder could not open the E-AC-3 JOC audio source.'
+  const cause = detail || 'The Windows decoder could not open the Dolby encoded audio source.'
   return 'Windows Media Foundation could not play this Dolby Atmos file: ' +
-    cause + ' Check Windows E-AC-3 codec support and Dolby Access / Spatial Sound in Atmos Setup. ' +
+    cause + ' Check Windows E-AC-3/AC-4 codec support and Dolby Access / Spatial Sound in Atmos Setup. ' +
     'If the OS cannot decode it, use normal Play (stereo) or HDMI passthrough with an Atmos-capable receiver.'
 }
 
