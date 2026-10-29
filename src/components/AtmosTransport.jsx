@@ -7,7 +7,7 @@ import { beginAtmosOutputRelease } from '../audio/atmosHandoff.mjs'
 /**
  * Native Atmos is an output backend of the existing Lokal player, not a
  * second transport. Bar/fullscreen/mini/SMTC all share the Zustand queue,
- * playback state, clock and seek controls. JOC never enters Chromium PCM.
+ * playback state, clock and seek controls. JOC/AC-4 never enters Chromium PCM.
  */
 export default function AtmosTransport() {
   useEffect(() => {
@@ -45,13 +45,13 @@ export default function AtmosTransport() {
         paused = false
         setOutputRoute(route)
         setPlayer({ isBuffering: true })
-        if (!toast) toast = showLoadingToast('Preparing Dolby Atmos…')
+        if (!toast) toast = showLoadingToast('Preparing Dolby encoded audio…')
         const percent = next.percent == null ? null : Number(next.percent)
         const measured = Number.isFinite(percent) && percent >= 0 && percent <= 100
         const phase = /segments/i.test(next.message || '')
-          ? 'Downloading Dolby Atmos segments'
+          ? 'Downloading Dolby encoded audio segments'
           : /download/i.test(next.message || '') || measured
-            ? 'Downloading Dolby Atmos' : (next.message || 'Preparing Dolby Atmos…')
+            ? 'Downloading Dolby encoded audio' : (next.message || 'Preparing Dolby encoded audio…')
         toast.update(phase, measured ? Math.round(percent) : null)
         return
       }
@@ -85,7 +85,7 @@ export default function AtmosTransport() {
         active = false
         setOutputRoute(null)
         setPlayer({ isPlaying: false, isBuffering: false })
-        showToast(next.error || 'Native Dolby Atmos playback failed')
+        showToast(next.error || 'Native Dolby audio playback failed')
         return
       }
       if (next.state === 'ended' || (next.state === 'stopped' && active)) {
