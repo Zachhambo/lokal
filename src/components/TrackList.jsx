@@ -31,6 +31,9 @@ import QualityImage from './QualityImage'
 import { playRecommendationPool } from '../recommendationPlayback'
 import { playbackFallbackMessage } from '../recommendations'
 import { navigateToTrackAlbum } from '../playbackContext'
+import { navigateToArtistName, trackArtistParts } from '../artistLink'
+import { keepCommaSet } from '../artistNames'
+import ArtistNames, { useKeepCommaArtists } from './ArtistNames'
 import { downloadGhostResult as queueGhostResult, ghostDownloadSuggestions, redownloadMissingTrack } from '../ghostDownloads'
 import HoverScrollTitle from './HoverScrollTitle'
 import { useGhostDownloadSources } from './useGhostDownloadSources'
@@ -97,8 +100,32 @@ function SortableHeader({ column, label, children, sort, onSortChange, className
   </button>
 }
 
+// Both inline album metadata and the optional standalone Album column use
+// the same destination. Missing album tags stay visible, but are never links.
+// Stop the row's select/double-click-to-play handlers when navigating.
+function TrackAlbumLink({ track, navigate, className = '', fallback = '—', inline = false }) {
+  const { t } = useTranslation()
+  const album = String(track?.album || '').trim()
+  if (!album) {
+    return <span data-inline-album={inline || undefined} className={className} title={fallback}>{fallback}</span>
+  }
+  return (
+    <button
+      type="button"
+      data-inline-album={inline || undefined}
+      className={`${className} text-left cursor-pointer transition-colors hover:text-accent hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent`}
+      title={t('Go to album: {album}', { album })}
+      onClick={event => { event.stopPropagation(); navigateToTrackAlbum(navigate, track) }}
+      onDoubleClick={event => event.stopPropagation()}
+    >
+      {album}
+    </button>
+  )
+}
+
 export default function TrackList({ tracks = [], showQuality = false, onRemove = null, showPlayNext = true, showAddToQueue = true, playlistId = null, onReorder = null, onQuickAdd = null, reduceMotion = false, context = null, highlightTrackId = null, highlightRequestKey = null, extraColumns = [], resolveTracks = null, sort = null, onSortChange = null, trackNumbers = null, toolbarStart = null }) {
   const { t } = useTranslation()
+  const keepCommaArtists = useKeepCommaArtists()
   const resolvedPlaybackRef = useRef(0)
   const resolvedToastRef = useRef(null)
   useEffect(() => () => { resolvedPlaybackRef.current++; resolvedToastRef.current?.close() }, [])
@@ -592,6 +619,15 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
    * lossless, save, quick add), so on a narrow page, where those buttons only
    * show on hover, the ⋯ button (and a right click) still reaches them all.
    */
+  const openTrackArtist = track => {
+    // Use the same configurable credit splitting as the visible artist
+    // links: both "Earth, Wind & Fire" and "Main (feat. Guest)" must open
+    // their actual primary artist, not a comma-cut or unsplit credit.
+    const firstArtist = trackArtistParts(track, keepCommaSet(keepCommaArtists))
+      .find(part => part.artist)?.artist
+    return navigateToArtistName(navigate, track, firstArtist || track?.artist)
+  }
+
   const openTrackMenu = (event, track) => {
     setMenuFor(null) // a right click; the ⋯ marks its row after this
     const ids = selection.contextSelect(track.id)
@@ -619,6 +655,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
       !one && losslessManyMenuItem(list, Gem),
       { separator: true },
       one?.album && { label: 'Go to album', icon: Disc3, onSelect: () => navigateToTrackAlbum(navigate, one) },
+      one?.artist && { label: 'Go to artist', icon: User, onSelect: () => openTrackArtist(one) },
       !resolveTracks && (one ? { label: 'Edit info', icon: Edit2, onSelect: () => setEditingTrack(one) } : { label: `Edit${count}`, icon: Edit2, onSelect: () => setShowBatchEdit(true) }),
       one && !resolveTracks && api.isElectron && !oneGhost && !isStreamed(one) && one.file_path && !String(one.file_path).startsWith('ghost://') && { label: 'Open in file manager', icon: FolderOpen, onSelect: () => api.showItemInFolder(one.file_path) },
       !resolveTracks && one && api.isElectron && { label: 'Replace artwork', icon: Camera, onSelect: () => replaceArtwork(one, { stopPropagation() {} }) },
@@ -958,10 +995,10 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
                     : <span title={track.playback_error} className="px-1.5 py-0.5 rounded-full bg-red-400/10 border border-red-400/20 text-[10px] leading-[14px] uppercase tracking-wide text-red-200 flex-shrink-0">{t("Can't play")}</span>)}
                 </div>
                 <div className="flex min-w-0 items-center text-xs text-muted leading-4 h-4">
-                  {columns.artist && <span className="min-w-0 flex-1 truncate" title={track.artist}>{track.artist}</span>}
+                  {columns.artist && <ArtistNames track={track} className="min-w-0 flex-1 truncate" linkClassName="hover:text-accent hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent" />}
                   {!layout.album && <>
                     {columns.artist && track.artist && <span className="mx-1 shrink-0">·</span>}
-                    <span data-inline-album className="min-w-0 flex-1 truncate" title={track.album || t('Unknown album')}>{track.album || t('Unknown album')}</span>
+                    <TrackAlbumLink track={track} navigate={navigate} inline className="min-w-0 flex-1 truncate" fallback={t('Unknown album')} />
                   </>}
                 </div>
                 {extraColumns.filter(column => !layout[column.key]).map(column => <span key={column.key} className="mr-2 text-[10px] text-muted">{column.label}: {column.render(track)}</span>)}
@@ -969,7 +1006,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
             </div>
 
             {layout.album && (
-              <p className="truncate text-xs text-muted" title={track.album || undefined}>{track.album || '—'}</p>
+              <TrackAlbumLink track={track} navigate={navigate} className="min-w-0 truncate text-xs text-muted" />
             )}
             {layout.source && <span className="flex items-center justify-center"><TrackSourceIcon track={track} addonNames={addonNames} /></span>}
             {layout.quality && (() => {
