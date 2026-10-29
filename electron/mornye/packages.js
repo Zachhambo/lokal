@@ -11,6 +11,7 @@ const { ExtensionHost, safePath, runTool, mediaInfo } = require('./host')
 const { ExtensionRuntime } = require('./runtime')
 
 const REGISTRY = 'https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/refs/heads/main/registry.json'
+const AMAZON_NEW_REGISTRY = 'https://raw.githubusercontent.com/CHEYCKIT/Mornye-Extension/refs/heads/feature/amazon-new-release-20261029/amazon-new-registry.json'
 const COMPAT_VERSION = '5.1.0'
 const FEATURES = { signedSession: 3, sessionRefresh: 1, sessionGrant: 1, globalAction: 1, webviewAuth: 1, downloadSegments: 1, patternedFileTransform: 1, preparedContext: 1, accountForms: 1, accountDownloadMode: 1, directMedia: 1 }
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex')
@@ -158,6 +159,8 @@ class PackageService {
     const defaultId=hash(REGISTRY).slice(0,16)
     db.prepare('INSERT OR IGNORE INTO mornye_repositories (id,url,name) VALUES (?,?,?)').run(defaultId,REGISTRY,'Mornye official')
     db.prepare('UPDATE mornye_repositories SET name=? WHERE id=? AND name=?').run('Mornye official',defaultId,'SpotiFLAC official')
+    const newRegistryId=hash(AMAZON_NEW_REGISTRY).slice(0,16)
+    db.prepare('INSERT OR IGNORE INTO mornye_repositories (id,url,name) VALUES (?,?,?)').run(newRegistryId,AMAZON_NEW_REGISTRY,'Amazon (New) updates')
   }
   tools() {
     if(this.toolProvider)return this.toolProvider()
