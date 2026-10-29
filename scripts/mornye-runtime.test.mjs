@@ -144,7 +144,8 @@ test('Mornye callback matcher handles top-level and window.open handoffs with le
   const runtime = { host: { session: { config: {} }, auth: {} } }
   assert.equal(isExpectedCallback('mornye://session-grant?state=x&grant=y', runtime), true)
   assert.equal(isExpectedCallback('spotiflac://session-grant?state=x&grant=y', runtime), true)
-  assert.equal(isExpectedCallback('https://gateway.example/finish?cb=mornye%3A%2F%2Fsession-grant%3Fstate%3Dx', runtime), true)
+  assert.equal(isExpectedCallback('https://gateway.example/finish?cb=mornye%3A%2F%2Fsession-grant%3Fstate%3Dx%26grant%3Dy', runtime), true)
+  assert.equal(isExpectedCallback('https://gateway.example/finish?cb=mornye%3A%2F%2Fsession-grant%3Fstate%3Dx', runtime), false)
   assert.equal(isExpectedCallback('https://example.com/not-the-callback', runtime), false)
   runtime.host.session.config.callbackUrl = 'https://gateway.example/callback'
   assert.equal(isExpectedCallback('https://gateway.example/callback?code=x', runtime), true)

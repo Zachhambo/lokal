@@ -18,6 +18,12 @@ test('Atmos download action requires advertised edition and addon identity', () 
   assert.equal(atmosDownloadRef({ ...atmosItem, provider: 'mono' }), null)
 })
 
+test('Amazon AC-4 requestability offers downloads without inventing catalogue Atmos', () => {
+  const amazon = { ...atmosItem, audio_modes: ['STEREO'], atmos_requestable: 1 }
+  assert.deepEqual(atmosDownloadRef(amazon), { provider, id: amazon.id })
+  assert.equal(atmosDownloadRef({ ...amazon, atmos_requestable: 0 }), null)
+})
+
 test('explicit Atmos action pins to the exact addon and opts in only for that download', async () => {
   const calls = []
   const ghost = { file_path: 'ghost://addon/1234567890/tidal-track-88', title: 'Atmos track' }

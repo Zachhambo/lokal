@@ -96,9 +96,9 @@ function normalizeTrackMetadata(track) {
   return normalized
 }
 
-function trackOf(track, provider) {
+function trackOf(track, provider, addon = null) {
   const artists=Array.isArray(track.artists)?track.artists.map(a=>typeof a==='string'?a:a.name).filter(Boolean):[String(track.artists || track.artist || '')].filter(Boolean)
-  return {provider,id:String(track.id),title:String(track.name || track.title || '').slice(0,500),artist:artists.join(', '),artists,artistIds:track.artist_id?[String(track.artist_id)]:[],album:albumNameOf(track),albumId:albumIdOf(track),track_num:Number(track.track_number || track.trackNumber)||null,disc_num:Number(track.disc_number || track.discNumber)||null,year:Number(String(track.release_date || '').slice(0,4))||null,isrc:track.isrc || null,genre:track.genre || null,duration:(Number(track.duration_ms ?? track.durationMs)||0)/1000 || null,thumbnail:track.cover_url || track.coverUrl || (typeof track.images==='string'?track.images:null),quality:track.audio_quality || null,atmos_available:hasAtmosMetadata(track)?1:0,spotify_id:track.spotify_id || track.spotifyId || null,deezer_id:track.deezer_id || track.deezerId || null,qobuz_id:track.qobuz_id || track.qobuzId || null,tidal_id:track.tidal_id || track.tidalId || null,kind:'song'}
+  return {provider,id:String(track.id),title:String(track.name || track.title || '').slice(0,500),artist:artists.join(', '),artists,artistIds:track.artist_id?[String(track.artist_id)]:[],album:albumNameOf(track),albumId:albumIdOf(track),track_num:Number(track.track_number || track.trackNumber)||null,disc_num:Number(track.disc_number || track.discNumber)||null,year:Number(String(track.release_date || '').slice(0,4))||null,isrc:track.isrc || null,genre:track.genre || null,duration:(Number(track.duration_ms ?? track.durationMs)||0)/1000 || null,thumbnail:track.cover_url || track.coverUrl || (typeof track.images==='string'?track.images:null),quality:track.audio_quality || null,atmos_available:hasAtmosMetadata(track)?1:0,atmos_requestable:/^amazon(?:-web)?$/i.test(addon?.name || '') && (addon?.manifest?.qualityOptions || []).some(q => q.id === 'ac4')?1:0,spotify_id:track.spotify_id || track.spotifyId || null,deezer_id:track.deezer_id || track.deezerId || null,qobuz_id:track.qobuz_id || track.qobuzId || null,tidal_id:track.tidal_id || track.tidalId || null,kind:'song'}
 }
 
 // Move legacy on-disk state without overwriting any Mornye data already present.
@@ -384,7 +384,7 @@ class PackageService {
     else results=await runtime.invoke(runtime.methods.includes('searchTracks')?'searchTracks':'customSearch',runtime.methods.includes('searchTracks')?[query,limit]:[query,{limit,filter:addon.manifest.searchBehavior?.filters?.find(f=>/^(songs?|tracks?)$/.test(f.id))?.id || 'tracks'}])
     const tracks=Array.isArray(results)?results:results?.tracks || results?.album?.tracks || results?.artist?.top_tracks || (results?.track?[results.track]:[])
     const songs=tracks.filter(t=>t?.id!=null&&(t.name||t.title)&&(!t.item_type||t.item_type==='track'))
-    this.remember(key,songs);return songs.slice(0,limit).map(t=>trackOf(t,`a-${key}`))
+    this.remember(key,songs);return songs.slice(0,limit).map(t=>trackOf(t,`a-${key}`,addon))
   }
   async browse(key,query,filter) {
     const runtime=await this.runtime(key),addon=this.find(key)
@@ -397,12 +397,12 @@ class PackageService {
     const runtime=await this.runtime(key),data=await runtime.invoke(playlist?'getPlaylist':'getAlbum',[id])
     if(!data)throw new Error('Addon returned no album')
     this.remember(key,data.tracks || [])
-    return {provider:`a-${key}`,id:String(data.id || id),title:data.name,artist:data.artists || data.owner || '',artistId:data.artist_id,artwork_url:data.cover_url || data.images,year:Number(String(data.release_date || '').slice(0,4))||null,release_type:data.album_type || 'album',tracks:(data.tracks || []).map(t=>trackOf({...t,album_id:t.album_id || id,album_name:t.album_name || data.name,cover_url:t.cover_url || data.cover_url},`a-${key}`))}
+    return {provider:`a-${key}`,id:String(data.id || id),title:data.name,artist:data.artists || data.owner || '',artistId:data.artist_id,artwork_url:data.cover_url || data.images,year:Number(String(data.release_date || '').slice(0,4))||null,release_type:data.album_type || 'album',tracks:(data.tracks || []).map(t=>trackOf({...t,album_id:t.album_id || id,album_name:t.album_name || data.name,cover_url:t.cover_url || data.cover_url},`a-${key}`,this.find(key)))}
   }
   async artist(key,id) {
     const data=await (await this.runtime(key)).invoke('getArtist',[id]);if(!data)throw new Error('Addon returned no artist')
     this.remember(key,data.top_tracks || data.tracks || [])
-    return {provider:`a-${key}`,id:String(data.id || id),name:data.name,image:data.image_url,albums:(data.albums || []).map(a=>({provider:`a-${key}`,albumId:a.id,title:a.name,artist:a.artists || data.name,year:Number(String(a.release_date || '').slice(0,4))||null,release_type:a.album_type || 'album',artwork_url:a.cover_url,track_count:a.total_tracks})),tracks:(data.top_tracks || data.tracks || []).map(t=>trackOf(t,`a-${key}`))}
+    return {provider:`a-${key}`,id:String(data.id || id),name:data.name,image:data.image_url,albums:(data.albums || []).map(a=>({provider:`a-${key}`,albumId:a.id,title:a.name,artist:a.artists || data.name,year:Number(String(a.release_date || '').slice(0,4))||null,release_type:a.album_type || 'album',artwork_url:a.cover_url,track_count:a.total_tracks})),tracks:(data.top_tracks || data.tracks || []).map(t=>trackOf(t,`a-${key}`,this.find(key)))}
   }
   async invokeAction(key,action,input,token) {
     const runtime=await this.runtime(key),addon=this.find(key)
@@ -608,9 +608,16 @@ class PackageService {
         if(processed.new_file_path || processed.newFilePath)file=safePath(runtime.host.root,processed.new_file_path || processed.newFilePath,runtime.host.grants)
       }
       info=await mediaInfo(file,tools,combined)
-      if(downloadingAtmos) {
-        // Verify the actual downloaded audio, not its filename or catalogue
-        // badge. Preserve the compressed JOC bitstream via remux, never FLAC.
+      if(downloadingAtmos && String(chosen).toLowerCase()==='ac4') {
+        // Amazon delivers AC-4 inside MP4. Validate the actual codec after
+        // decryption; never decode, FLAC-convert or remux its presentation.
+        // This verifies AC-4 encoding, not an Atmos object presentation.
+        if(info.codec!=='ac4') throw new Error('Amazon did not return the requested AC-4 audio. No stereo track was substituted.')
+        if(!/\.(?:mp4|m4a)$/i.test(file)) throw new Error('Amazon AC-4 must be delivered in an MP4 container')
+        if(!String(info.format || '').split(',').some(fmt=>['mov','mp4','m4a','3gp','3g2','mj2'].includes(fmt.trim()))) throw new Error('Amazon AC-4 returned a non-MP4 audio container; nothing was saved')
+      }
+      if(downloadingAtmos && String(chosen).toLowerCase()!=='ac4') {
+        // Verify E-AC-3 JOC; plain E-AC-3 does not imply Dolby Atmos.
         if(info.codec!=='eac3' || await probeAtmosFile(file,{codec:info.codec,ffprobe:tools.ffprobe})!==1) {
           throw new Error('The addon did not supply verified E-AC-3 JOC Dolby Atmos audio; nothing was saved')
         }

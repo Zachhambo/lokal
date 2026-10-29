@@ -18,6 +18,7 @@
 //     new file gets the song's own date, which doesn't change
 
 const fs = require('fs')
+const { isAc4Codec } = require('./quality/editionDuplicates')
 
 const TAG = 'LOKAL_ADDED'
 const IDS = new Set([`TXXX:${TAG}`, TAG, `----:com.apple.iTunes:${TAG}`])
@@ -103,6 +104,8 @@ function writeAddedDate(filePath, seconds) {
  * that can't be written is left as it was.
  */
 function stampNewFile(db, filePath, seconds = Math.floor(Date.now() / 1000), { log = console } = {}) {
+  // AC-4 downloads retain their original MP4 atoms; date added stays in SQLite.
+  if (/\.ac4\.(?:m4a|mp4)$/i.test(filePath)) return false
   try {
     writeAddedDate(filePath, seconds)
     if (db) require('./fileStamp').noteFileWritten(db, filePath)
@@ -126,12 +129,13 @@ function applyToRow(db, trackId, seconds) {
  * whole file), so it lets the app breathe between files.
  */
 async function stampAddedDates(db, filePaths, { log = console } = {}) {
-  const rowOf = db.prepare("SELECT added_at FROM tracks WHERE file_path = ? AND file_path NOT LIKE 'ghost://%'")
+  const rowOf = db.prepare("SELECT * FROM tracks WHERE file_path = ? AND file_path NOT LIKE 'ghost://%'")
   const { noteFileWritten } = require('./fileStamp')
   let written = 0
   let failed = 0
   for (const filePath of filePaths) {
     const row = rowOf.get(filePath)
+    if (isAc4Codec(row?.codec) || /\.ac4\.(?:m4a|mp4)$/i.test(filePath)) continue
     let seconds = Number(row?.added_at)
     if (!row || !Number.isFinite(seconds) || seconds <= 0) continue
     // An old row may hold milliseconds.

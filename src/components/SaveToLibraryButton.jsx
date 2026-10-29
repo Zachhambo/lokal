@@ -12,7 +12,7 @@ import SourceIcon from './SourceIcon'
 import { DEFAULT_FIND_ON_SOURCES, orderedFindOnSources, buildFindOnRequest } from '../findOnSources'
 import { downloadUrlFor, isGhostTrack, providerLabel as labelOf, saveToLibrary, streamRef, sourceRefKey } from '../onlineTracks'
 import { libraryCopy, useLibraryIndex } from '../libraryIndex'
-import { atmosAvailable } from '../quality'
+import { atmosRequestable } from '../quality'
 
 const SAVING = new Set(['queued', 'downloading', 'finishing'])
 
@@ -130,7 +130,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
   // it can still be downloaded from the menu (another version, say).
   const ownedOnly = state === 'saved' && owned && !inLibrary && job?.status !== 'done'
   const canSaveAtmos = !!ref && /^a-[0-9a-f]{10}$/.test(ref.provider) &&
-    (atmosAvailable(meta) || atmosAvailable(track))
+    (atmosRequestable(meta) || atmosRequestable(track))
 
   /** Download from where the song streams. */
   const saveFromSource = async ({ force = false } = {}) => {

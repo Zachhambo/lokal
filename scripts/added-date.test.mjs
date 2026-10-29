@@ -28,6 +28,22 @@ function tagTypesOf(filePath) {
   try { return file.tagTypesOnDisk } finally { file.dispose() }
 }
 
+test('automatic date stamping preserves original downloaded AC-4 bytes', async t => {
+  const dir = tempDir()
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const file = path.join(dir, 'song.ac4.m4a')
+  mp3(file) // A taggable fixture proves the exclusion prevents rewriting.
+  const original = fs.readFileSync(file)
+  const db = new DatabaseSync(':memory:')
+  t.after(() => db.close())
+  db.exec('CREATE TABLE tracks (file_path TEXT, added_at INTEGER, codec TEXT)')
+  db.prepare('INSERT INTO tracks VALUES (?, ?, ?)').run(file, 1760875200, 'AC-4')
+  assert.equal(stampNewFile(db, file), false)
+  assert.deepEqual(await stampAddedDates(db, [file]), { written: 0, failed: 0 })
+  assert.deepEqual(fs.readFileSync(file), original)
+  assert.equal(db.prepare('SELECT added_at FROM tracks').get().added_at, 1760875200)
+})
+
 test('the tag holds the moment in UTC, and reads back', () => {
   assert.equal(toTag(1760875200), '2025-10-19T12:00:00Z')
   assert.equal(parse('2025-10-19T12:00:00Z'), 1760875200)

@@ -234,6 +234,7 @@ test('already-owned Atmos edition does not replace stereo playlist or like ghost
     .run('ghost://addon/0123456789/song', 'a-0123456789:song')
   db.prepare("INSERT INTO user_likes (user_id, track_id) VALUES ('guest', 'streamed')").run()
   mgr.configure({ findTools: () => ({ ytdlp: 'unused' }) })
+  t.mock.method(mgr, 'isPackageSource', () => true)
   mgr.pump = () => { throw new Error('Owned Atmos edition should not be queued again') }
 
   const response = mgr.enqueue('single', 'https://addon.example/file.flac', {
@@ -249,6 +250,21 @@ test('already-owned Atmos edition does not replace stereo playlist or like ghost
   assert.deepEqual(db.prepare('SELECT track_id FROM user_likes ORDER BY track_id').all().map(row => row.track_id),
     ['g1', 'streamed'])
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM track_aliases').get().n, 0)
+})
+
+test('owned AC-4 satisfies only the explicit edition request without claiming verified Atmos', t => {
+  const { db, mgr } = downloadFixture(t, { skipped: true }, false)
+  const ref = 'a-0123456789:song'
+  db.prepare("UPDATE tracks SET source_ref = ?, codec = 'AC-4', atmos_verified = NULL WHERE id = 'target'").run(ref)
+  assert.equal(mgr.libraryTrackWithRef(ref, { atmos: false }), null)
+  assert.equal(mgr.libraryTrackWithRef(ref, { atmos: true })?.id, 'target')
+  assert.equal(db.prepare("SELECT atmos_verified FROM tracks WHERE id = 'target'").get().atmos_verified, null)
+  t.mock.method(mgr, 'isPackageSource', () => true)
+  mgr.pump = () => { throw new Error('Owned AC-4 should not be queued again') }
+  assert.equal(mgr.enqueue('single', 'https://addon.example/file.mp4', {
+    addonSource: { provider: 'a-0123456789', id: 'song' },
+    explicitAtmosDownload: true, addonQuality: 'DOLBY_ATMOS',
+  }).alreadyInLibrary, true)
 })
 
 test('desktop ghost resolution honors match checks, deduplication, and completed aliases', t => {

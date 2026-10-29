@@ -65,7 +65,7 @@ function maxTrackNumber(db, dir) {
 }
 
 function freeName(dir, basename) {
-  const ext = path.extname(basename)
+  const ext = /\.ac4\.m4a$/i.test(basename) ? basename.slice(-8) : path.extname(basename)
   const stem = path.basename(basename, ext)
   let target = path.join(dir, basename)
   for (let i = 2; fs.existsSync(target); i++) target = path.join(dir, stem + ' (' + i + ')' + ext)
@@ -120,6 +120,8 @@ function placeDownload(db, filePath, relativeFolder, assignedNumbers = {}, expli
       try { if (fs.existsSync(oldStem + ext) && !fs.existsSync(newStem + ext)) fs.moveSync(oldStem + ext, newStem + ext) } catch {}
     }
   }
+  // Preserve the original AC-4 MP4 atoms; folder placement must not tag it.
+  if (/\.ac4\.m4a$/i.test(target)) return { filePath: target, trackNum: null, dir }
   const key = process.platform === 'win32' ? dir.toLowerCase() : dir
   const number = Math.max(maxTrackNumber(db, dir), Number(assignedNumbers[key]) || 0) + 1
   try {

@@ -146,6 +146,42 @@ test('a package download crosses the real host, FFprobe validation, and staged c
   try { assert.equal(result.info.codec,'pcm_s16le');assert.equal(path.extname(result.file),'.wav','WAV audio written to audio.flac is rewrapped for the player');assert.equal(result.info.duration_ms,1000);assert.equal(result.metadata.album,'Fixture Album');assert.equal(result.metadata.album_name,'Fixture Album');assert.equal(result.metadata.album_artist,'Fixture Album Artist');assert.ok((await fs.stat(result.file)).size>44) } finally { await result.cleanup() }
 })
 
+test('Amazon AC-4 validates codec and container while preserving downloaded bytes', async t => {
+  const { service, root } = await fixture(t)
+  const original = Buffer.from('synthetic provider bytes; probe results are controlled below')
+  const server = http.createServer((_req, res) => res.end(original))
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const probe = path.join(root, 'ffprobe.cjs')
+  const probeResult = path.join(root, 'probe.json')
+  await fs.writeFile(probe, `#!${process.execPath}\nprocess.stdout.write(require('node:fs').readFileSync(${JSON.stringify(probeResult)}, 'utf8'))\n`, { mode: 0o755 })
+  service.toolProvider = () => ({ ffprobe: probe, ffmpeg: path.join(root, 'must-not-convert') })
+  const installed = await service.install({ buffer: archive({
+    ...manifest, name: 'amazon', qualityOptions: [{ id: 'ac4', kind: 'spatial' }],
+    permissions: { ...manifest.permissions, network: ['127.0.0.1'], allowHttp: true },
+  }, `registerExtension({download(id,quality,output){
+    if(quality!=='ac4')throw new Error('Wrong requested tier');
+    var r=file.download('http://127.0.0.1:${server.address().port}/audio',output+'.mp4');
+    return {success:r.success,file_path:r.path};
+  }})`) })
+  service.remember(installed.key, [{ id: 'song', name: 'Song', artists: 'Artist' }])
+  const options = { quality: 'DOLBY_ATMOS', allowAtmos: true }
+  const setProbe = (codec, format) => fs.writeFile(probeResult, JSON.stringify({
+    streams: [{ codec_type: 'audio', codec_name: codec }], format: { format_name: format },
+  }))
+  await setProbe('ac4', 'mov,mp4,m4a,3gp,3g2,mj2')
+  const artifact = await service.download(installed.key, 'song', options)
+  try {
+    assert.equal(artifact.info.codec, 'ac4')
+    assert.deepEqual(await fs.readFile(artifact.file), original)
+  } finally { await artifact.cleanup() }
+  await setProbe('aac', 'mov,mp4,m4a,3gp,3g2,mj2')
+  await assert.rejects(service.download(installed.key, 'song', options), /requested AC-4/)
+  await setProbe('ac4', 'matroska,webm')
+  await assert.rejects(service.download(installed.key, 'song', options), /non-MP4/)
+  assert.deepEqual(await fs.readdir(path.join(root, 'work')), [], 'failed artifacts are cleaned up')
+})
+
 test('native Tidal acquisition checks availability before enrichment for both Play and Save',async t=>{
   const {service}=await fixture(t)
   const wav=Buffer.alloc(44+8000*2)
@@ -224,6 +260,9 @@ test('a plain FLAC download can be played while it arrives, and a range past wha
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lokal-live-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}))
   const file=path.join(dir,'audio.flac'),part=`${file}.part`,total=200000
   const bytes=Buffer.alloc(total,7);bytes.write('fLaC',0,'latin1')
+  // A complete STREAMINFO header is required before progressive playback.
+  bytes[4]=0x80;bytes.writeUIntBE(34,5,3)
+  bytes[18]=0x0b;bytes[19]=0xb8;bytes[20]=0x02;bytes[21]=0xf0
   await fs.writeFile(part,bytes.subarray(0,100000))
   let ready=false;const job={status:'running',markLive:()=>{ready=true},promise:new Promise(()=>{})}
   liveUpdate(job,{part,file,total,written:100000})

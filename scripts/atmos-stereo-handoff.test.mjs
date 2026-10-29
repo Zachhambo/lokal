@@ -102,3 +102,26 @@ test('explicit Atmos request is isolated, validated and never silently downgrade
     {}, { quality: 'DOLBY_ATMOS', allowAtmos: true }), /does not offer Dolby Atmos/)
 })
 
+
+test('Amazon AC-4 is an explicit native tier, never the default stereo path', () => {
+  const amazon = { name: 'amazon', manifest: { qualityOptions: [
+    { id: 'best', kind: 'lossless' },
+    { id: 'opus', kind: 'lossy' },
+    { id: 'eac3', kind: 'spatial' },
+    { id: 'ac4', kind: 'spatial', label: 'Dolby Atmos (AC-4)' },
+  ] } }
+  assert.equal(isAtmosQuality('ac4'), true)
+  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'ac4' }), 'best')
+  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'eac3' }), 'best')
+  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'ac4' }), 'best')
+  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'eac3' }), 'best')
+  assert.equal(addonDownloadQuality(amazon, {}, {
+    quality: 'DOLBY_ATMOS', allowAtmos: true, purpose: 'download',
+  }), 'ac4')
+  assert.equal(addonDownloadQuality(amazon, {}, {
+    quality: 'ac4', allowAtmos: true, purpose: 'download',
+  }), 'ac4')
+  assert.throws(() => addonDownloadQuality(amazon, {}, {
+    quality: 'ac4', allowAtmos: true, purpose: 'playback',
+  }), /explicit Download Dolby Atmos/)
+})
