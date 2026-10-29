@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { navigateToTrackArtist, navigateToArtistName } from '../src/artistLink.js'
+import { navigateToArtistName, trackArtistParts } from '../src/artistLink.js'
 import { navigateToTrackAlbum } from '../src/playbackContext.js'
 import { artistCreditParts, keepCommaSet } from '../src/artistNames.js'
 
@@ -19,7 +19,9 @@ test('shared TrackList links artist credits and both inline and standalone album
 
 test('song right-click actions include both artist and album destinations for one track', () => {
   assert.match(source, /one\?\.album && \{ label: 'Go to album', icon: Disc3, onSelect: \(\) => navigateToTrackAlbum\(navigate, one\) \}/)
-  assert.match(source, /one\?\.artist && \{ label: 'Go to artist', icon: User, onSelect: \(\) => navigateToTrackArtist\(navigate, one\) \}/)
+  assert.match(source, /one\?\.artist && \{ label: 'Go to artist', icon: User, onSelect: \(\) => openTrackArtist\(one\) \}/)
+  assert.match(source, /const firstArtist = trackArtistParts\(track, keepCommaSet\(keepCommaArtists\)\)/)
+  assert.match(source, /return navigateToArtistName\(navigate, track, firstArtist \|\| track\?\.artist\)/)
   assert.match(source, /const one = list\.length === 1 \? list\[0\] : null/)
   assert.match(source, /onContextMenu=\{\(e\) => openTrackMenu\(e, track\)\}/)
 })
@@ -36,16 +38,21 @@ test('library song album navigation carries artist and highlight into the album 
   assert.equal(calls.length, 1)
 })
 
-test('single song artist context navigation reuses the existing artist page route', () => {
-  const calls = []
+test('song artist navigation preserves comma names and resolves the primary credit', () => {
   const row = { id: 'track-33', title: 'Title', artist: 'Earth, Wind & Fire', album: 'I Am' }
-  assert.equal(navigateToTrackArtist((...args) => calls.push(args), row), true)
-  // Keep-comma artists are resolved using the same rules as the rest of the app.
-  assert.equal(calls[0][0], '/artist/a-earth')
-  const full = []
-  assert.equal(navigateToArtistName((...args) => full.push(args), row, 'Earth, Wind & Fire'), true)
-  assert.equal(full[0][0], '/artist/a-earth-wind-fire')
-  assert.equal(full[0][1].state.name, 'Earth, Wind & Fire')
+  const primaryName = trackArtistParts(row, keepCommaSet()).find(part => part.artist)?.artist
+  assert.equal(primaryName, 'Earth, Wind & Fire')
+  const calls = []
+  assert.equal(navigateToArtistName((...args) => calls.push(args), row, primaryName), true)
+  assert.equal(calls[0][0], '/artist/a-earth-wind-fire')
+  assert.equal(calls[0][1].state.name, 'Earth, Wind & Fire')
+
+  const collaboration = { id: 'track-44', title: 'Collab', artist: 'Main Artist (feat. Guest Singer)' }
+  const main = trackArtistParts(collaboration, keepCommaSet()).find(part => part.artist)?.artist
+  assert.equal(main, 'Main Artist')
+  const collabCalls = []
+  assert.equal(navigateToArtistName((...args) => collabCalls.push(args), collaboration, main), true)
+  assert.equal(collabCalls[0][0], '/artist/a-main-artist')
 })
 
 test('artist-credit links can navigate each featured performer, not play the row', () => {
@@ -74,7 +81,7 @@ test('streamed track navigation keeps online artist and album destination behavi
   assert.equal(albums[0][0].split('?')[0], '/online/album')
   assert.equal(new URLSearchParams(albums[0][0].split('?')[1]).get('sourceAlbum'), 'B012345')
   const artists = []
-  assert.equal(navigateToTrackArtist((...args) => artists.push(args), online), true)
+  assert.equal(navigateToArtistName((...args) => artists.push(args), online, 'Online Artist'), true)
   assert.equal(artists[0][0], '/artist/a-online-artist')
   assert.equal(artists[0][1].state.anchor.title, 'Stream Track')
 })
