@@ -110,6 +110,20 @@ function registerSpotifyLikesHandlers(ipcMain) {
     catch (error) { return { tracks: [], error: error.message } }
   })
 
+  // Unlike mixes, recently played changes frequently. A failed optional
+  // account-scope request is never treated as fabricated listening history.
+  ipcMain.handle('spotify:recentlyPlayed', async (_, force) => {
+    try {
+      const cookie = spotify.cookieValue(settings().spotify_sp_dc)
+      const key = `${cookie}\\0recentlyPlayed`
+      const hit = cache.get(key)
+      if (!force && hit && Date.now() - hit.at < 5 * 60 * 1000) return { tracks: hit.value }
+      const tracks = await spotify.recentlyPlayed(settings().spotify_sp_dc)
+      cache.set(key, { at: Date.now(), value: tracks })
+      return { tracks }
+    } catch (error) { return { tracks: [], error: error.message } }
+  })
+
   // A song liked in Lokal: liked on Spotify too.
   ipcMain.handle('spotifyLikes:push', async (_, track) => {
     const now = status()
