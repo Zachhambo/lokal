@@ -675,6 +675,41 @@ const tokenQuery = rawCookie => async (operationName, variables) => {
   return pathfinder(t, operationName, variables)
 }
 
+/** Spotify's actual Recently Played shelf (never inferred from mixes).
+ * The WebPlayer cookie token may lack this optional account scope. In that
+ * case the IPC caller returns an empty shelf and other shelves still work.
+ * A fetchPage override keeps parser regressions independent of network/auth.
+ */
+async function recentlyPlayed(rawCookie, { fetchPage } = {}) {
+  if (!fetchPage && !cookieValue(rawCookie)) throw new Error('Connect Spotify to load recently played songs.')
+  const requestPage = fetchPage || (async () => {
+    const t = await getTokens(rawCookie)
+    if (!t?.accessToken) throw new Error('Spotify did not accept the cookie.')
+    const response = await request('https://api.spotify.com/v1/me/player/recently-played?limit=30', {
+      headers: { Authorization: `Bearer ${t.accessToken}`, Accept: 'application/json', 'App-Platform': 'WebPlayer', 'User-Agent': UA },
+    })
+    if (response.status === 401) tokens = null
+    if (!response.ok) throw new Error(`Spotify recently played unavailable (HTTP ${response.status}).`)
+    return response.json()
+  })
+  const page = await requestPage()
+  return (Array.isArray(page?.items) ? page.items : []).map(entry => {
+    const track = entry?.track || {}
+    const artists = (track.artists || []).map(a => a?.name).filter(Boolean)
+    const title = String(track.name || '').trim()
+    if (!title || !artists.length) return null
+    const uri = /^spotify:track:[A-Za-z0-9]{22}$/.test(track.uri || '') ? track.uri : ''
+    return {
+      id: track.id || uri || `${title}:${artists.join(', ')}`,
+      title, artist: artists.join(', '), artists, album: track.album?.name || '',
+      artwork_url: (track.album?.images || []).slice().sort((a,b) => (b.width || 0) - (a.width || 0))[0]?.url || '',
+      duration: Number(track.duration_ms) > 0 ? Number(track.duration_ms) / 1000 : null,
+      ...(uri ? { spotifyUri: uri } : {}),
+      source: 'spotify', scrobbledAt: Math.floor(Date.parse(entry.played_at || '') / 1000) || 0,
+    }
+  }).filter(Boolean)
+}
+
 /** The Made For You playlists on the account's Spotify Home. `query(op, variables)` is for the tests. */
 async function madeForYou(rawCookie, { query } = {}) {
   if (!query && !cookieValue(rawCookie)) throw new Error('Add your Spotify cookie (sp_dc) in Settings → Integrations → Spotify first.')
@@ -802,4 +837,4 @@ async function searchCataloguePathfinder(token, term, offset, limit, fetchImpl =
   }
 }
 
-module.exports = { madeForYou, playlistTracks, homeMixes, playlistEntry, fromSpotify, checkSpotify, findSpotifyTrackId, parseCanvases, cookieValue, followedArtists, likedSince, likeOnSpotify, likedEntry, catalogueSearch, TransientError }
+module.exports = { madeForYou, playlistTracks, recentlyPlayed, homeMixes, playlistEntry, fromSpotify, checkSpotify, findSpotifyTrackId, parseCanvases, cookieValue, followedArtists, likedSince, likeOnSpotify, likedEntry, catalogueSearch, TransientError }

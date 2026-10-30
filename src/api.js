@@ -243,6 +243,7 @@ export const api = {
   // Discovery's Spotify source: Made For You mixes and their songs (desktop).
   spotifyMadeForYou: (force = false) => isE() && el()?.spotifyMadeForYou ? el().spotifyMadeForYou(force) : Promise.resolve({ mixes: [], error: 'Spotify discovery works in the desktop app.' }),
   spotifyPlaylist: (uri, force = false) => isE() && el()?.spotifyPlaylist ? el().spotifyPlaylist(uri, force) : Promise.resolve({ tracks: [], error: 'Spotify discovery works in the desktop app.' }),
+  spotifyRecentlyPlayed: (force = false) => isE() && el()?.spotifyRecentlyPlayed ? el().spotifyRecentlyPlayed(force) : Promise.resolve({ tracks: [] }),
   // AutoMix: a song's analysis (desktop; electron/automix), null when it can't be.
   automixAnalyze: (track) => isE() && el()?.automixAnalyze ? el().automixAnalyze(track) : Promise.resolve(null),
   automixStemClip: (outgoing, incoming) => isE() && el()?.automixStemClip ? el().automixStemClip(outgoing, incoming) : Promise.resolve(null),

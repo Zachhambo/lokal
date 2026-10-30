@@ -68,7 +68,7 @@ test('playlist songs: a missing playlist says so', async () => {
   await assert.rejects(playlistTracks('', DW, { query: async () => ({ playlistV2: { __typename: 'NotFound', message: 'Not found' } }) }), /Not found/)
 })
 
-test('Discovery page: mixes, Fresh Finds from two personal mixes, rotating each page', async () => {
+test('Discovery page: fresh songs and distinct Quick Picks from rotating personal mixes', async () => {
   const mixes = [DW, RR, DAILY].map((uri, n) => ({ id: uri, title: `Mix ${n}`, personal: true, thumbnail: `img${n}` })).concat({ id: EDITORIAL, title: 'Editorial', personal: false })
   const opened = []
   const client = {
@@ -77,16 +77,17 @@ test('Discovery page: mixes, Fresh Finds from two personal mixes, rotating each 
   }
   const first = await loadRecommendationPage('spotify', 0, client)
   assert.equal(first.source, 'spotify')
-  assert.deepEqual(opened, [DW, RR])
+  assert.deepEqual(opened, [DW, RR, DAILY])
   assert.equal(first.mixes.length, 4)
   assert.ok(first.mixes.every(mix => mix.source === 'spotify'))
   assert.equal(first.mixes[0].artwork_url, 'img0')
   assert.deepEqual(first.freshFinds.map(song => song.title), ['Song 0', 'Song 1', 'Song 10', 'Song 11'])
+  assert.deepEqual(first.quickPicks.map(song => song.title), ['Song 20', 'Song 21'])
   assert.ok(first.artists.some(artist => artist.name === 'Guest'))
-  assert.equal(first.albums.length, 4)
+  assert.equal(first.albums.length, 6)
   opened.length = 0
   await loadRecommendationPage('spotify', 1, client)
-  assert.deepEqual(opened, [DAILY, DW])
+  assert.deepEqual(opened, [DAILY, DW, RR])
   assert.equal(sourceName('spotify'), 'Spotify')
 })
 

@@ -410,7 +410,44 @@ function parseAccountPlaylists(root, limit = 100) {
 
 const isMixTitle = title => /^(mixed for you|mixes for you|your mixes)$/i.test(String(title || '').trim())
 const isPersonalMix = playlist => /^RDTMAK/.test(playlist.id)
-const shelfTitle = shelf => textOf(shelf?.header?.musicCarouselShelfBasicHeaderRenderer?.title || shelf?.title)
+const shelfTitle = shelf => textOf(shelf?.header?.musicCarouselShelfBasicHeaderRenderer?.title || shelf?.header?.musicShelfHeaderRenderer?.title || shelf?.title)
+
+// The same five provider-owned Home shelves Mobile recognizes. Do not
+// synthesize results from search or mix playlists under these names.
+function youtubeHomeCategory(title) {
+  const value = String(title || '').trim().toLowerCase()
+  if (value.includes('community')) return 'community'
+  if (value.includes('new release') || value.includes('new album') || value.includes('recently released')) return 'newReleases'
+  if (value.includes('trending')) return 'trending'
+  if (value.includes('featured playlist')) return 'featuredPlaylists'
+  if (value.includes('daily discover') || value.includes('discover mix')) return 'dailyDiscover'
+  return null
+}
+
+function parseAccountHomeCategories(root) {
+  const result = new Map()
+  walkObjects(root, node => {
+    const shelf = node.musicCarouselShelfRenderer || node.musicShelfRenderer
+    if (!shelf) return
+    const id = youtubeHomeCategory(shelfTitle(shelf))
+    if (!id) return
+    const tracks = parseAccountTracks(shelf.contents || [], 100)
+    const playlists = parseAccountPlaylists(shelf.contents || [], 100)
+    const albums = parseAccountEntities(shelf.contents || [], 'album')
+    if (!tracks.length && !playlists.length && !albums.length) return
+    if (!result.has(id)) result.set(id, { id, tracks: [], mixes: [], albums: [] })
+    const group = result.get(id)
+    group.tracks.push(...tracks)
+    group.mixes.push(...playlists)
+    group.albums.push(...albums)
+  })
+  return [...result.values()].map(group => ({
+    ...group,
+    tracks: [...new Map(group.tracks.map(item => [item.videoId, item])).values()],
+    mixes: [...new Map(group.mixes.map(item => [item.id, item])).values()],
+    albums: [...new Map(group.albums.map(item => [item.albumId || `${item.artist}\0${item.title}`, item])).values()],
+  }))
+}
 
 function mixedForYouShelves(root) {
   const shelves = []
@@ -554,7 +591,9 @@ async function fetchAccountData({ cookies, fetchImpl = fetch, limit = 100, force
   }
   const homePages = homeResult.status === 'fulfilled' ? await browsePages('FEmusic_home', homeResult.value, cookieHeader, fetchImpl, config, {
     types: ['sectionListRenderer', 'sectionListContinuation', 'appendContinuationItemsAction', 'reloadContinuationItemsCommand'],
-    stop: pages => mixedForYouShelves(pages).some(shelf => isMixTitle(shelfTitle(shelf))),
+    // Explore several Home continuations rather than stopping at the first
+    // mixes shelf. Bound requests: a provider can offer many unrelated pages.
+    stop: pages => pages.length >= 5,
   }) : { pages: [], error: homeResult.reason?.message || '' }
   const homeRoot = homePages.pages
   const homePlaylists = parseAccountPlaylists(homeRoot)
@@ -577,7 +616,7 @@ async function fetchAccountData({ cookies, fetchImpl = fetch, limit = 100, force
   const mixError = homePages.error || shelfPages.find(result => result.error)?.error || expandedMixes.find(result => result.status === 'rejected')?.reason?.message || expandedMixes.find(result => result.status === 'fulfilled' && result.value.error)?.value.error || ''
   const knownAlbums = new Map([...liked, ...home].filter(track => track.album).map(track => [track.videoId, track]))
   const history = (historyResult.status === 'fulfilled' ? parseAccountTracks(historyResult.value, limit) : []).map(track => track.album || !knownAlbums.has(track.videoId) ? track : { ...track, album: knownAlbums.get(track.videoId).album, albumId: knownAlbums.get(track.videoId).albumId })
-  const data = { liked, playlists, home, homePlaylists, mixes, history, artists: parseAccountEntities(homeRoot, 'artist'), albums: parseAccountEntities(homeRoot, 'album'), authenticated: true, homeError: homeResult.status === 'rejected' ? homeResult.reason?.message : '', mixError }
+  const data = { liked, playlists, home, homePlaylists, mixes, history, categories: parseAccountHomeCategories(homeRoot), artists: parseAccountEntities(homeRoot, 'artist'), albums: parseAccountEntities(homeRoot, 'album'), authenticated: true, homeError: homeResult.status === 'rejected' ? homeResult.reason?.message : '', mixError }
   if (!errors.length && !mixError) {
     accountCache.set(key, { at: Date.now(), data })
     if (accountCache.size > 4) accountCache.delete(accountCache.keys().next().value)
@@ -1179,6 +1218,6 @@ function videoIdFromUrl(url) {
 module.exports = {
   searchSongs, innertubeSearch, spellCheck, parseSearch, parseItem, parseDuration,
   fetchAccountData, fetchAccountPlaylist, fetchMusicPlaylistInfo, fetchMusicPlaylist, parseMusicPlaylistMetadata, youtubeMusicPlaylistId, setAccountLiked, fetchCatalogue, parseArtistPage,
-  fetchRadio, parseAccountTracks, parseAccountMixes, clearAccountCache, accountHeaders, normalizeAccountCookies, parseMusicConfig, isLoggedOutResponse,
+  fetchRadio, parseAccountTracks, parseAccountMixes, parseAccountHomeCategories, youtubeHomeCategory, clearAccountCache, accountHeaders, normalizeAccountCookies, parseMusicConfig, isLoggedOutResponse,
   resolveStream, fetchStream, streamError, videoIdFromUrl, fastFailure,
 }

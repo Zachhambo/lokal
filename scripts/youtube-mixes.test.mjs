@@ -43,6 +43,16 @@ test('account retrieval follows home continuations to find the real mix shelf an
     let result = response([])
     if (body.browseId === 'FEmusic_home' && !body.continuation) result = home([shelf([], 'Listen again')], more('home-page-two'))
     if (body.continuation === 'home-page-two') result = { responseContext: authenticated, continuationContents: { sectionListContinuation: { contents: [shelf([card(0, 'My Supermix'), card(1, 'Discover Mix')], 'Mixed for you', { continuations: more('mix-page-two') })], continuations: more('unrelated-home-page') } } }
+    if (body.continuation === 'unrelated-home-page') result = {
+      responseContext: authenticated,
+      continuationContents: { sectionListContinuation: { contents: [
+        shelf([{ musicTwoRowItemRenderer: {
+          title: { simpleText: 'Real trending track' },
+          navigationEndpoint: { watchEndpoint: { videoId: 'abcdefghijk' } },
+          subtitle: { simpleText: 'Real artist • Album' },
+        } }], 'Trending songs for you'),
+      ] } },
+    }
     if (body.continuation === 'mix-page-two') result = { responseContext: authenticated, continuationContents: { musicCarouselShelfContinuation: { contents: [card(1), card(2), modernMore('mix-page-three')] } } }
     if (body.continuation === 'mix-page-three') result = { responseContext: authenticated, onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: Array.from({ length: 16 }, (_, i) => card(i + 3)) } }] }
     return { ok: true, json: async () => result }
@@ -52,7 +62,8 @@ test('account retrieval follows home continuations to find the real mix shelf an
   assert.equal(account.mixes.length, 19)
   assert.deepEqual(account.mixes.map(mix => mix.id), Array.from({ length: 19 }, (_, i) => `RDTMAK5uy_mix${i}`))
   assert.equal(account.mixError, '')
-  assert.deepEqual(requests.filter(request => request.body.continuation).map(request => request.body.continuation), ['home-page-two', 'mix-page-two', 'mix-page-three'])
+  assert.equal(account.categories.find(group => group.id === 'trending')?.tracks[0]?.title, 'Real trending track')
+  assert.deepEqual(requests.filter(request => request.body.continuation).map(request => request.body.continuation), ['home-page-two', 'unrelated-home-page', 'mix-page-two', 'mix-page-three'])
   for (const request of requests) {
     assert.equal(request.body.context.client.hl, 'en')
     assert.match(request.headers.Authorization, /SAPISIDHASH/)

@@ -261,6 +261,7 @@ contextBridge.exposeInMainWorld('electron', {
   // Discovery's Spotify source: Made For You mixes (electron/ipc/spotifyLikes.js)
   spotifyMadeForYou: (force) => invoke('spotify:madeForYou', force),
   spotifyPlaylist: (uri, force) => invoke('spotify:playlist', uri, force),
+  spotifyRecentlyPlayed: (force) => invoke('spotify:recentlyPlayed', force),
   // AutoMix: a song's analysis (electron/automix)
   automixAnalyze: (track) => invoke('automix:analyze', track),
   automixStemClip: (outgoing, incoming) => invoke('automix:stemClip', outgoing, incoming),

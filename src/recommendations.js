@@ -497,8 +497,8 @@ export async function buildRecommendationMix({ size, previous = [], loadPage, re
   return tracks
 }
 
-// Spotify: the Made For You mixes; Fresh Finds are the songs of two of the
-// personal ones (Discover Weekly and Release Radar first), two more each page.
+// Spotify: genuine Made For You mixes. Fresh Finds and Quick Picks use
+// different personal playlists; recently played requires separate account data.
 async function loadSpotifyPage(page, client, force) {
   const home = await client.spotifyMadeForYou(force)
   if (home?.error && !home?.mixes?.length) return { error: home.error }
@@ -506,12 +506,25 @@ async function loadSpotifyPage(page, client, force) {
   const personal = mixes.filter(mix => mix.personal)
   const pool = personal.length ? personal : mixes
   const start = pool.length ? page * 2 % pool.length : 0
-  const picked = [...pool.slice(start), ...pool.slice(0, start)].slice(0, 2)
+  const rotated = [...pool.slice(start), ...pool.slice(0, start)]
+  // Mobile's cookie-based Spotify Discovery draws from several personal
+  // playlists. Use the first two for Fresh Finds and the next two for Quick
+  // Picks, so the latter are real provider songs instead of fabricated
+  // 'Recently played' or duplicated cards.
+  const picked = rotated.slice(0, 4)
+  const recentJob = typeof client.spotifyRecentlyPlayed === 'function'
+    ? Promise.resolve().then(() => client.spotifyRecentlyPlayed(force)).catch(() => ({ tracks: [] }))
+    : Promise.resolve({ tracks: [] })
   const expanded = await Promise.all(picked.map(mix => client.spotifyPlaylist(mix.id, force).catch(error => ({ error: error.message }))))
-  const candidates = uniqueSongs(expanded.flatMap(data => data?.tracks || []).map(track => ({ ...track, source: 'spotify' })))
+  const recent = await recentJob
+  const from = batches => uniqueSongs(batches.flatMap(data => data?.tracks || []).map(track => ({ ...track, source: 'spotify' })))
+  const fresh = from(expanded.slice(0, 2))
+  const freshKeys = new Set(fresh.map(songKey))
+  const quick = from(expanded.slice(2, 4)).filter(track => !freshKeys.has(songKey(track)))
+  const candidates = uniqueSongs([...fresh, ...quick])
   return {
     source: 'spotify', fetchedAt: Date.now(), candidates,
-    freshFinds: candidates.slice(0, 30), quickPicks: [], liked: [], history: [], mixes, mixError: home?.error || '',
+    freshFinds: fresh.slice(0, 30), quickPicks: quick.slice(0, 30), liked: [], history: (recent?.tracks || []).slice(0, 30), mixes, mixError: home?.error || '',
     artists: [...new Map(candidates.flatMap(track => (track.artists || [track.artist]).map(name => ({ name, source: 'spotify' }))).filter(artist => artist.name).map(artist => [recommendationKey(artist.name), artist])).values()].slice(0, 30),
     albums: [...new Map(candidates.filter(track => track.album).map(track => ({ title: track.album, artist: track.artists?.[0] || track.artist, artwork_url: track.artwork_url })).map(album => [`${album.artist}\0${album.title}`, album])).values()].slice(0, 30),
     warnings: expanded.map(data => data?.error).filter(Boolean),
@@ -536,6 +549,12 @@ export async function loadRecommendationPage(source, page = 0, client = api, { f
     freshFinds: candidates.slice(0, 30), quickPicks: [], liked: liked.slice(0, 30), history: uniqueSongs(account?.history || []).map(track => ({ ...track, source: 'youtube', artwork_url: track.thumbnail })),
     mixes: (account?.mixes || []).map(mix => ({ ...mix, source: 'youtube', artwork_url: mix.thumbnail })),
     mixError: account?.mixError || '',
+    categories: (account?.categories || []).map(group => ({
+      ...group,
+      tracks: (group.tracks || []).map(track => ({ ...track, source: 'youtube', artwork_url: track.artwork_url || track.thumbnail })),
+      mixes: (group.mixes || []).map(mix => ({ ...mix, source: 'youtube', artwork_url: mix.artwork_url || mix.thumbnail })),
+      albums: (group.albums || []).map(album => ({ ...album, source: 'youtube' })),
+    })),
     artists: [...new Map([...(account?.artists || []), ...picks.flatMap(track => (track.artists || [track.artist]).map(name => ({ name, source: 'youtube' })))].filter(artist => artist.name).map(artist => [recommendationKey(artist.name), artist])).values()].slice(0, 30),
     albums: [...new Map([...(account?.albums || []), ...picks.filter(track => track.album).map(track => ({ title: track.album, artist: track.artist, albumId: track.albumId, artwork_url: track.thumbnail }))].map(album => [`${album.artist}\0${album.title}`, album])).values()].slice(0, 30),
     warnings: [account.homeError, account.mixError].filter(Boolean),
