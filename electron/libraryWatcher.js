@@ -131,24 +131,6 @@ function selectedRoot(folder) {
   return configuredRoots().some(candidate => candidate.toLowerCase() === wanted)
 }
 
-function audioFiles(root) {
-  const { AUDIO_EXTS } = require('./ipc/scanner')
-  const { isPreparedStemClipName } = require('./automix/stem-clip')
-  const files = []
-  const walk = dir => {
-    let entries = []
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else if (entry.isFile() && !isPreparedStemClipName(entry.name) &&
-        AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(path.resolve(full))
-    }
-  }
-  walk(root)
-  return files
-}
-
 async function scan(folder) {
   const target = path.resolve(folder)
   const { isReadableRoot } = require('./ipc/networkLibrary')
@@ -156,10 +138,17 @@ async function scan(folder) {
   const db = require('./ipc/db').getDB()
   const scanner = require('./ipc/scanner')
   const before = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
-  await scanner.scanFolder(target, { saveRoot: false, watch: false })
-  // Never prune if the NAS disappeared while the metadata scan was running.
+  const scanned = await scanner.scanFolder(target, { saveRoot: false, watch: false })
+  // A failed metadata read or missing NAS subfolder means the inventory is
+  // incomplete. Never interpret that snapshot as deleted files.
+  if (scanned?.errors) return
   if (!selectedRoot(target) || !await isReadableRoot(target)) return
-  const files = audioFiles(target)
+  const walkFailures = []
+  const files = await scanner.walkDir(target, [], walkFailures)
+  if (walkFailures.length) {
+    console.warn('[libraryWatcher] Skipped destructive prune after incomplete NAS walk:', walkFailures.length)
+    return
+  }
   if (!selectedRoot(target) || !await isReadableRoot(target)) return
   const oldRows = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
   const pruned = require('./libraryPrune').pruneMissingTracks(db, target, files)
