@@ -403,7 +403,9 @@ function importLyrics(db, trackId, content, type) {
   const filePath = trustedFilePath(db, trackId)
   const text = typeof content === 'string' ? content : Array.isArray(content) ? content.join('\n') : String(content ?? '')
   const result = parseImported(text.replace(/\r\n/g, '\n'), type)
-  if (!result) return null
+  // A blank/plain import can parse to a truthy empty result. Never replace
+  // a previously chosen lyric with that empty result.
+  if (!result?.lines?.some(line => String(line?.text || line?.bgText || '').trim())) return null
   // Keep the imported document's original text, like Mobile's normal Save:
   // reconstructed ELRC/TTML may otherwise lose metadata, whitespace or
   // unsupported vendor extensions. Do not duplicate unusually huge files.
