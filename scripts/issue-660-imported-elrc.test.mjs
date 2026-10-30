@@ -49,6 +49,7 @@ test('#660: importing an ELRC preserves real word timestamps for embed and re-ex
   assert.equal(selected.lines[0].translation?.text, 'Bonjour monde')
   const exported = prepareLyricsExport(selected)
   assert.equal(exported.extension, 'elrc')
+  assert.equal(exported.text, raw, 'normal export must preserve imported source text like Mobile')
   assert.match(exported.text, /<00:01\.00>Hello\s+<00:01\.50>world<00:02\.10>/)
   const reparsed = parseAny(exported.text)
   assert.deepEqual(reparsed.lines[0].words.map(word => word.time), [1, 1.5])
