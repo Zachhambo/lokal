@@ -6,9 +6,9 @@ const { resolveNetworkLibraryLocation, probeNetworkLibraryLocation } = require('
 
 test('Windows SMB URLs map to UNC paths without interpreting URL passwords', () => {
   assert.equal(resolveNetworkLibraryLocation('smb://192.168.8.1/disk1_part1', 'win32'),
-    String.raw`\\\\192.168.8.1\disk1_part1`)
+    String.fromCharCode(92, 92) + '192.168.8.1' + String.fromCharCode(92) + 'disk1_part1')
   assert.equal(resolveNetworkLibraryLocation('smb://nas/My%20Music/Albums', 'win32'),
-    String.raw`\\\\nas\My Music\Albums`)
+    String.fromCharCode(92, 92) + 'nas' + String.fromCharCode(92) + 'My Music' + String.fromCharCode(92) + 'Albums')
   assert.throws(() => resolveNetworkLibraryLocation('smb://user:secret@nas/share', 'win32'), /without embedded credentials/)
   assert.throws(() => resolveNetworkLibraryLocation('smb://nas/', 'win32'), /valid share name/)
   assert.throws(() => resolveNetworkLibraryLocation('smb://nas/share/../other', 'win32'), /valid share name/)
