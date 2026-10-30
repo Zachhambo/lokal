@@ -7,53 +7,52 @@ function isAtmosQuality(value) {
   return /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(value || '').trim())
 }
 
-function stereoPlaybackQuality(addon, settings = {}) {
-  const configured = settings.downloadQuality
-  const selected = (addon?.manifest?.qualityOptions || []).find(opt => opt.id === configured)
-  if (!isAtmosQuality(configured) && selected?.kind !== 'spatial') return configured || undefined
-  const options = addon?.manifest?.qualityOptions || []
-  const stereo = options.filter(opt => opt?.id && !isAtmosQuality(opt.id) &&
-    !isAtmosQuality(opt.kind) && !isAtmosQuality(opt.name) &&
-    !isAtmosQuality(opt.label) && opt.kind !== 'spatial')
-  const rank = opt => {
-    const id = String(opt.id).toUpperCase()
-    if (id === 'HI_RES_LOSSLESS') return 0
-    if (id === 'LOSSLESS') return 1
-    if (id === 'HIGH') return 2
-    return opt.kind === 'lossless' ? 3 : 4
-  }
-  stereo.sort((a, b) => rank(a) - rank(b))
-  // Tidal's stereo tiers have stable IDs. Never use the Atmos tier merely
-  // because an add-on didn't publish the optional qualityOptions manifest.
-  return stereo[0]?.id || (/tidal/i.test(addon?.name || '') ? 'HI_RES_LOSSLESS' : undefined)
+function spatialQuality(addon, quality) {
+  const option = (addon?.manifest?.qualityOptions || []).find(q => q.id === quality)
+  return isAtmosQuality(quality) || option?.kind === 'spatial' ||
+    /^amazon(?:-(?:new|web))?$/i.test(addon?.name || '') && String(quality || '').toLowerCase() === 'eac3'
 }
 
-
-/** Ordinary download chooses a stereo tier even if Atmos was saved as default.
- * An Atmos request is only legal for a separately opted-in download operation.
- * Never silently substitute stereo for an explicitly requested Atmos version.
- */
-function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = false, purpose = 'download' } = {}) {
-  if (isAtmosQuality(quality)) {
-    if (!allowAtmos || purpose !== 'download') throw new Error('Dolby Atmos requires the explicit Download Dolby Atmos action')
-    const options = addon?.manifest?.qualityOptions || []
-    const amazon = /^amazon(?:-(?:new|web))?$/i.test(addon?.name || '')
-    const offered = options.find(q => String(q?.id || '').toLowerCase() === (amazon ? 'ac4' : 'dolby_atmos')) ||
-      options.find(q => isAtmosQuality(q?.id))
-    if (!offered) throw new Error('This addon does not offer Dolby Atmos downloads')
-    return offered.id
-  }
-  if (quality) return quality
-  const savedOption = (addon?.manifest?.qualityOptions || []).find(opt => opt.id === settings.downloadQuality)
-  if (settings.downloadQuality && !isAtmosQuality(settings.downloadQuality) && savedOption?.kind !== 'spatial') return settings.downloadQuality
-  const available = (addon?.manifest?.qualityOptions || []).filter(q => q?.id &&
-    q.kind !== 'spatial' && ![q.id, q.name, q.label, q.kind].some(isAtmosQuality))
+// The add-on's saved quality is its playback preference. Never secretly swap
+// a selected Atmos tier for FLAC. Requesting it does not certify the rendition.
+function addonPlaybackQuality(addon, settings = {}) {
+  const options = addon?.manifest?.qualityOptions || []
+  const saved = settings.downloadQuality
+  if (saved && options.some(q => q?.id === saved)) return saved
+  const available = options.filter(q => q?.id && !spatialQuality(addon, q.id))
   const preferred = available.find(q => String(q.id).toUpperCase() === 'HI_RES_LOSSLESS') ||
     available.find(q => String(q.id).toUpperCase() === 'LOSSLESS') ||
     available.find(q => q.kind === 'lossless') || available[0]
-  // Tidal versions can omit qualityOptions. Its stable hi-res stereo tier is
-  // still safer than sending DOLBY_ATMOS or the first manifest choice.
-  return preferred?.id || (/tidal/i.test(addon?.name || '') ? 'HI_RES_LOSSLESS' : 'default')
+  return preferred?.id || (/tidal/i.test(addon?.name || '') ? 'HI_RES_LOSSLESS' : undefined)
 }
 
-module.exports = { isAtmosQuality, stereoPlaybackQuality, addonDownloadQuality }
+// Historical name used by the streaming layer; now returns the saved
+// preference as-is. Its caller must route spatial formats to native output.
+function stereoPlaybackQuality(addon, settings = {}) {
+  return addonPlaybackQuality(addon, settings)
+}
+
+
+/** Download and playback use the add-on setting; explicit one-off quality
+ * overrides it. Only dedicated native output may consume spatial streams.
+ */
+function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = false, purpose = 'download' } = {}) {
+  const options = addon?.manifest?.qualityOptions || []
+  if (quality) {
+    if (spatialQuality(addon, quality)) {
+      if (purpose === 'playback') throw new Error('Configured spatial audio needs native output; PCM playback cannot preserve the encoded stream.')
+      if (!allowAtmos) throw new Error('Native spatial audio requires explicit authorization')
+      const selected = options.find(q => q.id === quality)
+      if (!selected) throw new Error('The addon does not offer the requested spatial tier')
+      return selected.id
+    }
+    return quality
+  }
+  const preferred = addonPlaybackQuality(addon, settings)
+  if (purpose === 'playback' && spatialQuality(addon, preferred)) {
+    throw new Error('Configured spatial audio needs native output; PCM playback cannot preserve the encoded stream.')
+  }
+  return preferred || 'default'
+}
+
+module.exports = { isAtmosQuality, spatialQuality, addonPlaybackQuality, stereoPlaybackQuality, addonDownloadQuality }
