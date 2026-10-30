@@ -35,14 +35,23 @@ async function findFolderArtworkAsync(folder, {
       a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
   })
   if (!images.length) return null
-  const first = images[0]
-  if (coverPriority(first.name) < 0 && images.length !== 1) return null
-  const candidate = path.join(folder, first.name)
-  try {
-    const info = await withTimeout(stat, timeoutMs)(candidate)
-    if (!info.isFile() || info.size <= 0 || info.size > MAX_FOLDER_COVER_BYTES) return null
-    return candidate
-  } catch { return null }
+  // Never choose an arbitrary poster among multiple images. Try each named
+  // cover in priority order: an oversized/unreadable cover.jpg must not hide
+  // a valid folder.jpg or front.png.
+  const candidates = images.filter(entry => coverPriority(entry.name) >= 0)
+  if (!candidates.length && images.length === 1) candidates.push(images[0])
+  for (const entry of candidates) {
+    const candidate = path.join(folder, entry.name)
+    try {
+      const info = await withTimeout(stat, timeoutMs)(candidate)
+      if (info.isFile() && info.size > 0 && info.size <= MAX_FOLDER_COVER_BYTES) {
+        return candidate
+      }
+    } catch {
+      // A failed candidate does not invalidate other named covers.
+    }
+  }
+  return null
 }
 
 module.exports = { findFolderArtworkAsync, coverPriority }
