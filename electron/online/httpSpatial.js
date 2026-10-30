@@ -30,7 +30,7 @@ function selectedHttpSpatial(addon) {
 // HTTP addon resolver enforces its own URL/manifest constraints. Redirects
 // here are also manually validated and bounded; signed URLs, media bytes and
 // the source's token never appear in errors or logs.
-async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes = 512 * 1024 * 1024 } = {}) {
+async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes = 512 * 1024 * 1024, allowPrivate = false } = {}) {
   const fs = require('node:fs')
   const fsp = require('node:fs/promises')
   const path = require('node:path')
@@ -48,9 +48,11 @@ async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes 
   deadline.addEventListener('abort', cancel, { once: true })
   try {
     let current = checkUrl(url)
-    const local = host => /^(?:localhost|127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|\\[?::1\\]?)/i.test(host) ||
+    const local = host => !host.includes('.') || /^(?:localhost|127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|\\[?::1\\]?)/i.test(host) ||
       /\\.(?:local|internal|lan)$/.test(host)
-    const startedLocal = local(current.hostname)
+    if (!allowPrivate && local(current.hostname)) {
+      throw new Error('Selected audio points to a private host')
+    }
     for (let hop = 0; hop <= 4; hop++) {
       const response = await fetchImpl(current, {
         method: 'GET', redirect: 'manual', signal: aborter.signal,
@@ -62,7 +64,7 @@ async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes 
         const next = checkUrl(new URL(location, current).toString())
         // A remote signed-media URL cannot redirect the app into a private
         // network, localhost, or a user's local API.
-        if (!startedLocal && local(next.hostname)) throw new Error('Media redirect to a private host was refused')
+        if (!allowPrivate && local(next.hostname)) throw new Error('Media redirect to a private host was refused')
         current = next
         await response.body?.cancel()
         continue
@@ -87,7 +89,7 @@ async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes 
     await cleanup()
     // Signed media locations can be present in network exception messages.
     throw new Error(error?.name === 'AbortError' ? 'Spatial audio request was cancelled or timed out' :
-      /exceeds the playback staging limit|Too many media redirects|Media redirect lacked a destination|Media redirect to a private host was refused|empty audio|quality is unavailable/.test(error?.message || '')
+      /exceeds the playback staging limit|Too many media redirects|Media redirect lacked a destination|Media redirect to a private host was refused|Selected audio points to a private host|empty audio|quality is unavailable/.test(error?.message || '')
         ? error.message : 'Could not retrieve the requested HTTP spatial rendition')
   } finally {
     signal?.removeEventListener('abort', cancel)
