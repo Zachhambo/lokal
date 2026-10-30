@@ -30,7 +30,7 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
       parts = [];
     }
     if (!parts.length || parts.some(part =>
-      part === '..' || part === '.' || /[\\/:\\x00]/.test(part))) {
+      part === '..' || part === '.' || [0, 47, 58, 92].some(code => part.includes(String.fromCharCode(code))))) {
       throw new Error('Specify a valid share name after the SMB server.')
     }
     if (uri.port) throw new Error('Windows UNC shares use the system SMB port. Remove the custom port.')
@@ -40,7 +40,7 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
     if (platform !== 'win32') throw new Error('Windows UNC paths are only supported on Windows. Use the mounted folder path.')
     const parts = input.slice(2).split('\\').filter(Boolean)
     if (parts.length < 2 || parts.some(part =>
-      part === '..' || part === '.' || /[\/\\x00]/.test(part))) {
+      part === '..' || part === '.' || [0, 47].some(code => part.includes(String.fromCharCode(code))))) {
       throw new Error('Use a complete UNC path such as \\\\nas\\Music.')
     }
     return path.win32.normalize(input)
