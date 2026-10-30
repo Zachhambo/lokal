@@ -8,6 +8,7 @@ import LyricsPanel from './LyricsPanel'
 import SearchDrawer from './LyricsSearchDrawer'
 import { api, wordSyncEnabled } from '../api'
 import { trackFullArtURL } from '../onlineTracks'
+import { showToast } from './Toaster'
 
 // How the player and full-screen lyrics trade places (FullscreenPlayer uses
 // these too): the view being left fades out quickly, the one arriving fades in
@@ -73,14 +74,19 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
 
   const importLyrics = async () => {
     if (!currentTrack || !api.isElectron) return
-    const fp = await api.openFile([{ name: 'Lyrics', extensions: ['lrc', 'txt', 'ttml', 'xml'] }])
-    if (!fp) return
-    const content = await api.readFileBinary(fp)
-    if (!content) return
-    const ext = fp.split('.').pop().toLowerCase()
-    const type = ext === 'ttml' || ext === 'xml' ? 'ttml' : ext === 'lrc' ? 'lrc' : 'txt'
-    await api.importLyrics(currentTrack.id, content, type)
-    setRefreshKey(k => k + 1)
+    try {
+      const fp = await api.openFile([{ name: 'Lyrics', extensions: ['lrc', 'elrc', 'txt', 'ttml', 'xml'] }])
+      if (!fp) return
+      const content = await api.readFileBinary(fp)
+      if (!content?.trim()) throw new Error('This lyrics file is empty.')
+      const ext = fp.split('.').pop().toLowerCase()
+      const type = ext === 'ttml' || ext === 'xml' ? 'ttml' : ext === 'elrc' ? 'elrc' : ext === 'lrc' ? 'lrc' : 'txt'
+      const imported = await api.importLyrics(currentTrack.id, content, type)
+      if (!imported?.lines?.length) throw new Error('The selected lyrics file could not be parsed.')
+      setRefreshKey(k => k + 1)
+    } catch (error) {
+      showToast(error?.message || 'Could not import lyrics.')
+    }
   }
 
   const artSrc = trackFullArtURL(currentTrack)
@@ -211,9 +217,12 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
                 onSessionChange={updateSearchSession}
                 onClose={() => setShowSearch(false)}
                 onSelect={(lyrics, type) => {
-                  api.importLyrics(currentTrack.id, lyrics, type)
-                  setRefreshKey(k => k + 1)
+                  const trackId = currentTrack.id
                   setShowSearch(false)
+                  Promise.resolve(api.importLyrics(trackId, lyrics, type)).then(imported => {
+                    if (!imported?.lines?.length) throw new Error('No usable lyrics were found.')
+                    if (usePlayerStore.getState().currentTrack?.id === trackId) setRefreshKey(k => k + 1)
+                  }).catch(error => showToast(error?.message || 'Could not import lyrics.'))
                 }}
               />
             )}
