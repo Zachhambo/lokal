@@ -32,6 +32,10 @@ test('Windows GL.iNet WebDAV uses HTTPS WebClient with custom port', () => {
   assert.throws(() => resolveNetworkLibraryLocation(
     'https://user:secret@nas.example/dav', 'win32'), /must not contain credentials/)
   assert.throws(() => resolveNetworkLibraryLocation(
+    'https://nas.example/dav?', 'win32'), /query or fragment/)
+  assert.throws(() => resolveNetworkLibraryLocation(
+    'https://nas.example/dav#', 'win32'), /query or fragment/)
+  assert.throws(() => resolveNetworkLibraryLocation(
     'https://nas.example/dav/%2e%2e/private', 'win32'), /Invalid WebDAV path segment/)
 })
 
