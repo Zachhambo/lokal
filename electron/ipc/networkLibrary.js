@@ -3,8 +3,6 @@
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { probeNetworkLibraryLocation } = require('../networkShare')
-const scanner = require('./scanner')
-const { getDB } = require('./db')
 
 const STAT_TIMEOUT_MS = 8000
 
@@ -33,9 +31,9 @@ async function isReadableRoot(folder, {
 /// This also protects the renderer from fs.statSync on disconnected UNC paths
 /// in the legacy scanner. Accessible roots still use its metadata workflow.
 async function scanNetworkRoots(inputs, {
-  existing = scanner.configuredMusicFolders(),
-  scan = scanner.scanFolders,
-  db = getDB(),
+  existing = [],
+  scan,
+  db,
   isReadable = isReadableRoot,
 } = {}) {
   const candidates = Array.isArray(inputs) ? inputs : []
@@ -78,14 +76,36 @@ async function scanNetworkRoots(inputs, {
 }
 
 function registerNetworkLibraryHandlers(ipcMain) {
+  const scanner = require('./scanner')
+  const { getDB } = require('./db')
+  const run = roots => scanNetworkRoots(roots, {
+    existing: scanner.configuredMusicFolders(),
+    scan: scanner.scanFolders,
+    db: getDB(),
+  })
+  const progress = (event, scanning, status) => {
+    try {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('scanner:progress', {
+          scanning, total: status?.total ?? 0, done: status?.done ?? 0,
+          errors: status?.errors ?? 0, skipped: status?.skipped ?? 0,
+          ...(!scanning ? { complete: true } : {}),
+        })
+      }
+    } catch {}
+  }
   // These two handlers were registered by the legacy scanner. Replace only
   // their orchestration; actual scan and playback remain unchanged.
   ipcMain.removeHandler('scanner:scanFolders')
   ipcMain.removeHandler('scanner:connectNetworkShare')
   ipcMain.handle('scanner:scanFolders', async (event, inputs) => {
+    progress(event, true)
     try {
-      return await scanNetworkRoots(inputs)
+      const result = await run(inputs)
+      progress(event, false, result.status)
+      return result
     } catch (error) {
+      progress(event, false)
       return { error: error?.message || 'Could not scan the selected folders.' }
     }
   })
@@ -96,8 +116,12 @@ function registerNetworkLibraryHandlers(ipcMain) {
       if (!current.some(x => x.toLowerCase() === folder.toLowerCase())) {
         current.push(folder)
       }
-      return await scanNetworkRoots(current)
+      progress(event, true)
+      const result = await run(current)
+      progress(event, false, result.status)
+      return result
     } catch (error) {
+      progress(event, false)
       return { error: error?.message || 'Could not open this network share.' }
     }
   })
