@@ -11,7 +11,6 @@ const { ExtensionHost, safePath, runTool, mediaInfo } = require('./host')
 const { ExtensionRuntime } = require('./runtime')
 
 const REGISTRY = 'https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/refs/heads/main/registry.json'
-const AMAZON_NEW_REGISTRY = 'https://raw.githubusercontent.com/CHEYCKIT/Mornye-Extension/refs/heads/feature/amazon-new-release-20261029/amazon-new-registry.json'
 const COMPAT_VERSION = '5.1.0'
 const FEATURES = { signedSession: 3, sessionRefresh: 1, sessionGrant: 1, globalAction: 1, webviewAuth: 1, downloadSegments: 1, patternedFileTransform: 1, preparedContext: 1, accountForms: 1, accountDownloadMode: 1, directMedia: 1 }
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex')
@@ -159,8 +158,6 @@ class PackageService {
     const defaultId=hash(REGISTRY).slice(0,16)
     db.prepare('INSERT OR IGNORE INTO mornye_repositories (id,url,name) VALUES (?,?,?)').run(defaultId,REGISTRY,'Mornye official')
     db.prepare('UPDATE mornye_repositories SET name=? WHERE id=? AND name=?').run('Mornye official',defaultId,'SpotiFLAC official')
-    const newRegistryId=hash(AMAZON_NEW_REGISTRY).slice(0,16)
-    db.prepare('INSERT OR IGNORE INTO mornye_repositories (id,url,name) VALUES (?,?,?)').run(newRegistryId,AMAZON_NEW_REGISTRY,'Amazon (New) updates')
   }
   tools() {
     if(this.toolProvider)return this.toolProvider()
@@ -169,21 +166,6 @@ class PackageService {
     return {ffmpeg:settings.ffmpeg_path || 'ffmpeg',ffprobe:settings.ffprobe_path || 'ffprobe'}
   }
   find(key) {const row=this.db.prepare('SELECT * FROM mornye_packages WHERE key=?').get(key);return row?{...row,manifest:JSON.parse(row.manifest_json),methods:JSON.parse(row.methods_json)}:null}
-  /** Included in Electron's packaged files; never requires a third-party
-   * registry or changes the existing Amazon user's credentials/settings.
-   * Installed packages newer than the bundled copy are preserved.
-   */
-  async ensureBundledAmazonNew() {
-    const existing = this.find(keyOf('amazon-new'))
-    if (existing && compareVersions(existing.manifest.version, '2.3.16') >= 0) return existing
-    const bytes = await fsp.readFile(path.join(__dirname, 'bundled', 'amazon-new.sflx'))
-    const checksum = crypto.createHash('sha256').update(bytes).digest('hex')
-    if (checksum !== '967bc8cf940cf39029ef7e33f55bf37c5f686028332570ef484579ebc75c5543') {
-      throw new Error('Bundled Amazon (New) archive checksum mismatch')
-    }
-    return this.install({ buffer: bytes })
-  }
-
   settings(addon) {
     // Settings saved by another build can be unreadable (the OS credential vault
     // key changed): the addon then shows its defaults rather than failing to list.
