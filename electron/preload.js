@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld('electron', {
   readFileLyrics: (id) => invoke('lyrics:readFile', id),
   writeFileLyrics: (id, text) => invoke('lyrics:writeFile', id, text),
   embedLyricsFrom: (providerId, id, ti, ar, al, d) => invoke('lyrics:embedFrom', providerId, id, ti, ar, al, d),
+  exportLyricsFile: (providerId, id, ti, ar, al, d) => invoke('lyrics:exportFile', providerId, id, ti, ar, al, d),
   importLyrics: (id, c, t, fp) => invoke('lyrics:import', id, c, t, fp),
   clearLyricsDb: () => invoke('db:clearLyrics'),
 
