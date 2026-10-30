@@ -300,7 +300,16 @@ async function getLyrics(db, args) {
           // The song's own lyrics, saved unsynced: read again, so a file whose
           // timed lyrics were missed before (two lyrics tags, a SYLT frame)
           // gets them now. Keep the existing words if the refresh cannot improve them.
-          cachedLocalLyrics = fromRow(row, meta, db)
+          const existing = fromRow(row, meta, db)
+          // Some older cached rows say "unsynced" even though their saved
+          // lines have real timestamps and meta.sync is line/syllable. Repair
+          // the stale type rather than letting the inconsistent row win the
+          // quality comparison and keep showing as plain lyrics.
+          const hasRealTime = existing.lines.some(line => line?.text && line.time != null) &&
+            !isUntimed(existing.lines)
+          cachedLocalLyrics = hasRealTime && ['line', 'syllable'].includes(existing.sync)
+            ? { ...existing, type: 'synced' }
+            : existing
         } else {
           if (trackId && row.track_id !== trackId) writeRow(db, trackId, filePath, fromRow(row, meta, db), { attempts: meta.attempts, pinned: meta.pinned })
           return fromRow(row, meta, db)
