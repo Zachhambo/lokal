@@ -224,9 +224,10 @@ function watchLibraryRoots(folderPaths = []) {
   for (const value of Array.isArray(folderPaths) ? folderPaths : []) {
     if (typeof value !== 'string' || !value.trim()) continue
     const full = path.resolve(value.trim())
-    let stat
-    try { stat = fs.statSync(full) } catch { continue }
-    if (!stat.isDirectory() || seen.has(full.toLowerCase())) continue
+    // The network-source scanner already probes directory access before
+    // supplying roots. A synchronous statSync here could still freeze
+    // Electron if the NAS disappears between probing and watcher setup.
+    if (seen.has(full.toLowerCase())) continue
     seen.add(full.toLowerCase())
     nextRoots.push(full)
   }
@@ -253,6 +254,10 @@ function watchLibraryRoots(folderPaths = []) {
       console.warn('[libraryWatcher] Could not watch music folder:', next, error.message)
     }
   }
+  // Only directories whose fs.watch was successfully established are active.
+  // Unavailable NAS roots remain in persisted settings, not in live watchers.
+  roots = [...watchers.keys()]
+  root = roots[0] || null
 }
 
 function stopWatching() {
