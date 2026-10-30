@@ -330,6 +330,19 @@ function HomeContent({ user }) {
   const playQueue = usePlayerStore(s => s.playQueue)
   const navigate = useNavigate()
   const menu = useContextMenu()
+  const [showDiscoveryEditor, setShowDiscoveryEditor] = useState(false)
+  const [shelfLayouts, setShelfLayouts] = useState(() => Object.fromEntries(
+    Object.keys(DISCOVERY_SHELF_DEFAULTS).map(provider => {
+      try { return [provider, readShelfLayout(window.localStorage, uidKey, provider)] }
+      catch { return [provider, restoreShelfLayout(provider)] }
+    })
+  ))
+  const changeShelfLayout = (provider, next) => {
+    const safe = restoreShelfLayout(provider, next)
+    setShelfLayouts(previous => ({ ...previous, [provider]: safe }))
+    try { writeShelfLayout(window.localStorage, uidKey, provider, safe) }
+    catch { showToast(t('Could not save Discovery section preferences.')) }
+  }
   const [saving, setSaving] = useState(null)
   const [localArtists, setLocalArtists] = useState([])
   const [artistsLoaded, setArtistsLoaded] = useState(false)
@@ -509,7 +522,14 @@ function HomeContent({ user }) {
   }, [user?.id])
 
   const allowedDiscovery = item => !hiddenArtists.has(discoveryArtistKey(item?.artist)) && !hiddenArtists.has(discoveryArtistKey(item?.seedArtist))
-  const data = discovery ? { ...discovery, ...Object.fromEntries(['albums', 'freshFinds', 'quickPicks', 'liked', 'history'].map(key => [key, discovery[key]?.filter(allowedDiscovery)])) } : discovery
+  const data = discovery ? {
+    ...discovery,
+    ...Object.fromEntries(['albums', 'freshFinds', 'quickPicks', 'liked', 'history']
+      .map(key => [key, discovery[key]?.filter(allowedDiscovery)])),
+    categories: (discovery.categories || []).map(category => ({
+      ...category, tracks: (category.tracks || []).filter(allowedDiscovery),
+    })),
+  } : discovery
   const recommendationTracks = data?.freshFinds || []
   const goHome = (next, section = null) => navigate(next === 'home' ? '/' : `/home/${next}${section ? `/${section}` : ''}`)
   const openMixMenu = (event, mix) => menu.open(event, [
@@ -600,8 +620,9 @@ function HomeContent({ user }) {
   const openTrackMenu = (event, track, section = 'fresh') => {
     const isLiked = section === 'liked'
     const isQuick = section === 'quick'
-    const context = isLiked ? 'YouTube Music Likes' : isQuick ? 'Quick Picks' : 'Fresh Finds'
-    const pool = isLiked ? data?.liked || [] : isQuick ? data?.quickPicks || [] : recommendationTracks
+    const category = data?.categories?.find(group => group.id === section)
+    const context = category ? DISCOVERY_SHELF_TITLES[section] : isLiked ? 'YouTube Music Likes' : isQuick ? 'Quick Picks' : 'Fresh Finds'
+    const pool = category ? category.tracks || [] : isLiked ? data?.liked || [] : isQuick ? data?.quickPicks || [] : recommendationTracks
     return menu.open(event, [
       { label: 'Play', icon: Play, onSelect: () => playRecommendation(track, context, pool) },
       { label: 'Play next', icon: Clock, onSelect: () => withRecommendation(track, playNextMany) },
@@ -619,6 +640,8 @@ function HomeContent({ user }) {
   }
   const sectionProps = {
     data: data ? { ...data, artists: visibleArtists(data.artists) } : data, localArtists: visibleArtists(localArtists), allArtists: [...localArtists, ...(discovery?.artists || [])], source: recommendationSource, loading: discoveryLoading, error: discoveryError,
+    layout: shelfLayouts[recommendationSource] || restoreShelfLayout(recommendationSource),
+    onEditCategory: event => menu.open(event, [{ label: 'Edit', icon: Pencil, onSelect: () => setShowDiscoveryEditor(true) }]),
     getDownloadTrack: resolveDownloadTrack,
     onProviderMixPlay: playProviderMix,
     onProviderMixMenu: (event, mix) => menu.open(event, [
@@ -633,7 +656,9 @@ function HomeContent({ user }) {
     }, activeSection: route.section, onSection: section => goHome('discovery', section), onPlay: (track, section = 'fresh') => {
       const isLiked = section === 'liked'
       const isQuick = section === 'quick'
-      playRecommendation(track, isLiked ? 'YouTube Music Likes' : isQuick ? 'Quick Picks' : 'Fresh Finds', isLiked ? data.liked : isQuick ? data.quickPicks : recommendationTracks)
+      const category = data?.categories?.find(group => group.id === section)
+      const pool = category ? category.tracks || [] : isLiked ? data.liked : isQuick ? data.quickPicks : recommendationTracks
+      playRecommendation(track, category ? DISCOVERY_SHELF_TITLES[section] : isLiked ? 'YouTube Music Likes' : isQuick ? 'Quick Picks' : 'Fresh Finds', pool)
     }, onTrackMenu: openTrackMenu,
     resolveTracks: (rows, options = {}) => {
       const account = sessionState.account
@@ -705,6 +730,10 @@ function HomeContent({ user }) {
         : localHome
       }
     </SectionSwap>
+    <DiscoveryShelfEditor open={showDiscoveryEditor} provider={recommendationSource}
+      layout={shelfLayouts[recommendationSource] || restoreShelfLayout(recommendationSource)}
+      onChange={layout => changeShelfLayout(recommendationSource, layout)}
+      onClose={() => setShowDiscoveryEditor(false)} />
     <ContextMenu menu={menu} />
   </div>
 }
