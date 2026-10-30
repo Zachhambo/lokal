@@ -61,17 +61,18 @@ async function scanNetworkRoots(inputs, {
   }
 
   let result = { results: [], status: null }
-  if (online.length) {
-    // The existing scanner performs all metadata/index/bookkeeping work.
-    // Feed only probed roots so its synchronous stat cannot block on a known
-    // offline SMB mount. A network disconnect mid-scan is still possible.
-    result = await scan(online)
-    if (result?.error) return result
+  try {
+    if (online.length) {
+      // Metadata scanning only sees currently reachable roots. A new network
+      // failure during that scan must never erase a previously saved NAS.
+      result = await scan(online)
+    }
+  } finally {
+    // The scanner saves only online roots. Restore all configured folders,
+    // even when a scan throws halfway through its work.
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
   }
-  // scan(online) temporarily drops offline roots from persisted preferences.
-  // Always restore them, including the folder at index zero.
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
   return { ...result, folders, offlineFolders: offline }
 }
 
