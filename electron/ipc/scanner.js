@@ -1,6 +1,7 @@
 const { mergeDuplicates, mergeAllDuplicates } = require('./mergeDuplicates')
 const path = require('path')
 const fs = require('fs-extra')
+const fsp = require('node:fs/promises')
 const crypto = require('crypto')
 const https = require('https')
 const http = require('http')
@@ -219,7 +220,7 @@ async function walkDir(dir, files = [], failures = null) {
     visited.add(current)
     let entries
     try {
-      entries = await withTimeout(fs.promises.readdir)(current, { withFileTypes: true })
+      entries = await withTimeout(fsp.readdir)(current, { withFileTypes: true })
     } catch (error) {
       failures?.push(current)
       console.warn('[scanner] Folder enumeration failed:', current, error.message)
@@ -402,7 +403,10 @@ async function scanFolders(folderPaths = []) {
     const full = path.resolve(value.trim())
     if (seen.has(full.toLowerCase())) continue
     let available = false
-    try { available = fs.statSync(full).isDirectory() } catch {}
+    try {
+      available = (await require('./networkLibrary')
+        .withTimeout(fsp.stat)(full)).isDirectory()
+    } catch {}
     if (!available && !previous.has(full.toLowerCase())) continue
     seen.add(full.toLowerCase())
     folders.push(full)
@@ -562,7 +566,7 @@ async function scanFolder(folderPath, {
 
   for (const filePath of files) {
     try {
-      const stat = await require('./networkLibrary').withTimeout(fs.promises.stat)(filePath)
+      const stat = await require('./networkLibrary').withTimeout(fsp.stat)(filePath)
       const trackId = 't-' + hashFile(filePath, stat)
       const existing = db.prepare('SELECT id, last_modified, artwork_path FROM tracks WHERE file_path = ?').get(filePath)
       const folderArtwork = await getFolderArtwork(filePath)
