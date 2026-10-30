@@ -77,7 +77,7 @@ async function flush() {
     for (const folder of affected) catchUpLater(folder)
     return
   }
-  running = require('./ipc/scanner').applyFileChanges(ready)
+  running = require('./ipc/scanner').applyFileChanges(ready, [...roots])
     .then(({ added, updated, removed }) => {
       if (!added.length && !updated.length && !removed.length) return
       console.log(`[libraryWatcher] ${added.length} added, ${updated.length} updated, ${removed.length} removed`)
