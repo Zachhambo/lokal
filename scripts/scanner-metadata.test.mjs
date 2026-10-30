@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { parseWithDeadline, stopMetadataWorker } = require('../electron/ipc/scannerMetadata')
 
-test.after(async () => { await stopMetadataWorker() })
+after(async () => { await stopMetadataWorker() })
 
 // A valid 1-second mono PCM WAV verifies worker IPC preserves parsed
 // metadata and that retaining duration:true does not require full-file reads.
