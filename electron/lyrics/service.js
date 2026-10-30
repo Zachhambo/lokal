@@ -362,6 +362,30 @@ async function getLyricsFrom(db, args, providerId) {
   return result ? { ...result, attempts } : { type: null, lines: [], source: providerId, attempts, miss: true }
 }
 
+/** Resolve exactly the lyrics selected in the player for an explicit
+ * embed/export action. Imported LRC/ELRC is a pinned cache result, not a
+ * network provider. Re-fetching an unknown 'imported' provider returned no
+ * lyrics, causing issue #660 when users clicked Insert into track.
+ *
+ * A pinned source must match *this track and this requested source*; never
+ * embed a stale selection from a different song/provider.
+ */
+async function getLyricsForSaving(db, args, providerId) {
+  ensureSchema(db)
+  if (!args?.trackId || !providerId) throw new Error('Select lyrics for this song before saving.')
+  const filePath = trustedFilePath(db, args.trackId)
+  const row = readRow(db, args.trackId, filePath)
+  const meta = parseMeta(row)
+  if (row?.track_id === args.trackId && row.source === providerId && meta?.pinned) {
+    const selected = fromRow(row, meta, db)
+    if (selected.lines?.some(line => line?.text || line?.bgText)) return selected
+  }
+  if (providerId === 'imported') {
+    throw new Error('The imported lyrics are no longer selected. Import the file again before saving.')
+  }
+  return getLyricsFrom(db, args, providerId)
+}
+
 function importLyrics(db, trackId, content, type) {
   ensureSchema(db)
   if (!trackId) return null
@@ -399,4 +423,4 @@ async function romanize(db, trackId, lines) {
   return translation.romanize(db, trackId, lines)
 }
 
-module.exports = { getLyrics, getLyricsFrom, importLyrics, clearCache, sources, translate, romanize, readSettings, upgradeLegacy, lyricsQualityRank, retainBetterLyrics }
+module.exports = { getLyrics, getLyricsFrom, getLyricsForSaving, importLyrics, clearCache, sources, translate, romanize, readSettings, upgradeLegacy, lyricsQualityRank, retainBetterLyrics }
