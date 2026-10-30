@@ -8,6 +8,7 @@ import LyricsPanel from './LyricsPanel'
 import SearchDrawer from './LyricsSearchDrawer'
 import { api, wordSyncEnabled } from '../api'
 import { trackFullArtURL } from '../onlineTracks'
+import { announceLyricsChanged } from '../lyricLine'
 import { showToast } from './Toaster'
 
 // How the player and full-screen lyrics trade places (FullscreenPlayer uses
@@ -83,6 +84,7 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
       const type = ext === 'ttml' || ext === 'xml' ? 'ttml' : ext === 'elrc' ? 'elrc' : ext === 'lrc' ? 'lrc' : 'txt'
       const imported = await api.importLyrics(currentTrack.id, content, type)
       if (!imported?.lines?.length) throw new Error('The selected lyrics file could not be parsed.')
+      announceLyricsChanged(currentTrack.id)
       setRefreshKey(k => k + 1)
     } catch (error) {
       showToast(error?.message || 'Could not import lyrics.')
@@ -221,6 +223,7 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
                   setShowSearch(false)
                   Promise.resolve(api.importLyrics(trackId, lyrics, type)).then(imported => {
                     if (!imported?.lines?.length) throw new Error('No usable lyrics were found.')
+                    announceLyricsChanged(trackId)
                     if (usePlayerStore.getState().currentTrack?.id === trackId) setRefreshKey(k => k + 1)
                   }).catch(error => showToast(error?.message || 'Could not import lyrics.'))
                 }}
