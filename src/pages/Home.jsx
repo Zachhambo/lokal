@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, History, ListEnd, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, History, ListEnd, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus, Pencil } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import TrackList from '../components/TrackList'
 import FadeImg from '../components/FadeImg'
@@ -29,6 +29,8 @@ import ReleasesPanel from '../components/ReleasesPanel'
 import { onlineAlbumPath } from '../onlineBrowse'
 import UnfollowedArtists from '../components/UnfollowedArtists'
 import MadeForYou from '../components/MadeForYou'
+import DiscoveryShelfEditor from '../components/DiscoveryShelfEditor'
+import { DISCOVERY_SHELF_DEFAULTS, DISCOVERY_SHELF_TITLES, readShelfLayout, restoreShelfLayout, visibleShelfIds, writeShelfLayout } from '../discoveryShelfLayout.mjs'
 import FlowPanel from '../components/FlowPanel'
 import { madeForYou } from '../madeForYou'
 import { personalizedHomeMessages } from '../homeGreeting.mjs'
@@ -88,10 +90,10 @@ function MixCard({ mix, onClick, onSave, saving, onContextMenu }) {
   )
 }
 
-function SectionHeader({ icon: Icon, eyebrow, title, count, subtitle, onExpand, expanded, action }) {
+function SectionHeader({ icon: Icon, eyebrow, title, count, subtitle, onExpand, expanded, action, onContextMenu }) {
   const { t } = useTranslation()
   return (
-    <div className="mb-4 flex items-end justify-between gap-4">
+    <div className="mb-4 flex items-end justify-between gap-4" onContextMenu={onContextMenu} title={onContextMenu ? t('Right-click to edit Discovery sections') : undefined}>
       <div className="min-w-0">
         {eyebrow && <p className="mb-1 text-[11px] font-display uppercase tracking-[0.24em] text-muted">{t(eyebrow)}</p>}
         <div className="flex items-center gap-2"><Icon size={15} className="text-accent" /><h2 className="text-xl font-medium text-white">{t(title)}</h2>{count != null && <span className="text-sm text-muted">{count}</span>}</div>
@@ -154,39 +156,152 @@ function ScrobbleHistory({ entries, resolveTracks }) {
   return <div className="space-y-6">{groups.map(group => <section key={group.date}><div className="mb-2 flex items-center gap-2 text-xs font-display uppercase tracking-widest text-muted"><CalendarDays size={14} />{group.date}</div><div className="rounded-xl border border-border bg-elevated p-3"><TrackList tracks={recommendationRows(group.entries)} extraColumns={historyColumns(t)} resolveTracks={resolveTracks} reduceMotion context={{ type: 'discovery', name: 'Scrobble History' }} /></div></section>)}</div>
 }
 
-function RecommendationSections({ data, localArtists, allArtists, source: selectedSource, loading, error, onRefresh, onSourceChange, onPlay, resolveTracks, getDownloadTrack, onTrackMenu, onRadio, onArtistPlay, onArtistMenu, onAlbumPlay, onAlbumMenu, onProviderMixPlay, onProviderMixMenu, onSaveFresh, onSaveQuick, saving, onOpenSettings, activeSection, onSection }) {
+function RecommendationSections({ data, localArtists, allArtists, source: selectedSource, layout, onEditCategory, loading, error, onRefresh, onSourceChange, onPlay, resolveTracks, getDownloadTrack, onTrackMenu, onRadio, onArtistPlay, onArtistMenu, onAlbumPlay, onAlbumMenu, onProviderMixPlay, onProviderMixMenu, onSaveFresh, onSaveQuick, saving, onOpenSettings, activeSection, onSection }) {
   const { t } = useTranslation()
   const source = sourceName(selectedSource)
   const quick = Array.isArray(data?.quickPicks) ? data.quickPicks : []
-  const liked = Array.isArray(data?.liked) ? data.liked : []
-  const secondary = selectedSource === 'youtube' ? liked : quick
-  const secondaryKey = selectedSource === 'youtube' ? 'liked' : 'quick'
   const history = Array.isArray(data?.history) ? data.history : []
   const albums = Array.isArray(data?.albums) ? data.albums : []
   const providerMixes = Array.isArray(data?.mixes) ? data.mixes : []
   const artists = Array.isArray(data?.artists) ? data.artists : []
   const fresh = Array.isArray(data?.freshFinds) ? data.freshFinds : []
+  const categoryMap = new Map((data?.categories || []).filter(group =>
+    ['community', 'newReleases', 'trending', 'featuredPlaylists', 'dailyDiscover'].includes(group.id)
+  ).map(group => [group.id, group]))
   const toggle = key => onSection?.(activeSection === key ? null : key)
+  const categoryMenu = id => event => onEditCategory?.(event, id)
+  const header = (id, Icon, count, { eyebrow, subtitle, action } = {}) => (
+    <SectionHeader icon={Icon} title={t(DISCOVERY_SHELF_TITLES[id] || id)}
+      eyebrow={eyebrow} subtitle={subtitle} count={count}
+      onExpand={count ? () => toggle(id) : undefined} expanded={activeSection === id}
+      action={action} onContextMenu={categoryMenu(id)} />
+  )
+  const trackShelf = (id, tracks, { icon = Music, subtitle, action } = {}) => tracks.length ? (
+    <section key={id} data-discovery-shelf={id}>
+      {header(id, icon, tracks.length, { subtitle, action })}
+      <div className="grid gap-2 @md:grid-cols-2 @lg:grid-cols-3">
+        {(activeSection === id ? tracks : tracks.slice(0, 6)).map(track =>
+          <DiscoveryTrack key={songKey(track)} track={track} getDownloadTrack={getDownloadTrack}
+            onPlay={item => onPlay(item, id)} onRadio={onRadio}
+            onContextMenu={(event, item) => onTrackMenu(event, item, id)} />)}
+      </div>
+    </section>
+  ) : null
+  const albumShelf = (id, entries) => entries.length ? (
+    <section key={id} data-discovery-shelf={id}>
+      {header(id, Disc3, entries.length)}
+      <div className="grid grid-cols-2 gap-4 @md:grid-cols-3 @lg:grid-cols-6">
+        {(activeSection === id ? entries : entries.slice(0, 6)).map(album =>
+          <AlbumRecommendation key={album.albumId || `${album.artist}-${album.title}`}
+            album={album} onClick={onAlbumPlay} onContextMenu={onAlbumMenu} />)}
+      </div>
+    </section>
+  ) : null
+  const mixCards = (mixes, id) => (
+    <div className="grid grid-cols-2 gap-4 @md:grid-cols-3 @lg:grid-cols-6">
+      {(activeSection === id ? mixes : mixes.slice(0, 6)).map((mix, index) =>
+        <div key={mix.id} className={activeSection === id || index < 2 ? '' : index < 3 ? 'hidden @md:block' : 'hidden @lg:block'}>
+          <AlbumRecommendation album={{ ...mix, artist: mix.author || source }}
+            onClick={() => onProviderMixPlay(mix)} onContextMenu={event => onProviderMixMenu(event, mix)} />
+        </div>)}
+    </div>
+  )
+  // Each entry is a provider-native shelf, not a generic set of search
+  // results relabelled as Trending or Daily Discover.
+  const youtubeCategory = id => {
+    const category = categoryMap.get(id)
+    if (!category) return null
+    const tracks = category.tracks || [], mixes = category.mixes || [], releases = category.albums || []
+    const count = tracks.length + mixes.length + releases.length
+    if (!count) return null
+    const expanded = activeSection === id
+    return (
+      <section key={id} data-discovery-shelf={id}>
+        {header(id, Sparkles, count)}
+        {mixes.length > 0 && mixCards(mixes, id)}
+        {releases.length > 0 && <div className="mt-3 grid grid-cols-2 gap-4 @md:grid-cols-3 @lg:grid-cols-6">
+          {(expanded ? releases : releases.slice(0, 6)).map(album =>
+            <AlbumRecommendation key={album.albumId || `${album.artist}-${album.title}`}
+              album={album} onClick={onAlbumPlay} onContextMenu={onAlbumMenu} />)}
+        </div>}
+        {tracks.length > 0 && <div className="mt-3 grid gap-2 @md:grid-cols-2 @lg:grid-cols-3">
+          {(expanded ? tracks : tracks.slice(0, 6)).map(track =>
+            <DiscoveryTrack key={songKey(track)} track={track} getDownloadTrack={getDownloadTrack}
+              onPlay={item => onPlay(item, id)} onRadio={onRadio}
+              onContextMenu={(event, item) => onTrackMenu(event, item, id)} />)}
+        </div>}
+      </section>
+    )
+  }
+  const sections = {
+    mixes: ['youtube', 'spotify'].includes(selectedSource) && data ? (
+      <section key="mixes" data-discovery-shelf="mixes">
+        {header('mixes', Radio, providerMixes.length)}
+        {providerMixes.length ? mixCards(providerMixes, 'mixes')
+          : <p role="status" className="rounded-xl border border-border bg-elevated p-4 text-sm text-muted">
+            {loading ? t('Loading your {source} mixes…', { source })
+              : data.mixError ? t('Could not load your {source} mixes. {error}', { source, error: data.mixError })
+                : t('{source} did not return your personalized mixes. Refresh to try again.', { source })}
+          </p>}
+      </section>
+    ) : null,
+    fresh: trackShelf('fresh', fresh, { subtitle: t('More music from {source}.', { source }),
+      action: <button type="button" aria-label={t('Save Fresh Finds as a playlist')}
+        onClick={onSaveFresh} disabled={!!saving} className="p-1.5 text-accent disabled:opacity-50">
+        <ListPlus size={16} /></button> }),
+    quick: trackShelf('quick', quick, { icon: Sparkles,
+      action: <button type="button" aria-label={t('Save Quick Picks as a playlist')}
+        onClick={onSaveQuick} disabled={!!saving} className="p-1.5 text-accent disabled:opacity-50">
+        <ListPlus size={16} /></button> }),
+    history: history.length ? (
+      <section key="history" data-discovery-shelf="history">
+        {header('history', History, history.length)}
+        <ScrobbleHistory entries={activeSection === 'history' ? history : history.slice(0, 6)} resolveTracks={resolveTracks} />
+      </section>
+    ) : null,
+    albums: albumShelf('albums', albums),
+    artists: artists.length ? (
+      <section key="artists" data-discovery-shelf="artists">
+        {header('artists', User, artists.length)}
+        <div className="grid grid-cols-3 gap-4 @sm:grid-cols-4 @md:grid-cols-6 @lg:grid-cols-8">
+          {(activeSection === 'artists' ? artists : artists.slice(0, 8)).map(artist =>
+            <ArtistRecommendation key={artist.name} artist={artist} onClick={onArtistPlay}
+              onContextMenu={onArtistMenu} />)}
+        </div>
+      </section>
+    ) : null,
+    ...Object.fromEntries(['community', 'newReleases', 'trending', 'featuredPlaylists', 'dailyDiscover']
+      .map(id => [id, youtubeCategory(id)])),
+  }
+  const visible = visibleShelfIds(layout)
+  const available = visible.map(id => sections[id]).filter(Boolean)
   return <div className="space-y-7">
-    <div data-discovery-header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border/60 pb-4">
+    <div data-discovery-header title={t('Right-click to edit Discovery sections')}
+      onContextMenu={categoryMenu(null)}
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-border/60 pb-4">
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10"><Sparkles size={16} className="text-accent" /></div>
-        <div className="min-w-0"><div className="flex items-center gap-2"><h2 className="text-sm font-medium text-white">{t("Discovery")}</h2><span className="text-xs uppercase tracking-[0.18em] text-muted">{source}</span></div><p className="mt-0.5 truncate text-xs text-muted">{t("Personalized recommendations from your selected provider.")}</p></div>
+        <div className="min-w-0"><div className="flex items-center gap-2"><h2 className="text-sm font-medium text-white">{t('Discovery')}</h2><span className="text-xs uppercase tracking-[0.18em] text-muted">{source}</span></div>
+          <p className="mt-0.5 truncate text-xs text-muted">{t('Right-click a category to edit its order or visibility.')}</p></div>
       </div>
-      <div className="flex shrink-0 items-center gap-3"><div role="group" aria-label={t("Discovery provider")} className="flex items-center gap-0.5 rounded-lg border border-border bg-card/70 p-0.5">{[['lastfm', 'Last.fm'], ['youtube', 'YouTube Music'], ['spotify', 'Spotify']].map(([id, label]) => <button key={id} type="button" aria-pressed={selectedSource === id} onClick={() => onSourceChange?.(id)} className={`rounded-md px-2.5 py-1 !text-[11px] transition-colors ${selectedSource === id ? 'bg-accent text-base' : 'text-muted hover:text-white'}`}>{t(label)}</button>)}</div><button onClick={onRefresh} disabled={loading} className="inline-flex items-center gap-1.5 text-xs text-accent hover:text-accent/70 disabled:opacity-50"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{t("Refresh")}</button></div>
+      <div className="flex shrink-0 items-center gap-3">
+        <div role="group" aria-label={t('Discovery provider')} className="flex items-center gap-0.5 rounded-lg border border-border bg-card/70 p-0.5">
+          {[['lastfm', 'Last.fm'], ['youtube', 'YouTube Music'], ['spotify', 'Spotify']].map(([id, label]) =>
+            <button key={id} type="button" aria-pressed={selectedSource === id}
+              onClick={() => onSourceChange?.(id)} className={`rounded-md px-2.5 py-1 !text-[11px] transition-colors ${selectedSource === id ? 'bg-accent text-base' : 'text-muted hover:text-white'}`}>{t(label)}</button>)}
+        </div>
+        <button type="button" onClick={onRefresh} disabled={loading} className="inline-flex items-center gap-1.5 text-xs text-accent hover:text-accent/70 disabled:opacity-50"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{t('Refresh')}</button>
+      </div>
     </div>
     {error && <p role="status" className="rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-200">{t(error)}</p>}
     {!data && (loading
       ? <p className="py-10 text-center text-sm text-muted">{t('Building your {source} recommendations…', { source })}</p>
       : <div className="rounded-xl border border-border bg-elevated p-4"><ProviderConnections compact onOpenSettings={onOpenSettings} /></div>)}
-    {data && !secondary.length && !history.length && !albums.length && !providerMixes.length && !artists.length && !fresh.length && <p className="py-10 text-center text-sm text-muted">{t('No {source} recommendations are available yet.', { source })}</p>}
-    {/* YouTube Music: your personal mixes first. */}
-    {['youtube', 'spotify'].includes(selectedSource) && data && <section><SectionHeader icon={Radio} eyebrow="Made for you" title={t("Mixed for you")} count={providerMixes.length || null} onExpand={providerMixes.length ? () => toggle('mixes') : undefined} expanded={activeSection === 'mixes'} />{providerMixes.length ? <div className="grid grid-cols-2 gap-4 @md:grid-cols-3 @lg:grid-cols-6">{(activeSection === 'mixes' ? providerMixes : providerMixes.slice(0, 6)).map((mix, index) => <div key={mix.id} className={activeSection === 'mixes' || index < 2 ? '' : index < 3 ? 'hidden @md:block' : 'hidden @lg:block'}><AlbumRecommendation album={{ ...mix, artist: mix.author || source }} onClick={() => onProviderMixPlay(mix)} onContextMenu={event => onProviderMixMenu(event, mix)} /></div>)}</div> : <p role="status" className="rounded-xl border border-border bg-elevated p-4 text-sm text-muted">{loading ? t('Loading your {source} mixes…', { source }) : data.mixError ? t('Could not load your {source} mixes. {error}', { source, error: data.mixError }) : t('{source} did not return your personalized mixes. Refresh to try again.', { source })}</p>}</section>}
-    {fresh.length > 0 && <section><SectionHeader icon={Music} eyebrow="Fresh Finds" title={t("Fresh Finds")} count={fresh.length} subtitle={t('More music from {source}.', { source })} onExpand={() => toggle('fresh')} expanded={activeSection === 'fresh'} action={<button type="button" aria-label={t("Save Fresh Finds as a playlist")} title={t("Save Fresh Finds as a playlist")} onClick={onSaveFresh} disabled={!!saving} className="inline-flex h-7 w-7 items-center justify-center rounded-full text-accent hover:bg-accent/10 hover:text-accent/70 disabled:opacity-50">{saving === 'fresh-finds' ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" /> : <ListPlus size={15} />}</button>} /><div className="grid gap-2 @md:grid-cols-2 @lg:grid-cols-3">{(activeSection === 'fresh' ? fresh : fresh.slice(0, 6)).map(track => <DiscoveryTrack key={songKey(track)} track={track} getDownloadTrack={getDownloadTrack} onPlay={item => onPlay(item, 'fresh')} onRadio={onRadio} onContextMenu={(event, item) => onTrackMenu(event, item, 'fresh')} />)}</div></section>}
-    {secondary.length > 0 && <section><SectionHeader icon={Sparkles} eyebrow={selectedSource === 'youtube' ? 'Recently liked' : 'Jump back in'} title={selectedSource === 'youtube' ? 'YouTube Music Likes' : 'Quick Picks'} count={secondary.length} subtitle={selectedSource === 'youtube' ? 'Your 30 most recently liked tracks on YouTube Music.' : 'Tracks you scrobbled most often over the past week.'} onExpand={() => toggle(secondaryKey)} expanded={activeSection === secondaryKey} action={<button type="button" aria-label={`Save ${selectedSource === 'youtube' ? 'YouTube Music Likes' : 'Quick Picks'} as a playlist`} title={`Save ${selectedSource === 'youtube' ? 'YouTube Music Likes' : 'Quick Picks'} as a playlist`} onClick={onSaveQuick} disabled={!!saving} className="inline-flex h-7 w-7 items-center justify-center rounded-full text-accent hover:bg-accent/10 hover:text-accent/70 disabled:opacity-50">{saving === (selectedSource === 'youtube' ? 'youtube-likes' : 'quick-picks') ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" /> : <ListPlus size={15} />}</button>} /><div className="grid gap-2 @md:grid-cols-2 @lg:grid-cols-3">{(activeSection === secondaryKey ? secondary : secondary.slice(0, 6)).map(track => <DiscoveryTrack key={songKey(track)} track={track} getDownloadTrack={getDownloadTrack} onPlay={item => onPlay(item, secondaryKey)} onRadio={onRadio} onContextMenu={(event, item) => onTrackMenu(event, item, secondaryKey)} />)}</div></section>}
-    {history.length > 0 && <section><SectionHeader icon={History} eyebrow="History" title={selectedSource === 'youtube' ? 'YouTube Music History' : 'Scrobble History'} count={history.length} subtitle={selectedSource === 'youtube' ? 'Recent tracks from your YouTube Music listening history.' : 'Your last 100 provider scrobbles, grouped by date.'} onExpand={() => toggle('history')} expanded={activeSection === 'history'} />{selectedSource === 'youtube' ? <TrackList tracks={recommendationRows(activeSection === 'history' ? history : history.slice(0, 6))} resolveTracks={resolveTracks} reduceMotion context={{ type: 'discovery', name: 'YouTube Music History' }} /> : <ScrobbleHistory entries={activeSection === 'history' ? history : history.slice(0, 6)} resolveTracks={resolveTracks} />}</section>}
-    {selectedSource !== 'youtube' && albums.length > 0 && <section><SectionHeader icon={Disc3} eyebrow="Rotation" title={t("Albums For You")} count={albums.length} onExpand={() => toggle('albums')} expanded={activeSection === 'albums'} /><div className="grid grid-cols-2 gap-4 @md:grid-cols-3 @lg:grid-cols-6">{(activeSection === 'albums' ? albums : albums.slice(0, 6)).map(album => <AlbumRecommendation key={`${album.artist}-${album.title}`} album={album} onClick={onAlbumPlay} onContextMenu={onAlbumMenu} />)}</div></section>}
-    {artists.length > 0 && <section><SectionHeader icon={User} eyebrow="For You" title={t("Artists For You")} count={artists.length} onExpand={() => toggle('artists')} expanded={activeSection === 'artists'} /><div className="grid grid-cols-3 gap-4 @sm:grid-cols-4 @md:grid-cols-6 @lg:grid-cols-8">{(activeSection === 'artists' ? artists : artists.slice(0, 8)).map(artist => <ArtistRecommendation key={artist.name} artist={artist} onClick={onArtistPlay} onContextMenu={onArtistMenu} />)}</div></section>}
+    {data && available.length === 0 && <p className="py-10 text-center text-sm text-muted">
+      {visible.length === 0 ? t('All Discovery sections are hidden. Right-click the Discovery header to edit them.')
+        : t('No {source} recommendations are available yet.', { source })}
+    </p>}
+    {available}
     <UnfollowedArtists artists={allArtists} />
   </div>
 }
