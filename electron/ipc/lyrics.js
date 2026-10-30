@@ -30,12 +30,36 @@ function registerLyricsHandlers(ipcMain) {
     return result
   })
   ipcMain.handle('lyrics:embedFrom', async (_, providerId, trackId, title, artist, album, duration) => {
-    const result = await service.getLyricsFrom(db, { trackId, title, artist, album, duration }, providerId)
-    if (!result || (!result.lines?.length && !result.instrumental)) throw new Error('That lyrics source has no lyrics to insert')
+    const result = await service.getLyricsForSaving(db, { trackId, title, artist, album, duration }, providerId)
+    if (!result?.lines?.some(line => line?.text || line?.bgText)) throw new Error('That lyrics source has no lyrics to insert')
     const { text, privateTag } = fileLyrics.fromResult(result)
     const written = fileLyrics.writeFileLyrics(trackFilePath(trackId), text, privateTag)
     try { db.prepare('UPDATE tracks SET lyrics_kind = ? WHERE id = ?').run(fileLyrics.lyricsKind(text), trackId) } catch {}
     return { ...written, source: providerId }
+  })
+
+  // User-triggered file export: use only the confirmed save-dialog path, not
+  // an arbitrary renderer-supplied filename. This leaves audio tags untouched
+  // and writes .elrc when true per-word timings are present.
+  ipcMain.handle('lyrics:exportFile', async (_, providerId, trackId, title, artist, album, duration) => {
+    const lyrics = await service.getLyricsForSaving(db, { trackId, title, artist, album, duration }, providerId)
+    const { prepareLyricsExport } = require('../lyrics/fileExport')
+    const exported = prepareLyricsExport(lyrics)
+    const path = require('path')
+    const fs = require('fs/promises')
+    const { dialog } = require('electron')
+    const safeName = value => String(value || '').replace(/[<>:"/\\|?*\\x00-\\x1F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 70)
+    const stem = [safeName(artist), safeName(title)].filter(Boolean).join(' - ') || 'Lyrics'
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Save lyrics to file',
+      defaultPath: `${stem}.${exported.extension}`,
+      filters: [{ name: 'Lyrics', extensions: [exported.extension] }],
+    })
+    if (canceled || !filePath) return { saved: false, canceled: true }
+    // The selected native save-dialog path may omit the extension.
+    const target = path.extname(filePath) ? filePath : `${filePath}.${exported.extension}`
+    await fs.writeFile(target, exported.text, 'utf8')
+    return { saved: true, format: exported.format }
   })
 
   ipcMain.handle('lyrics:import', (_, trackId, content, type) =>
