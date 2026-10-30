@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { scanNetworkRoots, withTimeout } = require('../electron/ipc/networkLibrary.js')
+const { scanNetworkRoots, withTimeout, verifiedMissingPaths } = require('../electron/ipc/networkLibrary.js')
 const local = path.resolve('/music/local')
 const nas = path.resolve('/mnt/nas')
 const missing = path.resolve('/mnt/not-found')
@@ -79,4 +79,27 @@ test('restores offline NAS preference even when metadata scan throws', async () 
 test('initial network probe has a bounded response time', async () => {
   const bounded = withTimeout(() => new Promise(() => {}), 10)
   await assert.rejects(() => bounded(), /timed out/)
+})
+
+test('late NAS disconnect never turns watcher notifications into deletions', async () => {
+  const fileOne = path.join(nas, 'Album', '01.flac')
+  const fileTwo = path.join(nas, 'Album', '02.flac')
+  let probes = 0
+  const missing = await verifiedMissingPaths(
+    [fileOne, fileTwo],
+    () => nas,
+    new Map([[nas, true]]),
+    async root => { probes++; assert.equal(root, nas); return false },
+  )
+  assert.deepEqual(missing, [])
+  assert.equal(probes, 1, 'a rename batch should probe each root once')
+
+  const localPath = path.join(local, 'song.flac')
+  const mixed = await verifiedMissingPaths(
+    [fileOne, localPath],
+    file => file.startsWith(nas) ? nas : local,
+    new Map([[nas, true], [local, true]]),
+    async root => root === local,
+  )
+  assert.deepEqual(mixed, [localPath])
 })
