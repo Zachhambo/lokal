@@ -9,6 +9,10 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
     throw new Error('Enter an SMB share or an existing mounted network folder.')
   }
   if (/^smb:\/\//i.test(input)) {
+    // WHATWG URL would otherwise normalize away ../ before validation.
+    if (/\/(?:\.{1,2}|%2e(?:%2e|\.)?|\.%2e)(?:\/|$)/i.test(input)) {
+      throw new Error('Specify a valid share name and path without traversal.')
+    }
     if (platform !== 'win32') {
       throw new Error('Mount the SMB share in your file manager, then enter its mounted folder path. Direct smb:// access is available only through Windows UNC shares.')
     }
