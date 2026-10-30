@@ -585,9 +585,10 @@ async function scanFolder(folderPath, {
           scanStatus.done++; emitProgress(); continue
         }
       }
-      const meta = await require('./networkLibrary')
-        .withTimeout((file, options) => mm.parseFile(file, options), 20000)(
-          filePath, { duration: true, skipCovers: false })
+      // Promise.race cannot cancel a stalled NAS read or its tokenizer.
+      // A reusable worker is terminated on timeout, retaining random access.
+      const meta = await require('./scannerMetadata')
+        .parseWithDeadline(filePath, { duration: true, skipCovers: false }, 20000)
       const c = meta.common
       const rawTitle = c.title?.trim()
       const rawArtist = pickPreferredArtist(c, scanPreference)
