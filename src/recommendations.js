@@ -536,6 +536,12 @@ export async function loadRecommendationPage(source, page = 0, client = api, { f
     freshFinds: candidates.slice(0, 30), quickPicks: [], liked: liked.slice(0, 30), history: uniqueSongs(account?.history || []).map(track => ({ ...track, source: 'youtube', artwork_url: track.thumbnail })),
     mixes: (account?.mixes || []).map(mix => ({ ...mix, source: 'youtube', artwork_url: mix.thumbnail })),
     mixError: account?.mixError || '',
+    categories: (account?.categories || []).map(group => ({
+      ...group,
+      tracks: (group.tracks || []).map(track => ({ ...track, source: 'youtube', artwork_url: track.artwork_url || track.thumbnail })),
+      mixes: (group.mixes || []).map(mix => ({ ...mix, source: 'youtube', artwork_url: mix.artwork_url || mix.thumbnail })),
+      albums: (group.albums || []).map(album => ({ ...album, source: 'youtube' })),
+    })),
     artists: [...new Map([...(account?.artists || []), ...picks.flatMap(track => (track.artists || [track.artist]).map(name => ({ name, source: 'youtube' })))].filter(artist => artist.name).map(artist => [recommendationKey(artist.name), artist])).values()].slice(0, 30),
     albums: [...new Map([...(account?.albums || []), ...picks.filter(track => track.album).map(track => ({ title: track.album, artist: track.artist, albumId: track.albumId, artwork_url: track.thumbnail }))].map(album => [`${album.artist}\0${album.title}`, album])).values()].slice(0, 30),
     warnings: [account.homeError, account.mixError].filter(Boolean),
