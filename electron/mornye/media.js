@@ -4,7 +4,7 @@ const path = require('path')
 const crypto = require('crypto')
 const { Readable } = require('stream')
 const { service } = require('./packages')
-const { stereoPlaybackQuality } = require('./playbackQuality')
+const { stereoPlaybackQuality, spatialQuality } = require('./playbackQuality')
 const { progressiveMedia } = require('./progressiveMedia')
 const { isLiveProvider } = require('./providerFastPath')
 
@@ -35,13 +35,20 @@ function cached(db,key,id){
   return null
 }
 function prepare(db,key,id,{force=false}={}){
+  const serviceInstance=service(db),addon=serviceInstance.find(key)
+  if(!addon?.enabled)throw new Error('Addon is not available')
+  const configured=stereoPlaybackQuality(addon,serviceInstance.settings(addon))
+  if(spatialQuality(addon,configured)) {
+    // The renderer routes this exact queue entry to native encoded playback.
+    // Chromium's HTMLAudioElement must never silently downmix AC-4/JOC.
+    throw new Error('The selected addon quality requires native spatial output; use a supported Atmos device or choose a non-spatial tier.')
+  }
   if(!force){const hit=cached(db,key,id);if(hit)return {ok:true,package:true}}
   const map=state(db),hash=cacheKey(db,key,id)
   const existing=[...map.values()].find(job=>job.hash===hash&&job.status==='running')
   if(existing)return {pending:true,operationId:existing.id}
   const job={id:crypto.randomUUID(),hash,key,itemId:id,status:'running',progress:0,startedAt:Date.now(),controller:new AbortController()};map.set(job.id,job)
   job.liveReady=new Promise(resolve=>{job.markLive=resolve})
-  const addon=service(db).find(key)
   const startedAt=Date.now()
   const quality=stereoPlaybackQuality(addon,service(db).settings(addon))
   // Do not probe a growing file for providers that only deliver a usable
