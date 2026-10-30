@@ -2211,8 +2211,16 @@ async function applyFileChanges(changes = [], activeRoots) {
     changedRoots.add(owner)
 
     let stat
-    try { stat = await fs.stat(filePath) } catch {
-      if (change?.renamed || AUDIO_EXTS.has(path.extname(filePath).toLowerCase())) gone.push(filePath)
+    try {
+      stat = await require('./networkLibrary').withTimeout(fs.stat)(filePath)
+    } catch (error) {
+      // Only an actual "path not found" should enter the destructive prune
+      // pipeline. Permission failures, network disconnects and timeouts do
+      // not prove that the music has been deleted.
+      if ((error.code === 'ENOENT' || error.code === 'ENOTDIR') &&
+          (change?.renamed || AUDIO_EXTS.has(path.extname(filePath).toLowerCase()))) {
+        gone.push(filePath)
+      }
       continue
     }
     if (stat.isDirectory()) {
@@ -2244,14 +2252,10 @@ async function applyFileChanges(changes = [], activeRoots) {
 
   let removed = []
   if (gone.length) {
-    // Only prune paths on roots that are still actually readable at deletion
-    // time. A transient NAS outage must never be treated as file removal.
-    const confirmedGone = []
-    for (const filePath of new Set(gone)) {
-      const owner = rootFor(filePath)
-      if (owner && readableAfterScan.get(owner) === true &&
-          await isReadableRoot(owner)) confirmedGone.push(filePath)
-    }
+    // A NAS can disconnect after its watcher event was queued. Never purge
+    // rows unless the original owning root still permits directory listing.
+    const confirmedGone = await require('./networkLibrary')
+      .verifiedMissingPaths(gone, rootFor, readableAfterScan, isReadableRoot)
     try {
       if (confirmedGone.length) {
         removed = require('../libraryPrune').pruneGonePaths(db, confirmedGone).ids
