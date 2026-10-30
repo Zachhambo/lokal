@@ -106,7 +106,24 @@ function providers() {
     { id: 'yt', label: 'YouTube Music' },
     { id: 'sc', label: 'SoundCloud' },
     { id: 'mono', label: 'Monochrome' },
-    ...sources.addons.searchable(getDB()).map(a => ({ id: a.provider, label: a.name, icon: a.icon, addon: true, package: a.kind === 'mornye', needsSetup: a.kind === 'mornye' && (!a.access || !a.access.ready), filters: a.searchFilters, album: a.resources.includes('album'), artist: a.resources.includes('artist') })),
+    ...sources.addons.searchable(getDB()).map(a => {
+      const selected = a.kind === 'mornye' && a.qualityOptions?.find(q => q.id === a.settings?.downloadQuality)
+      const spatial = !!selected && (
+        selected.kind === 'spatial' || /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id))
+      )
+      return {
+        id: a.provider, label: a.name, icon: a.icon, addon: true,
+        package: a.kind === 'mornye',
+        needsSetup: a.kind === 'mornye' && (!a.access || !a.access.ready),
+        filters: a.searchFilters,
+        album: a.resources.includes('album'), artist: a.resources.includes('artist'),
+        // Only the choice/transport hint reaches the renderer. No credentials,
+        // tokens or unredacted settings are exposed.
+        playbackQuality: selected?.id || null,
+        nativeSpatialPreferred: spatial && /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id)),
+        nativeSpatialCodec: /^amazon(?:-(?:new|web))?$/i.test(a.id || '') ? 'ac4' : 'eac3-joc',
+      }
+    }),
   ]
 }
 
