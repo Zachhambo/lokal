@@ -48,7 +48,7 @@ function registerLyricsHandlers(ipcMain) {
     const path = require('path')
     const fs = require('fs/promises')
     const { dialog } = require('electron')
-    const safeName = value => String(value || '').replace(/[<>:"/\\|?*\\x00-\\x1F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 70)
+    const safeName = value => String(value || '').replace(/[<>:"|?*\x00-\x1F]/g, ' ').replace(/[\/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70)
     const stem = [safeName(artist), safeName(title)].filter(Boolean).join(' - ') || 'Lyrics'
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: 'Save lyrics to file',
