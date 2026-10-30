@@ -7,12 +7,16 @@ on:
       - 'electron/networkArtwork.js'
       - 'electron/ipc/networkLibrary.js'
       - 'electron/ipc/scanner.js'
+      - 'electron/ipc/scannerMetadata.js'
+      - 'electron/ipc/scannerMetadataThread.js'
+      - 'electron/libraryWatcher.js'
       - 'electron/main.js'
       - 'electron/preload.js'
       - 'src/api.js'
       - 'src/components/NetworkShareSettings.jsx'
       - 'src/pages/Settings.jsx'
       - 'scripts/network-*.test.mjs'
+      - 'scripts/scanner-metadata.test.mjs'
       - 'package.json'
       - '.github/workflows/network-library-ci.yml'
   workflow_dispatch:
@@ -38,10 +42,15 @@ jobs:
           node --check electron/ipc/networkLibrary.js
           node --check electron/main.js
           node --check electron/ipc/scanner.js
+          node --check electron/ipc/scannerMetadata.js
+          node --check electron/ipc/scannerMetadataThread.js
+          node --check electron/libraryWatcher.js
       - name: Test network path security and offline-root retention
         run: npm run test:network-shares
       - name: Install renderer dependencies
         run: npm ci --ignore-scripts
+      - name: Validate cancellable metadata worker
+        run: node --test scripts/scanner-metadata.test.mjs
       - name: Build desktop renderer
         run: |
           npm run gen:icons
