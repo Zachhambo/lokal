@@ -158,6 +158,12 @@ class PackageService {
     const defaultId=hash(REGISTRY).slice(0,16)
     db.prepare('INSERT OR IGNORE INTO mornye_repositories (id,url,name) VALUES (?,?,?)').run(defaultId,REGISTRY,'Mornye official')
     db.prepare('UPDATE mornye_repositories SET name=? WHERE id=? AND name=?').run('Mornye official',defaultId,'SpotiFLAC official')
+    // Earlier builds inserted this special feed without the user's action.
+    // Retire only that exact auto-created row; preserve user-added feeds and
+    // already installed addon packages, sessions and preferences.
+    db.prepare('DELETE FROM mornye_repositories WHERE url=? AND name=?').run(
+      'https://raw.githubusercontent.com/CHEYCKIT/Mornye-Extension/refs/heads/feature/amazon-new-release-20261029/amazon-new-registry.json',
+      'Amazon (New) updates')
   }
   tools() {
     if(this.toolProvider)return this.toolProvider()
