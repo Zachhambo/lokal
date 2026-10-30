@@ -2487,4 +2487,6 @@ function registerV4Handlers(ipcMain) {
 
 
 
+// Reuse this bounded, failure-reporting walker for watcher catch-up.
+module.exports.walkDir = walkDir
 module.exports.registerV4Handlers = registerV4Handlers
