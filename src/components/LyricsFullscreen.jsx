@@ -174,7 +174,7 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
                 <>
                   <button onClick={importLyrics}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/40 hover:text-white border border-white/10 hover:border-white/30 rounded-lg transition-colors">
-                    <Download size={12} /> {t("Import .lrc / .ttml")}
+                    <Download size={12} /> {t("Import .lrc / .elrc / .ttml")}
                   </button>
                   <button onClick={() => { api.clearLyricsCache(currentTrack.id); setRefreshKey(k => k + 1) }}
                     className="p-1.5 text-white/30 hover:text-white transition-colors rounded-lg hover:bg-white/8">
