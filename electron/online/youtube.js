@@ -591,8 +591,9 @@ async function fetchAccountData({ cookies, fetchImpl = fetch, limit = 100, force
   }
   const homePages = homeResult.status === 'fulfilled' ? await browsePages('FEmusic_home', homeResult.value, cookieHeader, fetchImpl, config, {
     types: ['sectionListRenderer', 'sectionListContinuation', 'appendContinuationItemsAction', 'reloadContinuationItemsCommand'],
-    // Read additional Home pages so named Discovery shelves are not silently
-    // dropped when a mixes shelf happens to appear first.
+    // Explore several Home continuations rather than stopping at the first
+    // mixes shelf. Bound requests: a provider can offer many unrelated pages.
+    stop: pages => pages.length >= 5,
   }) : { pages: [], error: homeResult.reason?.message || '' }
   const homeRoot = homePages.pages
   const homePlaylists = parseAccountPlaylists(homeRoot)
