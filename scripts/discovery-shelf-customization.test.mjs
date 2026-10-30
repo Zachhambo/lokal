@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import youtube from '../electron/online/youtube.js'
+import spotify from '../electron/artwork/spotify.js'
 import {
   DISCOVERY_SHELF_DEFAULTS, DISCOVERY_SHELF_TITLES,
   restoreShelfLayout, visibleShelfIds, moveShelf, showShelf,
@@ -121,6 +122,46 @@ test('Spotify Quick Picks use a different set of personal playlists than Fresh F
   assert.deepEqual(result.freshFinds.map(track => track.title), ['Song DW','Song RR'])
   assert.deepEqual(result.quickPicks.map(track => track.title), ['Song Daily1','Song Daily2'])
   assert.deepEqual(result.history, [], 'no fabricated Spotify recent-listening history')
+})
+
+test('Spotify recently played parses actual provider timestamps and never invents history', async () => {
+  const item = {
+    played_at: '2026-10-29T18:30:00.000Z',
+    track: {
+      id: 'a'.repeat(22), uri: 'spotify:track:' + 'a'.repeat(22), name: 'Actual Song',
+      artists: [{ name: 'Artist' }], duration_ms: 213000,
+      album: { name: 'Actual Album', images: [
+        { url: 'https://example.com/small', width: 64 },
+        { url: 'https://example.com/large', width: 640 },
+      ] },
+    },
+  }
+  const tracks = await spotify.recentlyPlayed('', { fetchPage: async () => ({
+    items: [item, { played_at: 'yesterday', track: null }],
+  }) })
+  assert.equal(tracks.length, 1)
+  assert.equal(tracks[0].title, 'Actual Song')
+  assert.equal(tracks[0].artist, 'Artist')
+  assert.equal(tracks[0].album, 'Actual Album')
+  assert.equal(tracks[0].artwork_url, 'https://example.com/large')
+  assert.equal(tracks[0].scrobbledAt, 1793298600)
+  assert.equal(tracks[0].source, 'spotify')
+  assert.deepEqual(await spotify.recentlyPlayed('', { fetchPage: async () => ({ items: [] }) }), [])
+  const ipc = readFileSync(new URL('../electron/ipc/spotifyLikes.js', import.meta.url), 'utf8')
+  assert.match(ipc, /ipcMain\.handle\('spotify:recentlyPlayed'/)
+  assert.match(ipc, /return \{ tracks: \[\], error: error\.message \}/)
+  const preload = readFileSync(new URL('../electron/preload.js', import.meta.url), 'utf8')
+  assert.match(preload, /spotifyRecentlyPlayed: \(force\) => invoke\('spotify:recentlyPlayed', force\)/)
+})
+
+test('real Spotify history flows into the customizable Recently Played section', async () => {
+  const history = [{ id: 'sp-1', title: 'Recent Song', artist: 'Test Artist', scrobbledAt: 1793298600 }]
+  const result = await loadRecommendationPage('spotify', 0, {
+    spotifyMadeForYou: async () => ({ mixes: [] }),
+    spotifyPlaylist: async () => ({ tracks: [] }),
+    spotifyRecentlyPlayed: async () => ({ tracks: history }),
+  })
+  assert.deepEqual(result.history, history)
 })
 
 test('Home right-click Edit opens category modal; rendering follows saved order, not fixed sections', () => {
