@@ -1,8 +1,8 @@
 'use strict'
 
-// The catalogue can advertise both stereo and Dolby Atmos for one Tidal ID.
-// Ordinary HTMLAudioElement streaming is never a native JOC transport. Keep
-// its quality selection independent of a user's Atmos download preference.
+// Provider quality settings select the requested rendition for both Play
+// and Download. A configured Atmos tier must use a verified native audio path;
+// Chromium's HTMLAudioElement cannot preserve AC-4/JOC as Atmos.
 function isAtmosQuality(value) {
   return /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(value || '').trim())
 }
