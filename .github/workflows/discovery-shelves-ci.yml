@@ -1,0 +1,42 @@
+name: Discovery shelf parity
+
+on:
+  pull_request:
+    paths:
+      - 'electron/online/youtube.js'
+      - 'electron/artwork/spotify.js'
+      - 'electron/ipc/spotifyLikes.js'
+      - 'electron/preload.js'
+      - 'src/api.js'
+      - 'src/pages/Home.jsx'
+      - 'src/recommendations.js'
+      - 'src/recommendationSession.js'
+      - 'src/discoveryShelfLayout.mjs'
+      - 'src/components/DiscoveryShelfEditor.jsx'
+      - 'scripts/discovery-shelf-customization.test.mjs'
+      - '.github/workflows/discovery-shelves-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install application dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify YouTube, Spotify and Discovery shelf regressions
+        run: |
+          node --check electron/online/youtube.js
+          node --check electron/artwork/spotify.js
+          node --check electron/ipc/spotifyLikes.js
+          node --check electron/preload.js
+          node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs
+      - name: Compile desktop Discovery UI
+        run: npx vite build
