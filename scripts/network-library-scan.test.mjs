@@ -55,3 +55,16 @@ test('rejects a newly entered inaccessible network root', async () => {
   })
   assert.match(result.error, /accessible/)
 })
+
+test('restores offline NAS preference even when metadata scan throws', async () => {
+  const saved = []
+  await assert.rejects(() => scanNetworkRoots(['/music/local', '/mnt/nas'], {
+    existing: ['/music/local', '/mnt/nas'],
+    db: { prepare: () => ({ run: value => saved.push(value) }) },
+    scan: async () => { throw new Error('NAS disconnected mid-scan') },
+    isReadable: async folder => folder === '/music/local',
+  }), /disconnected/)
+
+  assert.deepEqual(JSON.parse(saved[0]), ['/music/local', '/mnt/nas'])
+  assert.equal(saved[1], '/music/local')
+})
