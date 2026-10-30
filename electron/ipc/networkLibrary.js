@@ -6,6 +6,18 @@ const { probeNetworkLibraryLocation } = require('../networkShare')
 
 const STAT_TIMEOUT_MS = 8000
 
+function withTimeout(fn, timeoutMs = STAT_TIMEOUT_MS) {
+  return (...args) => {
+    let timer
+    return Promise.race([
+      Promise.resolve().then(() => fn(...args)),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Network share probe timed out. Check the NAS connection.')), timeoutMs)
+      }),
+    ]).finally(() => clearTimeout(timer))
+  }
+}
+
 async function isReadableRoot(folder, {
   stat = fs.stat,
   readdir = fs.readdir,
@@ -35,6 +47,7 @@ async function scanNetworkRoots(inputs, {
   scan,
   db,
   isReadable = isReadableRoot,
+  closeWatchers = () => require('../libraryWatcher').watchLibraryRoots([]),
 } = {}) {
   const candidates = Array.isArray(inputs) ? inputs : []
   const previous = new Set(existing.map(x => path.resolve(x).toLowerCase()))
@@ -66,6 +79,10 @@ async function scanNetworkRoots(inputs, {
       // Metadata scanning only sees currently reachable roots. A new network
       // failure during that scan must never erase a previously saved NAS.
       result = await scan(online)
+    } else {
+      // A disconnected share leaves old fs.watch handles behind unless
+      // explicitly replaced with an empty active watcher set.
+      closeWatchers()
     }
   } finally {
     // The scanner saves only online roots. Restore all configured folders,
@@ -112,7 +129,10 @@ function registerNetworkLibraryHandlers(ipcMain) {
   })
   ipcMain.handle('scanner:connectNetworkShare', async (event, input) => {
     try {
-      const { folder } = await probeNetworkLibraryLocation(input)
+      const { folder } = await probeNetworkLibraryLocation(input, {
+        stat: withTimeout(fs.stat),
+        readdir: withTimeout(fs.readdir),
+      })
       const current = scanner.configuredMusicFolders()
       if (!current.some(x => x.toLowerCase() === folder.toLowerCase())) {
         current.push(folder)
@@ -128,4 +148,4 @@ function registerNetworkLibraryHandlers(ipcMain) {
   })
 }
 
-module.exports = { registerNetworkLibraryHandlers, isReadableRoot, scanNetworkRoots }
+module.exports = { registerNetworkLibraryHandlers, isReadableRoot, scanNetworkRoots, withTimeout }
