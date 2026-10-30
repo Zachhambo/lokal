@@ -46,3 +46,31 @@ test('NAS artwork: refuse oversized art and time out offline shares', async () =
   })
   assert.equal(unreachable, null)
 })
+
+test('NAS artwork: skip an invalid first named image and use a valid next choice', async () => {
+  const album = path.resolve('/mnt/nas/Album')
+  const calls = []
+  const chosen = await findFolderArtworkAsync(album, {
+    readdir: async () => [file('front.png'), file('folder.jpg'), file('cover.jpg')],
+    stat: async candidate => {
+      calls.push(path.basename(candidate))
+      if (candidate.endsWith('cover.jpg')) return { isFile: () => true, size: 20 * 1024 * 1024 }
+      if (candidate.endsWith('folder.jpg')) return { isFile: () => true, size: 256 * 1024 }
+      return { isFile: () => true, size: 128 * 1024 }
+    },
+  })
+  assert.equal(chosen, path.join(album, 'folder.jpg'))
+  assert.deepEqual(calls, ['cover.jpg', 'folder.jpg'])
+})
+
+test('NAS artwork: unreadable named images fall through, but unrelated posters remain ambiguous', async () => {
+  const album = path.resolve('/mnt/nas/Album')
+  const chosen = await findFolderArtworkAsync(album, {
+    readdir: async () => [file('cover.jpg'), file('front.png'), file('poster.jpg')],
+    stat: async candidate => {
+      if (candidate.endsWith('cover.jpg')) throw new Error('unreadable')
+      return { isFile: () => true, size: 4096 }
+    },
+  })
+  assert.equal(chosen, path.join(album, 'front.png'))
+})
