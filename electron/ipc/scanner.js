@@ -205,15 +205,32 @@ async function extractArtwork(metadata, trackId, fallbackArtwork = null) {
 
 // `failures` collects folders that could not be read, so a scan can tell it
 // missed files instead of looking complete.
-function walkDir(dir, files = [], failures = null) {
-  try {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walkDir(full, files, failures)
-      else if (!isPreparedStemClipName(entry.name) &&
+async function walkDir(dir, files = [], failures = null) {
+  // SMB/WebDAV mounts may take seconds to reply or disappear mid-scan.
+  // Never perform directory enumeration synchronously in Electron's main
+  // thread, and avoid a recursive JS stack on deeply nested NAS libraries.
+  const { withTimeout } = require('./networkLibrary')
+  const pending = [dir]
+  const visited = new Set()
+  while (pending.length) {
+    const current = pending.pop()
+    if (visited.has(current)) continue
+    visited.add(current)
+    let entries
+    try {
+      entries = await withTimeout(fs.promises.readdir)(current, { withFileTypes: true })
+    } catch (error) {
+      failures?.push(current)
+      console.warn('[scanner] Folder enumeration failed:', current, error.message)
+      continue
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name)
+      if (entry.isDirectory()) pending.push(full)
+      else if (entry.isFile() && !isPreparedStemClipName(entry.name) &&
           AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(full)
     }
-  } catch { failures?.push(dir) }
+  }
   return files
 }
 
@@ -447,7 +464,7 @@ async function scanFolder(folderPath, {
     if (relinked) console.log(`[scanFolder] Re-linked artists for ${relinked} track(s)`)
   } catch (e) { console.warn('[scanFolder] Artist re-link skipped:', e.message) }
   const walkFailures = []
-  const files = walkDir(folderPath, [], walkFailures)
+  const files = await walkDir(folderPath, [], walkFailures)
   scanStatus.errors += walkFailures.length
   scanStatus.total = files.length
   const PROGRESS_INTERVAL_MS = 100
@@ -542,7 +559,7 @@ async function scanFolder(folderPath, {
 
   for (const filePath of files) {
     try {
-      const stat = fs.statSync(filePath)
+      const stat = await require('./networkLibrary').withTimeout(fs.promises.stat)(filePath)
       const trackId = 't-' + hashFile(filePath, stat)
       const existing = db.prepare('SELECT id, last_modified, artwork_path FROM tracks WHERE file_path = ?').get(filePath)
       const folderArtwork = getFolderArtwork(filePath)
@@ -561,7 +578,9 @@ async function scanFolder(folderPath, {
           scanStatus.done++; emitProgress(); continue
         }
       }
-      const meta = await mm.parseFile(filePath, { duration: true, skipCovers: false })
+      const meta = await require('./networkLibrary')
+        .withTimeout((file, options) => mm.parseFile(file, options), 20000)(
+          filePath, { duration: true, skipCovers: false })
       const c = meta.common
       const rawTitle = c.title?.trim()
       const rawArtist = pickPreferredArtist(c, scanPreference)
@@ -2224,7 +2243,7 @@ async function applyFileChanges(changes = [], activeRoots) {
       continue
     }
     if (stat.isDirectory()) {
-      if (change?.renamed) for (const child of walkDir(filePath)) files.add(path.resolve(child))
+      if (change?.renamed) for (const child of await walkDir(filePath)) files.add(path.resolve(child))
       continue
     }
     if (stat.isFile() && AUDIO_EXTS.has(path.extname(filePath).toLowerCase())) files.add(filePath)
