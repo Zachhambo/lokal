@@ -74,3 +74,20 @@ test('NAS artwork: unreadable named images fall through, but unrelated posters r
   })
   assert.equal(chosen, path.join(album, 'front.png'))
 })
+
+test('NAS artwork: a timed-out stat never causes another candidate to stall', async () => {
+  const album = path.resolve('/mnt/nas/Album')
+  const checked = []
+  const started = Date.now()
+  const result = await findFolderArtworkAsync(album, {
+    readdir: async () => [file('cover.jpg'), file('folder.jpg'), file('front.jpg')],
+    stat: candidate => {
+      checked.push(path.basename(candidate))
+      return new Promise(() => {})
+    },
+    timeoutMs: 12,
+  })
+  assert.equal(result, null)
+  assert.deepEqual(checked, ['cover.jpg'])
+  assert.ok(Date.now() - started < 500, 'all candidates share a bounded deadline')
+})
