@@ -21,8 +21,16 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
     if (uri.username || uri.password || uri.search || uri.hash || !uri.hostname) {
       throw new Error('Use smb://server/share without embedded credentials, query or fragment.')
     }
-    const parts = uri.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part))
-    if (!parts.length || parts.some(part => part === '..' || part === '.' || /[\\:\0]/.test(part))) {
+    // Validate the raw URL path as well: URL() normalizes dot segments.
+    const rawPath = input.match(/^smb:\/\/[^/]+\/([^?#]*)/i)?.[1] ?? '';
+    let parts;
+    try {
+      parts = rawPath.split('/').filter(Boolean).map(part => decodeURIComponent(part));
+    } catch {
+      parts = [];
+    }
+    if (!parts.length || parts.some(part =>
+      part === '..' || part === '.' || /[\\/:\\x00]/.test(part))) {
       throw new Error('Specify a valid share name after the SMB server.')
     }
     if (uri.port) throw new Error('Windows UNC shares use the system SMB port. Remove the custom port.')
@@ -31,7 +39,8 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
   if (input.startsWith('\\\\')) {
     if (platform !== 'win32') throw new Error('Windows UNC paths are only supported on Windows. Use the mounted folder path.')
     const parts = input.slice(2).split('\\').filter(Boolean)
-    if (parts.length < 2 || parts.some(part => part === '..' || part === '.')) {
+    if (parts.length < 2 || parts.some(part =>
+      part === '..' || part === '.' || /[\/\\x00]/.test(part))) {
       throw new Error('Use a complete UNC path such as \\\\nas\\Music.')
     }
     return path.win32.normalize(input)
