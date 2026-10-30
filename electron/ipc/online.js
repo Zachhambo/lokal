@@ -10,6 +10,7 @@ const { findYtDlp } = require('./tools')
 const { cookieArgs } = require('./ytCookies')
 const { runJsonSearch, mapSearchResult } = require('../download/search')
 const sources = require('../online/sources')
+const { selectedHttpSpatial } = require('../online/httpSpatial')
 const genres = require('../online/genres')
 const youtube = require('../online/youtube')
 const { createArtworkResolver } = require('../discoveryArtwork')
@@ -111,6 +112,8 @@ function providers() {
       const spatial = !!selected && (
         selected.kind === 'spatial' || /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id))
       )
+      const httpSpatial = a.kind === 'mornye' ? null :
+        selectedHttpSpatial({ manifest: { settings: a.settingsSchema }, settings: a.settings })
       return {
         id: a.provider, label: a.name, icon: a.icon, addon: true,
         package: a.kind === 'mornye',
@@ -120,8 +123,10 @@ function providers() {
         // Only the choice/transport hint reaches the renderer. No credentials,
         // tokens or unredacted settings are exposed.
         playbackQuality: selected?.id || null,
-        nativeSpatialPreferred: spatial && /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id)),
-        nativeSpatialCodec: /^amazon(?:-(?:new|web))?$/i.test(a.id || '') ? 'ac4' : 'eac3-joc',
+        nativeSpatialPreferred: !!httpSpatial ||
+          (spatial && /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id))),
+        nativeSpatialCodec: httpSpatial?.codec ||
+          (/^amazon(?:-(?:new|web))?$/i.test(a.id || '') ? 'ac4' : 'eac3-joc'),
       }
     }),
   ]
