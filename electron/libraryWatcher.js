@@ -58,7 +58,10 @@ async function flush() {
   const ready = []
   for (const [filePath, renamed] of pending) {
     let stat = null
-    try { stat = fs.statSync(filePath) } catch {}
+    try {
+      stat = await require('./ipc/networkLibrary')
+        .withTimeout(fs.promises.stat)(filePath)
+    } catch {}
     if (stat?.isFile() && now - stat.mtimeMs < SETTLE_MS) continue
     ready.push({ path: filePath, renamed })
     pending.delete(filePath)
@@ -68,13 +71,21 @@ async function flush() {
   // Directory renames/deletions can affect many descendant paths at once.
   // Let the existing scanner reconcile those rows and find renamed copies;
   // individual-file updates continue through the incremental path below.
-  const needsScan = ready.some(change => {
-    if (!change.renamed) return false
-    try { return fs.statSync(change.path).isDirectory() } catch { return true }
-  })
+  let needsScan = false
+  for (const change of ready) {
+    if (!change.renamed) continue
+    try {
+      const stat = await require('./ipc/networkLibrary')
+        .withTimeout(fs.promises.stat)(change.path)
+      if (stat.isDirectory()) needsScan = true
+    } catch { needsScan = true }
+  }
   if (needsScan) {
-    const affected = [...new Set(ready.map(change => rootForPath(change.path)).filter(Boolean))]
-    for (const folder of affected) catchUpLater(folder)
+    const active = [...new Set(ready.map(change => rootForPath(change.path)).filter(Boolean))]
+    const { isReadableRoot } = require('./ipc/networkLibrary')
+    for (const folder of active) {
+      if (await isReadableRoot(folder)) catchUpLater(folder)
+    }
     return
   }
   running = require('./ipc/scanner').applyFileChanges(ready, [...roots])
