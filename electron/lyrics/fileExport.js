@@ -75,4 +75,37 @@ function prepareLyricsExport(result) {
   return { extension, text: portable + '\n', format: extension }
 }
 
-module.exports = { timestamp, toEnhancedLrc, prepareLyricsExport }
+/** Write only to the final path selected by the native save dialog.
+ * A dialog on Linux may return a path without its filtered extension. The
+ * extension-adjusted filename may already exist even when the dialog's bare
+ * name does not; use exclusive creation to avoid silent overwrites and ask
+ * before replacing that precise target. No renderer-supplied path is used.
+ */
+async function writeConfirmedLyricsExport(fs, dialog, target, text) {
+  let handle
+  try {
+    handle = await fs.open(target, 'wx')
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Replace'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      message: 'A lyrics file with this name already exists.',
+      detail: `Replace the existing file?\\n\\n${target}`,
+    })
+    if (response !== 1) return { saved: false, canceled: true }
+    await fs.writeFile(target, text, 'utf8')
+    return { saved: true }
+  }
+  try {
+    await handle.writeFile(text, 'utf8')
+  } finally {
+    await handle.close()
+  }
+  return { saved: true }
+}
+
+module.exports = { timestamp, toEnhancedLrc, prepareLyricsExport, writeConfirmedLyricsExport }
