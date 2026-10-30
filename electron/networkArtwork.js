@@ -40,15 +40,22 @@ async function findFolderArtworkAsync(folder, {
   // a valid folder.jpg or front.png.
   const candidates = images.filter(entry => coverPriority(entry.name) >= 0)
   if (!candidates.length && images.length === 1) candidates.push(images[0])
+  // Share one candidate-stat deadline. A stalled NAS must not cost another
+  // full timeout for each conventional artwork filename.
+  const deadline = Date.now() + timeoutMs
   for (const entry of candidates) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
     const candidate = path.join(folder, entry.name)
     try {
-      const info = await withTimeout(stat, timeoutMs)(candidate)
+      const info = await withTimeout(stat, remaining)(candidate)
       if (info.isFile() && info.size > 0 && info.size <= MAX_FOLDER_COVER_BYTES) {
         return candidate
       }
-    } catch {
-      // A failed candidate does not invalidate other named covers.
+    } catch (error) {
+      if (Date.now() >= deadline || error?.code === 'ETIMEDOUT' ||
+          /timed out/i.test(error?.message || '')) break
+      // Immediate errors (e.g. EACCES/ENOENT) may still leave a valid cover.
     }
   }
   return null
