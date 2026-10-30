@@ -42,7 +42,9 @@ function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = fals
     if (spatialQuality(addon, quality)) {
       if (purpose === 'playback') throw new Error('Configured spatial audio needs native output; PCM playback cannot preserve the encoded stream.')
       if (!allowAtmos) throw new Error('Native spatial audio requires explicit authorization')
-      const selected = options.find(q => q.id === quality)
+      const selected = options.find(q => q.id === quality) ||
+        (/^amazon(?:-(?:new|web))?$/i.test(addon?.name || '') && /^DOLBY[_ -]?ATMOS$/i.test(quality)
+          ? options.find(q => /^ac-?4$/i.test(q.id)) : null)
       if (!selected) throw new Error('The addon does not offer the requested spatial tier')
       return selected.id
     }
