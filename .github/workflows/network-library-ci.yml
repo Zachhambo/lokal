@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'electron/networkShare.js'
+      - 'electron/networkArtwork.js'
       - 'electron/ipc/networkLibrary.js'
       - 'electron/ipc/scanner.js'
       - 'electron/main.js'
@@ -33,6 +34,7 @@ jobs:
       - name: Validate Electron network code syntax
         run: |
           node --check electron/networkShare.js
+          node --check electron/networkArtwork.js
           node --check electron/ipc/networkLibrary.js
           node --check electron/main.js
           node --check electron/ipc/scanner.js
