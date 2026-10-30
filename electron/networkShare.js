@@ -45,8 +45,41 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
     }
     return path.win32.normalize(input)
   }
+  if (/^https?:\/\//i.test(input)) {
+    if (platform !== 'win32') {
+      throw new Error('Mount the WebDAV share with your file manager first, then enter the mounted absolute folder path.')
+    }
+    let uri
+    try { uri = new URL(input) } catch { throw new Error('Invalid WebDAV URL.') }
+    if (uri.protocol !== 'https:') {
+      throw new Error('Use HTTPS for WebDAV with credentials; HTTP is not supported for automatic import.')
+    }
+    // WHATWG URL exposes empty '?' and '#' components as empty strings.
+    // Reject their raw delimiters too, or they become part of a UNC folder.
+    if (uri.username || uri.password || uri.search || uri.hash ||
+        input.includes('?') || input.includes('#')) {
+      throw new Error('WebDAV URLs must not contain credentials, query or fragment.')
+    }
+    const raw = input.match(/^https:\/\/[^/]+(?:\/(.*))?$/i)?.[1] ?? ''
+    let parts
+    try {
+      parts = raw.split('/').filter(Boolean).map(segment => decodeURIComponent(segment))
+    } catch {
+      throw new Error('Malformed percent-encoding in WebDAV path.')
+    }
+    if (parts.some(segment => segment === '.' || segment === '..' ||
+        [0, 47, 58, 92].some(code => segment.includes(String.fromCharCode(code))))) {
+      throw new Error('Invalid WebDAV path segment.')
+    }
+    // Windows WebClient maps HTTPS WebDAV to its virtual UNC filesystem.
+    // Keep TLS on and use the configured port, never silently downgrade.
+    const server = uri.hostname + '@SSL' +
+      (uri.port && uri.port !== '443' ? '@' + uri.port : '')
+    return '\\\\' + server + '\\DavWWWRoot' +
+      (parts.length ? '\\' + parts.join('\\') : '')
+  }
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(input)) {
-    throw new Error('This import reads an OS-mounted directory, not an HTTP or WebDAV URL. Mount WebDAV in your file manager first.')
+    throw new Error('Unsupported network URL. Use SMB, HTTPS WebDAV or a mounted folder.')
   }
   const paths = platform === 'win32' ? path.win32 : path.posix
   if (!paths.isAbsolute(input)) {
