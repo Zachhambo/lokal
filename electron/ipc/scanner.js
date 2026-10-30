@@ -2173,13 +2173,18 @@ async function applyFileChanges(changes = [], activeRoots) {
   // separate NAS is offline.
   const db = getDB()
   const configured = configuredMusicFolders(db)
-  const roots = Array.isArray(activeRoots)
+  const candidates = Array.isArray(activeRoots)
     ? activeRoots.map(root => path.resolve(root)).filter(root =>
         configured.some(saved => path.resolve(saved).toLowerCase() === root.toLowerCase()))
-    : await Promise.all(configured.map(async root => {
-        try { return (await fs.stat(root)).isDirectory() ? root : null }
-        catch { return null }
-      })).then(results => results.filter(Boolean))
+    : configured
+  // A watcher can still deliver an old event after a NAS was disconnected.
+  // Probe directory listing (not just stale watcher membership) without
+  // blocking Electron's main process before processing any file changes.
+  const { isReadableRoot } = require('./networkLibrary')
+  const online = await Promise.all(candidates.map(async root => ({
+    root, readable: await isReadableRoot(root),
+  })))
+  const roots = online.filter(entry => entry.readable).map(entry => entry.root)
   if (!roots.length || !Array.isArray(changes)) return { added: [], updated: [], removed: [] }
 
   const rootFor = filePath => {
@@ -2206,7 +2211,7 @@ async function applyFileChanges(changes = [], activeRoots) {
     changedRoots.add(owner)
 
     let stat
-    try { stat = fs.statSync(filePath) } catch {
+    try { stat = await fs.stat(filePath) } catch {
       if (change?.renamed || AUDIO_EXTS.has(path.extname(filePath).toLowerCase())) gone.push(filePath)
       continue
     }
@@ -2227,12 +2232,30 @@ async function applyFileChanges(changes = [], activeRoots) {
   // Scan only affected roots before pruning exact missing paths. This picks up
   // renamed files first, so the pruning code can transfer likes/history to the
   // replacement row instead of treating a rename as a delete.
-  for (const root of changedRoots) await scanFolder(root, { saveRoot: false, watch: false })
+  const readableAfterScan = new Map()
+  for (const root of changedRoots) {
+    if (!await isReadableRoot(root)) {
+      readableAfterScan.set(root, false)
+      continue
+    }
+    await scanFolder(root, { saveRoot: false, watch: false })
+    readableAfterScan.set(root, await isReadableRoot(root))
+  }
 
   let removed = []
   if (gone.length) {
+    // Only prune paths on roots that are still actually readable at deletion
+    // time. A transient NAS outage must never be treated as file removal.
+    const confirmedGone = []
+    for (const filePath of new Set(gone)) {
+      const owner = rootFor(filePath)
+      if (owner && readableAfterScan.get(owner) === true &&
+          await isReadableRoot(owner)) confirmedGone.push(filePath)
+    }
     try {
-      removed = require('../libraryPrune').pruneGonePaths(db, [...new Set(gone)]).ids
+      if (confirmedGone.length) {
+        removed = require('../libraryPrune').pruneGonePaths(db, confirmedGone).ids
+      }
     } catch (error) {
       console.warn('[libraryWatcher] Clearing missing files skipped:', error.message)
     }
