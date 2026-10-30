@@ -512,7 +512,11 @@ async function loadSpotifyPage(page, client, force) {
   // Picks, so the latter are real provider songs instead of fabricated
   // 'Recently played' or duplicated cards.
   const picked = rotated.slice(0, 4)
+  const recentJob = typeof client.spotifyRecentlyPlayed === 'function'
+    ? Promise.resolve().then(() => client.spotifyRecentlyPlayed(force)).catch(() => ({ tracks: [] }))
+    : Promise.resolve({ tracks: [] })
   const expanded = await Promise.all(picked.map(mix => client.spotifyPlaylist(mix.id, force).catch(error => ({ error: error.message }))))
+  const recent = await recentJob
   const from = batches => uniqueSongs(batches.flatMap(data => data?.tracks || []).map(track => ({ ...track, source: 'spotify' })))
   const fresh = from(expanded.slice(0, 2))
   const freshKeys = new Set(fresh.map(songKey))
@@ -520,7 +524,7 @@ async function loadSpotifyPage(page, client, force) {
   const candidates = uniqueSongs([...fresh, ...quick])
   return {
     source: 'spotify', fetchedAt: Date.now(), candidates,
-    freshFinds: fresh.slice(0, 30), quickPicks: quick.slice(0, 30), liked: [], history: [], mixes, mixError: home?.error || '',
+    freshFinds: fresh.slice(0, 30), quickPicks: quick.slice(0, 30), liked: [], history: (recent?.tracks || []).slice(0, 30), mixes, mixError: home?.error || '',
     artists: [...new Map(candidates.flatMap(track => (track.artists || [track.artist]).map(name => ({ name, source: 'spotify' }))).filter(artist => artist.name).map(artist => [recommendationKey(artist.name), artist])).values()].slice(0, 30),
     albums: [...new Map(candidates.filter(track => track.album).map(track => ({ title: track.album, artist: track.artists?.[0] || track.artist, artwork_url: track.artwork_url })).map(album => [`${album.artist}\0${album.title}`, album])).values()].slice(0, 30),
     warnings: expanded.map(data => data?.error).filter(Boolean),
