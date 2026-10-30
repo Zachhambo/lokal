@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('electron', {
   updaterDownload: () => invoke('updater:download'),
   scanFolder: (f) => invoke('scanner:scan', f),
   scanFolders: (folders) => invoke('scanner:scanFolders', folders),
+  connectNetworkShare: (location) => invoke('scanner:connectNetworkShare', location),
   repairLowQualityArtwork: () => invoke('scanner:artworkRepair'),
   artworkRepairStatus: () => invoke('scanner:artworkRepairStatus'),
   cancelArtworkRepair: () => invoke('scanner:artworkRepairCancel'),

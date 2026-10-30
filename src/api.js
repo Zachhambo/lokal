@@ -377,6 +377,9 @@ export const api = {
   getTheme: () => isE() ? el().getTheme() : apiFetch('/settings/theme'),
   saveTheme: (theme, overrides) => isE() ? el().saveTheme(theme, overrides) : apiFetch('/settings/theme', { method:'PUT', body:{theme, overrides} }),
   scanFolder: (f, o = {}) => isE() ? el().scanFolder(f, o) : apiFetch('/settings/scan', { method:'POST', body:{folder:f, full:!!o.full} }),
+  connectNetworkShare: (location) => isE()
+    ? el().connectNetworkShare(location)
+    : Promise.resolve({ error: 'Network folder import is only available in the desktop application.' }),
   scanFolders: async (folders) => {
     const list = [...new Set((Array.isArray(folders) ? folders : []).filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))]
     if (isE()) return el().scanFolders(list)

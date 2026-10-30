@@ -1,0 +1,46 @@
+name: Desktop network library regression
+
+on:
+  pull_request:
+    paths:
+      - 'electron/networkShare.js'
+      - 'electron/ipc/networkLibrary.js'
+      - 'electron/ipc/scanner.js'
+      - 'electron/main.js'
+      - 'electron/preload.js'
+      - 'src/api.js'
+      - 'src/components/NetworkShareSettings.jsx'
+      - 'src/pages/Settings.jsx'
+      - 'scripts/network-*.test.mjs'
+      - 'package.json'
+      - '.github/workflows/network-library-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  network-library:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate Electron network code syntax
+        run: |
+          node --check electron/networkShare.js
+          node --check electron/ipc/networkLibrary.js
+          node --check electron/main.js
+          node --check electron/ipc/scanner.js
+      - name: Test network path security and offline-root retention
+        run: npm run test:network-shares
+      - name: Install renderer dependencies
+        run: npm ci --ignore-scripts
+      - name: Build desktop renderer
+        run: |
+          npm run gen:icons
+          npx vite build
