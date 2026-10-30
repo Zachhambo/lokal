@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
 const service = require('../electron/lyrics/service')
@@ -32,6 +34,28 @@ test('#660: importing an LRC creates a pinned cache that can be embedded without
   const { text, privateTag } = fileLyrics.fromResult(selected)
   assert.match(text, /\[00:01\.00\]Hello world/)
   assert.equal(fromPrivateTag(privateTag).lines[0].text, 'Hello world')
+})
+
+test('#660: imported LRC can actually be embedded into a local MP3 and read back', async t => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'lokal-issue-660-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const frame = Buffer.alloc(417)
+  frame.writeUInt32BE(0xFFFB9064, 0)
+  const audioFile = path.join(dir, 'imported.mp3')
+  writeFileSync(audioFile, Buffer.concat(Array(40).fill(frame)))
+  const conn = db(); t.after(() => conn.close())
+  conn.prepare('UPDATE tracks SET file_path = ? WHERE id = ?').run(audioFile, 'one')
+  const raw = '[00:01.00]Imported first line\n[00:03.00]Imported second line'
+  service.importLyrics(conn, 'one', raw, 'lrc')
+  const selected = await service.getLyricsForSaving(conn, { trackId: 'one' }, 'imported')
+  const prepared = fileLyrics.fromResult(selected)
+  const saved = fileLyrics.writeFileLyrics(audioFile, prepared.text, prepared.privateTag)
+  assert.equal(saved.ok, true)
+  assert.equal(saved.synced, true)
+  const embedded = await fileLyrics.readFileLyrics(audioFile)
+  assert.equal(embedded.synced, true)
+  assert.match(embedded.text, /\[00:01\.00\]Imported first line/)
+  assert.match(embedded.text, /\[00:03\.00\]Imported second line/)
 })
 
 test('#660: importing an ELRC preserves real word timestamps for embed and re-export', async t => {
