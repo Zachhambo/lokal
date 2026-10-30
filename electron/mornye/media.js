@@ -49,7 +49,6 @@ function prepare(db,key,id,{force=false}={}){
   if(existing)return {pending:true,operationId:existing.id}
   const job={id:crypto.randomUUID(),hash,key,itemId:id,status:'running',progress:0,startedAt:Date.now(),controller:new AbortController()};map.set(job.id,job)
   job.liveReady=new Promise(resolve=>{job.markLive=resolve})
-  const addon=service(db).find(key)
   const startedAt=Date.now()
   const quality=stereoPlaybackQuality(addon,service(db).settings(addon))
   // Do not probe a growing file for providers that only deliver a usable
