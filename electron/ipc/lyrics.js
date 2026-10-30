@@ -43,7 +43,7 @@ function registerLyricsHandlers(ipcMain) {
   // and writes .elrc when true per-word timings are present.
   ipcMain.handle('lyrics:exportFile', async (_, providerId, trackId, title, artist, album, duration) => {
     const lyrics = await service.getLyricsForSaving(db, { trackId, title, artist, album, duration }, providerId)
-    const { prepareLyricsExport } = require('../lyrics/fileExport')
+    const { prepareLyricsExport, writeConfirmedLyricsExport } = require('../lyrics/fileExport')
     const exported = prepareLyricsExport(lyrics)
     const path = require('path')
     const fs = require('fs/promises')
@@ -58,8 +58,8 @@ function registerLyricsHandlers(ipcMain) {
     if (canceled || !filePath) return { saved: false, canceled: true }
     // The selected native save-dialog path may omit the extension.
     const target = path.extname(filePath) ? filePath : `${filePath}.${exported.extension}`
-    await fs.writeFile(target, exported.text, 'utf8')
-    return { saved: true, format: exported.format }
+    const written = await writeConfirmedLyricsExport(fs, dialog, target, exported.text)
+    return { ...written, ...(written.saved ? { format: exported.format } : {}) }
   })
 
   ipcMain.handle('lyrics:import', (_, trackId, content, type) =>
