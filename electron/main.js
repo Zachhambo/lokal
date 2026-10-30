@@ -20,6 +20,7 @@ const { autoUpdater } = require('electron-updater')
 const { createUpdateInstaller, shouldQuitOnWindowClosed } = require('./updaterInstall')
 const { initDB, getDB } = require('./ipc/db')
 const { registerScannerHandlers, registerExtraHandlers, registerV4Handlers, AUDIO_EXTS } = require('./ipc/scanner')
+const { registerNetworkLibraryHandlers } = require('./ipc/networkLibrary')
 const { registerMixesHandlers } = require('./ipc/mixes')
 const { registerPlayerHandlers } = require('./ipc/player')
 const { registerDownloaderHandlers, registerExtraDownloaderHandlers, registerPlaylistArchiveHandlers, markInterruptedPlaylistsIncomplete, shutdownActiveDownloads } = require('./ipc/downloader')
@@ -603,6 +604,8 @@ app.whenReady().then(async () => {
   ]) {
     try { fn(ipcMain) } catch (e) { console.error(fn.name + ':', e.message) }
   }
+  try { registerNetworkLibraryHandlers(ipcMain) }
+  catch (e) { console.error('registerNetworkLibraryHandlers:', e.message) }
   registerNativeOutput(ipcMain, () => mainWindow)
   try { registerThumbarHandlers(ipcMain, () => mainWindow) } catch (e) { console.error('registerThumbarHandlers:', e.message) }
   try { registerSmtcHandlers(ipcMain, () => mainWindow) } catch (e) { console.error('registerSmtcHandlers:', e.message) }
