@@ -36,16 +36,19 @@ export default function NetworkShareSettings({ onConnected }) {
   return (
     <form onSubmit={connect} className="space-y-3">
       <p className="text-xs text-muted leading-relaxed">
-        Add music from an SMB or WebDAV share mounted by your operating system.
-        Windows also accepts <code>smb://server/share</code> or <code>\\server\share</code>.
-        Connect to the NAS using your system credentials first. On macOS/Linux,
-        enter the mounted folder path. Lokal never stores a network password.
+        Add music from an SMB or WebDAV share via the operating system.
+        Windows accepts <code>smb://server/share</code> or an HTTPS WebDAV
+        URL such as <code>https://192.168.8.1:6008/disk1_part1</code>.
+        SMB uses Windows credentials; HTTPS WebDAV uses Windows WebClient
+        and requires the NAS certificate to be trusted by Windows.
+        On macOS/Linux, mount the share first and enter its absolute folder
+        path. Lokal does not store network passwords.
       </p>
       <div className="flex flex-wrap gap-2">
         <input
           value={location}
           onChange={event => setLocation(event.target.value)}
-          placeholder="smb://192.168.8.1/disk1_part1 or /mnt/music"
+          placeholder="smb://nas/share, https://nas:6008/share or /mnt/music"
           aria-label="Network library location"
           className="min-w-0 flex-1 rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-white"
         />
