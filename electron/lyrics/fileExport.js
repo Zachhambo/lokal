@@ -46,10 +46,27 @@ function toEnhancedLrc(result) {
   return out.length ? out.join('\n') + '\n' : null
 }
 
+/** Mobile's normal save preserves imported source text without re-rendering
+ * per-word timings, vendor metadata, or line endings. Parsed lyrics remain
+ * authoritative for playback and embedded tags.
+ */
+function originalImport(result) {
+  const raw = result?.source === 'imported' ? result.rawImport : null
+  if (!raw || typeof raw.content !== 'string' || !raw.content.trim()) return null
+  const content = raw.content
+  const lrc = /\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/.test(content)
+  const enhanced = lrc && /<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/.test(content)
+  const xml = /<(?:[A-Za-z_][\w.-]*:)?tt(?:\s|>)/i.test(content)
+  const extension = xml ? 'ttml' : lrc ? (enhanced ? 'elrc' : 'lrc') : 'txt'
+  return { extension, text: content, format: extension }
+}
+
 function prepareLyricsExport(result) {
   if (!result?.lines?.some(line => String(line?.text || line?.bgText || '').trim())) {
     throw new Error('There are no lyrics to save.')
   }
+  const original = originalImport(result)
+  if (original) return original
   const enhanced = toEnhancedLrc(result)
   if (enhanced) return { extension: 'elrc', text: enhanced, format: 'enhanced-lrc' }
   const portable = toPortableLyrics(result)
