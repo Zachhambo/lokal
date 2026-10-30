@@ -12,7 +12,8 @@ const { findAudioEditionDuplicate } = require('../quality/editionDuplicates')
 const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
-const { findFolderArtwork, getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
+const { getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
+const { findFolderArtworkAsync } = require('../networkArtwork')
 const { getDB, getStorageDir, importAppData, resetAppData } = require('./db')
 const { ipcMain } = require('electron')
 const { emitPluginHook } = require('./plugins')
@@ -553,7 +554,9 @@ async function scanFolder(folderPath, {
   const folderArtworkCache = new Map()
   const getFolderArtwork = (filePath) => {
     const folderPath = path.dirname(filePath)
-    if (!folderArtworkCache.has(folderPath)) folderArtworkCache.set(folderPath, findFolderArtwork(folderPath))
+    if (!folderArtworkCache.has(folderPath)) {
+      folderArtworkCache.set(folderPath, findFolderArtworkAsync(folderPath))
+    }
     return folderArtworkCache.get(folderPath)
   }
 
@@ -562,7 +565,7 @@ async function scanFolder(folderPath, {
       const stat = await require('./networkLibrary').withTimeout(fs.promises.stat)(filePath)
       const trackId = 't-' + hashFile(filePath, stat)
       const existing = db.prepare('SELECT id, last_modified, artwork_path FROM tracks WHERE file_path = ?').get(filePath)
-      const folderArtwork = getFolderArtwork(filePath)
+      const folderArtwork = await getFolderArtwork(filePath)
       // A refresh re-reads unchanged files, but not ones whose artist the user
       // changed by hand (rename/merge/delete lock their links).
       const refreshThis = refreshArtistNames && !(existing && artistLinksLocked(db, existing.id))
