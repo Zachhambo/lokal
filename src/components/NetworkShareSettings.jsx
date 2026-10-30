@@ -40,7 +40,9 @@ export default function NetworkShareSettings({ onConnected }) {
         Windows accepts <code>smb://server/share</code> or an HTTPS WebDAV
         URL such as <code>https://192.168.8.1:6008/disk1_part1</code>.
         SMB uses Windows credentials; HTTPS WebDAV uses Windows WebClient
-        and requires the NAS certificate to be trusted by Windows.
+        and requires the NAS certificate to be trusted by Windows. For
+        password-protected WebDAV, first open the WebDAV location in Windows
+        File Explorer and sign in with your NAS account, then add it here.
         On macOS/Linux, mount the share first and enter its absolute folder
         path. Lokal does not store network passwords.
       </p>
