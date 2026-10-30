@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1, Mic2, ListMusic, ListPlus, Search, Maximize2, Expand, Minimize, Volume2, Film, Clapperboard, Gamepad2, Eye, EyeOff, Image as ImageIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { showToast } from './Toaster'
 import { usePlayerStore, useAppStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import LyricsPanel from './LyricsPanel'
@@ -637,11 +638,17 @@ export default function FullscreenPlayer() {
     }
   }
 
-  const handleLyricsSelect = (lyrics, type) => {
+  const handleLyricsSelect = async (lyrics, type) => {
     if (!currentTrack) return
-    api.importLyrics(currentTrack.id, lyrics, type)
-    setRefreshKey(k => k + 1)
+    const trackId = currentTrack.id
     setShowSearch(false)
+    try {
+      const imported = await api.importLyrics(trackId, lyrics, type)
+      if (!imported?.lines?.length) throw new Error('No usable lyrics were found.')
+      if (usePlayerStore.getState().currentTrack?.id === trackId) setRefreshKey(k => k + 1)
+    } catch (error) {
+      showToast(error?.message || 'Could not import lyrics.')
+    }
   }
 
   // Idle: after a few seconds without the mouse moving, the header and the
