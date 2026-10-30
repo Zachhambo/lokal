@@ -38,7 +38,7 @@ test('Windows GL.iNet WebDAV uses HTTPS WebClient with custom port', () => {
 test('non-Windows only accepts mounted absolute paths', () => {
   assert.equal(resolveNetworkLibraryLocation('/mnt/nas/Music', 'linux'), '/mnt/nas/Music')
   assert.throws(() => resolveNetworkLibraryLocation('smb://nas/Music', 'linux'), /Mount/)
-  assert.throws(() => resolveNetworkLibraryLocation('https://nas.example/dav', 'linux'), /Mount WebDAV/)
+  assert.throws(() => resolveNetworkLibraryLocation('https://nas.example/dav', 'linux'), /Mount the WebDAV/)
   assert.throws(() => resolveNetworkLibraryLocation('Downloads', 'linux'), /absolute/)
 })
 
