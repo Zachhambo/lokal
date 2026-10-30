@@ -151,15 +151,16 @@ function audioFiles(root) {
 
 async function scan(folder) {
   const target = path.resolve(folder)
-  if (!selectedRoot(target) || !fs.existsSync(target)) return
+  const { isReadableRoot } = require('./ipc/networkLibrary')
+  if (!selectedRoot(target) || !await isReadableRoot(target)) return
   const db = require('./ipc/db').getDB()
   const scanner = require('./ipc/scanner')
   const before = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
   await scanner.scanFolder(target, { saveRoot: false, watch: false })
-  // A queued recovery can outlive the old watch. Never prune or publish its
-  // results if another music folder was selected while the scan was running.
-  if (!selectedRoot(target)) return
+  // Never prune if the NAS disappeared while the metadata scan was running.
+  if (!selectedRoot(target) || !await isReadableRoot(target)) return
   const files = audioFiles(target)
+  if (!selectedRoot(target) || !await isReadableRoot(target)) return
   const oldRows = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
   const pruned = require('./libraryPrune').pruneMissingTracks(db, target, files)
   const after = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
@@ -215,7 +216,11 @@ function recover(folder) {
     if (selectedRoot(target)) {
       try { await scan(target) } catch (error) { console.warn('[libraryWatcher] Recovery scan failed:', error.message) }
     }
-    watchLibraryRoots(configuredRoots())
+    const { isReadableRoot } = require('./ipc/networkLibrary')
+    const candidates = configuredRoots()
+    const online = await Promise.all(candidates.map(async folder =>
+      await isReadableRoot(folder) ? folder : null))
+    watchLibraryRoots(online.filter(Boolean))
   }, RECOVER_MS)
 }
 
