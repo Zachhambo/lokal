@@ -76,7 +76,7 @@ test('native handler verifies the delivered HTTP file, never catalogue metadata'
   const handler = readFileSync(path.join(root, 'electron/audio/atmos.js'), 'utf8')
   assert.match(handler, /selectedHttpSpatial\(httpAddon\)/)
   assert.match(handler, /stageHttpSpatialAudio\(stream.url/)
-  assert.match(handler, /inspectAtmosFile\(staged.file/)
+  assert.match(handler, /inspectAtmosFile\s*\(\s*staged\.file/)
   assert.match(handler, /No stereo fallback/)
   const provider = readFileSync(path.join(root, 'electron/ipc/online.js'), 'utf8')
   assert.match(provider, /nativeSpatialPreferred: !!httpSpatial/)
