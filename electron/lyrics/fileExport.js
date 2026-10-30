@@ -94,7 +94,7 @@ async function writeConfirmedLyricsExport(fs, dialog, target, text) {
       cancelId: 0,
       noLink: true,
       message: 'A lyrics file with this name already exists.',
-      detail: `Replace the existing file?\\n\\n${target}`,
+      detail: `Replace the existing file?\n\n${target}`,
     })
     if (response !== 1) return { saved: false, canceled: true }
     await fs.writeFile(target, text, 'utf8')
