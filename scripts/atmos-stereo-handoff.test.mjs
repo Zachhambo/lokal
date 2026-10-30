@@ -6,31 +6,30 @@ import { beginAtmosOutputRelease, awaitAtmosOutputRelease, shouldToggleNormalStr
 const require = createRequire(import.meta.url)
 const { stereoPlaybackQuality, isAtmosQuality, addonDownloadQuality } = require('../electron/mornye/playbackQuality.js')
 
-test('Atmos is never selected for regular Tidal streaming, even if configured as default', () => {
-  const addon = {
-    name: 'tidal',
-    manifest: { qualityOptions: [
-      { id: 'DOLBY_ATMOS', kind: 'spatial' },
-      { id: 'HIGH', kind: 'lossy' },
-      { id: 'LOSSLESS', kind: 'lossless' },
-      { id: 'HI_RES_LOSSLESS', kind: 'lossless' },
-    ] },
-  }
-  assert.equal(stereoPlaybackQuality(addon, { downloadQuality: 'DOLBY_ATMOS' }), 'HI_RES_LOSSLESS')
-  assert.equal(stereoPlaybackQuality(addon, { downloadQuality: 'LOSSLESS' }), 'LOSSLESS')
-  assert.equal(stereoPlaybackQuality(addon, { downloadQuality: 'HIGH' }), 'HIGH')
-  assert.equal(stereoPlaybackQuality(addon, { downloadQuality: 'ATMOS' }), 'HI_RES_LOSSLESS')
-  assert.equal(stereoPlaybackQuality({ name: 'Tidal', manifest: {} }, { downloadQuality: 'DOLBY_ATMOS' }), 'HI_RES_LOSSLESS')
-  assert.equal(isAtmosQuality(stereoPlaybackQuality(addon, { downloadQuality: 'DOLBY_ATMOS' })), false)
+test('Mornye saved quality controls playback without inferring a catalogue tag', () => {
+  const tidal = { name: 'tidal', manifest: { qualityOptions: [
+    { id: 'DOLBY_ATMOS', kind: 'spatial' },
+    { id: 'HIGH', kind: 'lossy' },
+    { id: 'LOSSLESS', kind: 'lossless' },
+    { id: 'HI_RES_LOSSLESS', kind: 'lossless' },
+  ] } }
+  assert.equal(stereoPlaybackQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }), 'DOLBY_ATMOS')
+  assert.equal(stereoPlaybackQuality(tidal, { downloadQuality: 'LOSSLESS' }), 'LOSSLESS')
+  assert.equal(stereoPlaybackQuality(tidal, { downloadQuality: 'HIGH' }), 'HIGH')
+  assert.equal(stereoPlaybackQuality(tidal, {}), 'HI_RES_LOSSLESS')
+  assert.equal(isAtmosQuality('DOLBY_ATMOS'), true)
+  assert.equal(isAtmosQuality('LOSSLESS'), false)
 })
 
-test('only lossless/stereo tiers are used when no preferred quality exists', () => {
-  const addon = { name: 'tidal', manifest: { qualityOptions: [
-    { id: 'DOLBY_ATMOS' }, { id: 'LOSSLESS', kind: 'lossless' },
+test('other addon formats are passed through as configured', () => {
+  const plugin = { name: 'qobuz', manifest: { qualityOptions: [
+    { id: 'HI_RES_LOSSLESS', kind: 'lossless' },
+    { id: 'HIGH', kind: 'lossy' },
   ] } }
-  assert.equal(stereoPlaybackQuality(addon, { downloadQuality: 'DOLBY_ATMOS' }), 'LOSSLESS')
-  assert.equal(stereoPlaybackQuality({ name: 'other', manifest: {} }, { downloadQuality: 'DOLBY_ATMOS' }), undefined)
-  assert.equal(stereoPlaybackQuality(addon, {}), undefined)
+  for (const quality of ['HI_RES_LOSSLESS', 'HIGH']) {
+    assert.equal(stereoPlaybackQuality(plugin, { downloadQuality: quality }), quality)
+    assert.equal(addonDownloadQuality(plugin, { downloadQuality: quality }, { purpose: 'playback' }), quality)
+  }
 })
 
 test('Atmos-to-normal handoff holds the PCM start until native teardown completes', async () => {
@@ -74,54 +73,27 @@ test('same Tidal track after Atmos changes engine instead of pausing native sess
   assert.equal(shouldToggleNormalStream({ id: 42, atmosNative: false }, false), false)
 })
 
-test('ordinary high-res downloads never request Atmos, even if saved default is Atmos', () => {
-  const tidal = { name: 'tidal-web', manifest: { qualityOptions: [
-    { id: 'DOLBY_ATMOS', kind: 'spatial' },
-    { id: 'HI_RES_LOSSLESS', kind: 'lossless' },
-    { id: 'LOSSLESS', kind: 'lossless' },
+test('configured Atmos is requested for downloads, never downmixed to FLAC', () => {
+  const tidal = { name: 'tidal', manifest: { qualityOptions: [
+    { id: 'DOLBY_ATMOS', kind: 'spatial' }, { id: 'HI_RES_LOSSLESS', kind: 'lossless' },
   ] } }
-  assert.equal(addonDownloadQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }), 'HI_RES_LOSSLESS')
-  assert.equal(addonDownloadQuality(tidal, {}), 'HI_RES_LOSSLESS')
+  assert.equal(addonDownloadQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }), 'DOLBY_ATMOS')
   assert.equal(addonDownloadQuality(tidal, { downloadQuality: 'HI_RES_LOSSLESS' }), 'HI_RES_LOSSLESS')
-  assert.equal(addonDownloadQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }, { quality: 'LOSSLESS' }), 'LOSSLESS')
   assert.equal(addonDownloadQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }, { quality: 'HI_RES_LOSSLESS' }), 'HI_RES_LOSSLESS')
-  assert.equal(addonDownloadQuality({ name: 'tidal', manifest: {} }, { downloadQuality: 'DOLBY_ATMOS' }), 'HI_RES_LOSSLESS')
-  assert.equal(addonDownloadQuality({ name: 'other', manifest: { qualityOptions: [
-    { id: 'DOLBY_ATMOS' }, { id: 'LOSSLESS' },
-  ] } }, {}), 'LOSSLESS')
+  assert.throws(() => addonDownloadQuality(tidal, { downloadQuality: 'DOLBY_ATMOS' }, { purpose: 'playback' }), /native output/i)
 })
 
-test('explicit Atmos request is isolated, validated and never silently downgraded', () => {
-  const tidal = { name: 'tidal-web', manifest: { qualityOptions: [
-    { id: 'DOLBY_ATMOS' }, { id: 'HI_RES_LOSSLESS' },
-  ] } }
-  assert.throws(() => addonDownloadQuality(tidal, {}, { quality: 'DOLBY_ATMOS' }), /explicit Download Dolby Atmos/)
-  assert.throws(() => addonDownloadQuality(tidal, {}, { quality: 'DOLBY_ATMOS', allowAtmos: true, purpose: 'playback' }), /explicit Download Dolby Atmos/)
-  assert.equal(addonDownloadQuality(tidal, {}, { quality: 'DOLBY_ATMOS', allowAtmos: true, purpose: 'download' }), 'DOLBY_ATMOS')
-  assert.throws(() => addonDownloadQuality({ name: 'generic', manifest: { qualityOptions: [{ id: 'LOSSLESS' }] } },
-    {}, { quality: 'DOLBY_ATMOS', allowAtmos: true }), /does not offer Dolby Atmos/)
-})
-
-
-test('Amazon AC-4 is an explicit native tier, never the default stereo path', () => {
+test('Amazon AC-4 and FLAC settings request different audio codecs', () => {
   const amazon = { name: 'amazon', manifest: { qualityOptions: [
     { id: 'best', kind: 'lossless' },
-    { id: 'opus', kind: 'lossy' },
     { id: 'eac3', kind: 'spatial' },
-    { id: 'ac4', kind: 'spatial', label: 'Dolby Atmos (AC-4)' },
+    { id: 'ac4', kind: 'spatial' },
   ] } }
-  assert.equal(isAtmosQuality('ac4'), true)
-  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'ac4' }), 'best')
-  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'eac3' }), 'best')
-  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'ac4' }), 'best')
-  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'eac3' }), 'best')
-  assert.equal(addonDownloadQuality(amazon, {}, {
-    quality: 'DOLBY_ATMOS', allowAtmos: true, purpose: 'download',
-  }), 'ac4')
-  assert.equal(addonDownloadQuality(amazon, {}, {
-    quality: 'ac4', allowAtmos: true, purpose: 'download',
-  }), 'ac4')
-  assert.throws(() => addonDownloadQuality(amazon, {}, {
-    quality: 'ac4', allowAtmos: true, purpose: 'playback',
-  }), /explicit Download Dolby Atmos/)
+  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'ac4' }), 'ac4')
+  assert.equal(stereoPlaybackQuality(amazon, { downloadQuality: 'best' }), 'best')
+  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'ac4' }), 'ac4')
+  assert.equal(addonDownloadQuality(amazon, { downloadQuality: 'best' }), 'best')
+  assert.equal(addonDownloadQuality(amazon, {}, { quality: 'DOLBY_ATMOS', allowAtmos: true }), 'ac4')
+  assert.throws(() => addonDownloadQuality(amazon, { downloadQuality: 'ac4' }, { purpose: 'playback' }), /native output/i)
+  assert.throws(() => addonDownloadQuality(amazon, {}, { quality: 'ac4' }), /explicit authorization/i)
 })
