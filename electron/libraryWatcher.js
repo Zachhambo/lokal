@@ -33,6 +33,8 @@ let recovering = null
 let catchUp = null
 const pending = new Map() // path -> whether it appeared/went (vs changed)
 const catchUpRoots = new Set()
+const catchUpAttempts = new Map()
+const MAX_CATCH_UP_RETRIES = 3
 
 function broadcast(channel, payload) {
   const { BrowserWindow } = require('electron')
@@ -131,35 +133,24 @@ function selectedRoot(folder) {
   return configuredRoots().some(candidate => candidate.toLowerCase() === wanted)
 }
 
-function audioFiles(root) {
-  const { AUDIO_EXTS } = require('./ipc/scanner')
-  const { isPreparedStemClipName } = require('./automix/stem-clip')
-  const files = []
-  const walk = dir => {
-    let entries = []
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name)
-      if (entry.isDirectory()) walk(full)
-      else if (entry.isFile() && !isPreparedStemClipName(entry.name) &&
-        AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(path.resolve(full))
-    }
-  }
-  walk(root)
-  return files
-}
-
 async function scan(folder) {
   const target = path.resolve(folder)
   const { isReadableRoot } = require('./ipc/networkLibrary')
-  if (!selectedRoot(target) || !await isReadableRoot(target)) return
+  if (!selectedRoot(target) || !await isReadableRoot(target)) return false
   const db = require('./ipc/db').getDB()
   const scanner = require('./ipc/scanner')
   const before = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
-  await scanner.scanFolder(target, { saveRoot: false, watch: false })
-  // Never prune if the NAS disappeared while the metadata scan was running.
+  const scanned = await scanner.scanFolder(target, { saveRoot: false, watch: false })
+  // A failed metadata read or missing NAS subfolder means the inventory is
+  // incomplete. Never interpret that snapshot as deleted files.
+  if (!scanned || scanned.errors) return false
   if (!selectedRoot(target) || !await isReadableRoot(target)) return
-  const files = audioFiles(target)
+  const walkFailures = []
+  const files = await scanner.walkDir(target, [], walkFailures)
+  if (walkFailures.length) {
+    console.warn('[libraryWatcher] Skipped destructive prune after incomplete NAS walk:', walkFailures.length)
+    return false
+  }
   if (!selectedRoot(target) || !await isReadableRoot(target)) return
   const oldRows = db.prepare("SELECT id, file_path, last_modified FROM tracks WHERE file_path NOT LIKE 'ghost://%'").all()
   const pruned = require('./libraryPrune').pruneMissingTracks(db, target, files)
@@ -185,6 +176,45 @@ async function scan(folder) {
       removed: [...new Set(removed)],
     })
   }
+  return true
+}
+
+/** Retry an incomplete directory catch-up at most three times; never prune on failure. */
+function scheduleCatchUp(delay = CATCH_UP_MS) {
+  clearTimeout(catchUp)
+  catchUp = setTimeout(async () => {
+    catchUp = null
+    const pendingRoots = [...catchUpRoots]
+    catchUpRoots.clear()
+    let retryDelay = CATCH_UP_MS
+    for (const candidate of pendingRoots) {
+      const attempt = catchUpAttempts.get(candidate) ?? 0
+      if (!selectedRoot(candidate)) {
+        catchUpAttempts.delete(candidate)
+        continue
+      }
+      let complete = false
+      try {
+        complete = await scan(candidate)
+      } catch (error) {
+        console.warn('[libraryWatcher] Catch-up scan failed:', error.message)
+      }
+      // A newer watch event may have reset this root's retry sequence.
+      if (catchUpAttempts.get(candidate) !== attempt) continue
+      if (complete) {
+        catchUpAttempts.delete(candidate)
+      } else if (attempt < MAX_CATCH_UP_RETRIES) {
+        catchUpAttempts.set(candidate, attempt + 1)
+        catchUpRoots.add(candidate)
+        retryDelay = Math.max(retryDelay, CATCH_UP_MS * 2 ** (attempt + 1))
+      } else {
+        catchUpAttempts.delete(candidate)
+        console.warn('[libraryWatcher] Incomplete catch-up after bounded retries:', candidate)
+      }
+    }
+    // An incoming watcher event may already have scheduled a newer catch-up.
+    if (catchUpRoots.size && !catchUp) scheduleCatchUp(retryDelay)
+  }, delay)
 }
 
 /** Windows dropped events: a scan catches up once things are quiet. */
@@ -193,18 +223,11 @@ function catchUpLater(folder) {
   clearTimeout(timer)
   timer = null
   const target = path.resolve(folder)
-  if (selectedRoot(target)) catchUpRoots.add(target)
-  clearTimeout(catchUp)
-  catchUp = setTimeout(async () => {
-    catchUp = null
-    const pendingRoots = [...catchUpRoots]
-    catchUpRoots.clear()
-    for (const candidate of pendingRoots) {
-      if (selectedRoot(candidate)) {
-        try { await scan(candidate) } catch (error) { console.warn('[libraryWatcher] Catch-up scan failed:', error.message) }
-      }
-    }
-  }, CATCH_UP_MS)
+  if (selectedRoot(target)) {
+    catchUpRoots.add(target)
+    catchUpAttempts.set(target, 0)
+  }
+  scheduleCatchUp()
 }
 
 /** The watcher stopped: catch up the failed root and restore all configured watchers. */
@@ -235,9 +258,10 @@ function watchLibraryRoots(folderPaths = []) {
   for (const value of Array.isArray(folderPaths) ? folderPaths : []) {
     if (typeof value !== 'string' || !value.trim()) continue
     const full = path.resolve(value.trim())
-    let stat
-    try { stat = fs.statSync(full) } catch { continue }
-    if (!stat.isDirectory() || seen.has(full.toLowerCase())) continue
+    // The network-source scanner already probes directory access before
+    // supplying roots. A synchronous statSync here could still freeze
+    // Electron if the NAS disappears between probing and watcher setup.
+    if (seen.has(full.toLowerCase())) continue
     seen.add(full.toLowerCase())
     nextRoots.push(full)
   }
@@ -264,6 +288,10 @@ function watchLibraryRoots(folderPaths = []) {
       console.warn('[libraryWatcher] Could not watch music folder:', next, error.message)
     }
   }
+  // Only directories whose fs.watch was successfully established are active.
+  // Unavailable NAS roots remain in persisted settings, not in live watchers.
+  roots = [...watchers.keys()]
+  root = roots[0] || null
 }
 
 function stopWatching() {
@@ -278,6 +306,7 @@ function stopWatching() {
   clearTimeout(catchUp)
   catchUp = null
   catchUpRoots.clear()
+  catchUpAttempts.clear()
   clearTimeout(recovering)
   recovering = null
   pending.clear()
