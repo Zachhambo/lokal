@@ -22,7 +22,7 @@
     "test:artwork-download": "node --test scripts/artwork-download.test.mjs",
     "test:artist-roles": "node --test scripts/artist-roles.test.mjs",
     "test:gapless": "node --test scripts/gapless-playback.test.mjs",
-    "test:network-shares": "node --test scripts/network-share-paths.test.mjs",
+    "test:network-shares": "node --test scripts/network-share-paths.test.mjs scripts/network-library-scan.test.mjs",
     "test:resolution-tags": "node --test scripts/full-resolution-quality-tags.test.mjs",
     "test:tracklist-navigation": "node --test scripts/tracklist-song-links.test.mjs",
     "test:artist-search-keys": "node --test scripts/artist-search-result-keys.test.mjs",
