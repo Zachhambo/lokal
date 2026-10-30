@@ -68,7 +68,7 @@ import { loadingSession, withPreparationProgress, streamLoadKey } from './stream
 import ReleaseRefreshBanner from './components/ReleaseRefreshBanner'
 import { PageReadyContext, PageShownContext, PAGE_READY_TIMEOUT_MS } from './pageCache'
 import { audioSrcFor, isAddonProvider, providerLabel, streamRef } from './onlineTracks'
-import { awaitAtmosOutputRelease } from './audio/atmosHandoff.mjs'
+import { beginAtmosOutputRelease, awaitAtmosOutputRelease } from './audio/atmosHandoff.mjs'
 import { playbackLog } from './playbackLog'
 import TvController from './tv/TvController'
 
@@ -739,12 +739,12 @@ export default function App() {
   // the existing native codec path, never through Chromium's PCM decoder.
   useEffect(() => {
     const ref = streamRef(currentTrack)
-    if (!ref || !isAddonProvider(ref.provider) || !addonPlaybackPrefs || castActive) return
+    if (!api.isElectron || !ref || !isAddonProvider(ref.provider) || !addonPlaybackPrefs || castActive) return
     const preference = addonPlaybackPrefs[ref.provider]
     if (currentTrack?.atmosAuto && !preference?.nativeSpatialPreferred) {
       const ordinary = { ...currentTrack, atmosNative: false, atmosAuto: false }
       usePlayerStore.setState({ currentTrack: ordinary })
-      Promise.resolve(api.atmosStop()).catch(() => {})
+      beginAtmosOutputRelease(() => api.atmosStop()).catch(() => {})
       return
     }
     if (!preference?.nativeSpatialPreferred || currentTrack?.atmosNative || !isPlaying) return
