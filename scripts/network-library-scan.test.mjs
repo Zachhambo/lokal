@@ -1,9 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { scanNetworkRoots } = require('../electron/ipc/networkLibrary.js')
+const { scanNetworkRoots, withTimeout } = require('../electron/ipc/networkLibrary.js')
+const local = path.resolve('/music/local')
+const nas = path.resolve('/mnt/nas')
+const missing = path.resolve('/mnt/not-found')
 
 test('preserves offline NAS root and scans only currently reachable music roots', async () => {
   const saved = []
@@ -14,41 +18,44 @@ test('preserves offline NAS root and scans only currently reachable music roots'
   }
   const scans = []
   const result = await scanNetworkRoots(
-    ['/music/local', '/mnt/nas', '/music/local'],
+    [local, nas, local],
     {
-      existing: ['/music/local', '/mnt/nas'],
+      existing: [local, nas],
       db,
       scan: async roots => {
         scans.push(roots)
         return { results: [{ songs: 2 }], status: { done: 2 } }
       },
-      isReadable: async folder => folder === '/music/local',
+      isReadable: async folder => folder === local,
     },
   )
 
-  assert.deepEqual(scans, [['/music/local']])
-  assert.deepEqual(result.folders, ['/music/local', '/mnt/nas'])
-  assert.deepEqual(result.offlineFolders, ['/mnt/nas'])
-  assert.equal(JSON.parse(saved[0].value)[1], '/mnt/nas')
-  assert.equal(saved[1].value, '/music/local')
+  assert.deepEqual(scans, [[local]])
+  assert.deepEqual(result.folders, [local, nas])
+  assert.deepEqual(result.offlineFolders, [nas])
+  assert.equal(JSON.parse(saved[0].value)[1], nas)
+  assert.equal(saved[1].value, local)
 })
 
 test('keeps all previously saved roots if the NAS is offline', async () => {
   const saved = []
-  const result = await scanNetworkRoots(['/mnt/nas'], {
-    existing: ['/mnt/nas'],
+  let stopped = 0
+  const result = await scanNetworkRoots([nas], {
+    existing: [nas],
     db: { prepare: () => ({ run: value => saved.push(value) }) },
     scan: () => { throw new Error('Should not scan an offline server') },
     isReadable: async () => false,
+    closeWatchers: () => { stopped++ },
   })
-  assert.deepEqual(result.folders, ['/mnt/nas'])
-  assert.deepEqual(result.offlineFolders, ['/mnt/nas'])
+  assert.deepEqual(result.folders, [nas])
+  assert.deepEqual(result.offlineFolders, [nas])
   assert.equal(saved.length, 2)
+  assert.equal(stopped, 1)
 })
 
 test('rejects a newly entered inaccessible network root', async () => {
-  const result = await scanNetworkRoots(['/mnt/not-found'], {
-    existing: ['/music/local'],
+  const result = await scanNetworkRoots([missing], {
+    existing: [local],
     db: { prepare: () => ({ run: () => { throw new Error('Should not save') } }) },
     scan: () => { throw new Error('Should not scan') },
     isReadable: async () => false,
@@ -58,13 +65,18 @@ test('rejects a newly entered inaccessible network root', async () => {
 
 test('restores offline NAS preference even when metadata scan throws', async () => {
   const saved = []
-  await assert.rejects(() => scanNetworkRoots(['/music/local', '/mnt/nas'], {
-    existing: ['/music/local', '/mnt/nas'],
+  await assert.rejects(() => scanNetworkRoots([local, nas], {
+    existing: [local, nas],
     db: { prepare: () => ({ run: value => saved.push(value) }) },
     scan: async () => { throw new Error('NAS disconnected mid-scan') },
-    isReadable: async folder => folder === '/music/local',
+    isReadable: async folder => folder === local,
   }), /disconnected/)
 
-  assert.deepEqual(JSON.parse(saved[0]), ['/music/local', '/mnt/nas'])
-  assert.equal(saved[1], '/music/local')
+  assert.deepEqual(JSON.parse(saved[0]), [local, nas])
+  assert.equal(saved[1], local)
+})
+
+test('initial network probe has a bounded response time', async () => {
+  const bounded = withTimeout(() => new Promise(() => {}), 10)
+  await assert.rejects(() => bounded(), /timed out/)
 })
