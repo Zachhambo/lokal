@@ -515,7 +515,8 @@ async function loadSpotifyPage(page, client, force) {
   const expanded = await Promise.all(picked.map(mix => client.spotifyPlaylist(mix.id, force).catch(error => ({ error: error.message }))))
   const from = batches => uniqueSongs(batches.flatMap(data => data?.tracks || []).map(track => ({ ...track, source: 'spotify' })))
   const fresh = from(expanded.slice(0, 2))
-  const quick = from(expanded.slice(2, 4)).filter(track => !new Set(fresh.map(songKey)).has(songKey(track)))
+  const freshKeys = new Set(fresh.map(songKey))
+  const quick = from(expanded.slice(2, 4)).filter(track => !freshKeys.has(songKey(track)))
   const candidates = uniqueSongs([...fresh, ...quick])
   return {
     source: 'spotify', fetchedAt: Date.now(), candidates,
