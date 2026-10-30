@@ -345,6 +345,7 @@ export const api = {
   readFileLyrics: (tid) => isE() ? el().readFileLyrics(tid) : apiFetch(`/lyrics/${tid}/file`),
   writeFileLyrics: (tid, text) => isE() ? el().writeFileLyrics(tid, text) : apiFetch(`/lyrics/${tid}/file`, { method:'PUT', body:{ text } }),
   embedLyricsFrom: (providerId, tid, ti, ar, al, dur) => isE() ? el().embedLyricsFrom(providerId, tid, ti, ar, al, dur) : apiFetch(`/lyrics/${tid}/embed/${encodeURIComponent(providerId)}`, { method:'POST', body:{ title:ti||'', artist:ar||'', album:al||'', duration:dur||'' } }),
+  exportLyricsFile: (providerId, tid, ti, ar, al, dur) => isE() && el()?.exportLyricsFile ? el().exportLyricsFile(providerId, tid, ti, ar, al, dur) : Promise.reject(new Error('File export is available in the desktop app.')),
   clearLyricsDb: () => isE() ? el().clearLyricsDb() : apiFetch('/lyrics/clear-all', { method:'POST' }),
   // Both keep the snapshot peekSettings() hands out, so a page can paint with
   // the real settings on its first frame instead of defaults.

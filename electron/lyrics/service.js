@@ -300,7 +300,16 @@ async function getLyrics(db, args) {
           // The song's own lyrics, saved unsynced: read again, so a file whose
           // timed lyrics were missed before (two lyrics tags, a SYLT frame)
           // gets them now. Keep the existing words if the refresh cannot improve them.
-          cachedLocalLyrics = fromRow(row, meta, db)
+          const existing = fromRow(row, meta, db)
+          // Some older cached rows say "unsynced" even though their saved
+          // lines have real timestamps and meta.sync is line/syllable. Repair
+          // the stale type rather than letting the inconsistent row win the
+          // quality comparison and keep showing as plain lyrics.
+          const hasRealTime = existing.lines.some(line => line?.text && line.time != null) &&
+            !isUntimed(existing.lines)
+          cachedLocalLyrics = hasRealTime && ['line', 'syllable'].includes(existing.sync)
+            ? { ...existing, type: 'synced' }
+            : existing
         } else {
           if (trackId && row.track_id !== trackId) writeRow(db, trackId, filePath, fromRow(row, meta, db), { attempts: meta.attempts, pinned: meta.pinned })
           return fromRow(row, meta, db)
@@ -362,14 +371,48 @@ async function getLyricsFrom(db, args, providerId) {
   return result ? { ...result, attempts } : { type: null, lines: [], source: providerId, attempts, miss: true }
 }
 
+/** Resolve exactly the lyrics selected in the player for an explicit
+ * embed/export action. Imported LRC/ELRC is a pinned cache result, not a
+ * network provider. Re-fetching an unknown 'imported' provider returned no
+ * lyrics, causing issue #660 when users clicked Insert into track.
+ *
+ * A pinned source must match *this track and this requested source*; never
+ * embed a stale selection from a different song/provider.
+ */
+async function getLyricsForSaving(db, args, providerId) {
+  ensureSchema(db)
+  if (!args?.trackId || !providerId) throw new Error('Select lyrics for this song before saving.')
+  const filePath = trustedFilePath(db, args.trackId)
+  const row = readRow(db, args.trackId, filePath)
+  const meta = parseMeta(row)
+  if (row?.track_id === args.trackId && row.source === providerId && meta?.pinned) {
+    const selected = fromRow(row, meta, db)
+    if (selected.lines?.some(line => line?.text || line?.bgText)) {
+      return { ...selected, ...(meta.rawImport ? { rawImport: meta.rawImport } : {}) }
+    }
+  }
+  if (providerId === 'imported') {
+    throw new Error('The imported lyrics are no longer selected. Import the file again before saving.')
+  }
+  return getLyricsFrom(db, args, providerId)
+}
+
 function importLyrics(db, trackId, content, type) {
   ensureSchema(db)
   if (!trackId) return null
   const filePath = trustedFilePath(db, trackId)
   const text = typeof content === 'string' ? content : Array.isArray(content) ? content.join('\n') : String(content ?? '')
   const result = parseImported(text.replace(/\r\n/g, '\n'), type)
-  if (!result) return null
-  writeRow(db, trackId, filePath, result, { pinned: true })
+  // A blank/plain import can parse to a truthy empty result. Never replace
+  // a previously chosen lyric with that empty result.
+  if (!result?.lines?.some(line => String(line?.text || line?.bgText || '').trim())) return null
+  // Keep the imported document's original text, like Mobile's normal Save:
+  // reconstructed ELRC/TTML may otherwise lose metadata, whitespace or
+  // unsupported vendor extensions. Do not duplicate unusually huge files.
+  const rawImport = Buffer.byteLength(text, 'utf8') <= 512 * 1024
+    ? { type: String(type || '').toLowerCase(), content: text }
+    : null
+  writeRow(db, trackId, filePath, result, { pinned: true, ...(rawImport ? { rawImport } : {}) })
   return result
 }
 
@@ -399,4 +442,4 @@ async function romanize(db, trackId, lines) {
   return translation.romanize(db, trackId, lines)
 }
 
-module.exports = { getLyrics, getLyricsFrom, importLyrics, clearCache, sources, translate, romanize, readSettings, upgradeLegacy, lyricsQualityRank, retainBetterLyrics }
+module.exports = { getLyrics, getLyricsFrom, getLyricsForSaving, importLyrics, clearCache, sources, translate, romanize, readSettings, upgradeLegacy, lyricsQualityRank, retainBetterLyrics }

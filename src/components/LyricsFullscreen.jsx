@@ -8,6 +8,8 @@ import LyricsPanel from './LyricsPanel'
 import SearchDrawer from './LyricsSearchDrawer'
 import { api, wordSyncEnabled } from '../api'
 import { trackFullArtURL } from '../onlineTracks'
+import { announceLyricsChanged } from '../lyricLine'
+import { showToast } from './Toaster'
 
 // How the player and full-screen lyrics trade places (FullscreenPlayer uses
 // these too): the view being left fades out quickly, the one arriving fades in
@@ -73,14 +75,20 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
 
   const importLyrics = async () => {
     if (!currentTrack || !api.isElectron) return
-    const fp = await api.openFile([{ name: 'Lyrics', extensions: ['lrc', 'txt', 'ttml', 'xml'] }])
-    if (!fp) return
-    const content = await api.readFileBinary(fp)
-    if (!content) return
-    const ext = fp.split('.').pop().toLowerCase()
-    const type = ext === 'ttml' || ext === 'xml' ? 'ttml' : ext === 'lrc' ? 'lrc' : 'txt'
-    await api.importLyrics(currentTrack.id, content, type)
-    setRefreshKey(k => k + 1)
+    try {
+      const fp = await api.openFile([{ name: 'Lyrics', extensions: ['lrc', 'elrc', 'txt', 'ttml', 'xml'] }])
+      if (!fp) return
+      const content = await api.readFileBinary(fp)
+      if (!content?.trim()) throw new Error('This lyrics file is empty.')
+      const ext = fp.split('.').pop().toLowerCase()
+      const type = ext === 'ttml' || ext === 'xml' ? 'ttml' : ext === 'elrc' ? 'elrc' : ext === 'lrc' ? 'lrc' : 'txt'
+      const imported = await api.importLyrics(currentTrack.id, content, type)
+      if (!imported?.lines?.length) throw new Error('The selected lyrics file could not be parsed.')
+      announceLyricsChanged(currentTrack.id)
+      setRefreshKey(k => k + 1)
+    } catch (error) {
+      showToast(error?.message || 'Could not import lyrics.')
+    }
   }
 
   const artSrc = trackFullArtURL(currentTrack)
@@ -168,7 +176,7 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
                 <>
                   <button onClick={importLyrics}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/40 hover:text-white border border-white/10 hover:border-white/30 rounded-lg transition-colors">
-                    <Download size={12} /> {t("Import .lrc / .ttml")}
+                    <Download size={12} /> {t("Import .lrc / .elrc / .ttml")}
                   </button>
                   <button onClick={() => { api.clearLyricsCache(currentTrack.id); setRefreshKey(k => k + 1) }}
                     className="p-1.5 text-white/30 hover:text-white transition-colors rounded-lg hover:bg-white/8">
@@ -211,9 +219,13 @@ export default function LyricsFullscreen({ idle = false, onChromeHover = null, s
                 onSessionChange={updateSearchSession}
                 onClose={() => setShowSearch(false)}
                 onSelect={(lyrics, type) => {
-                  api.importLyrics(currentTrack.id, lyrics, type)
-                  setRefreshKey(k => k + 1)
+                  const trackId = currentTrack.id
                   setShowSearch(false)
+                  Promise.resolve(api.importLyrics(trackId, lyrics, type)).then(imported => {
+                    if (!imported?.lines?.length) throw new Error('No usable lyrics were found.')
+                    announceLyricsChanged(trackId)
+                    if (usePlayerStore.getState().currentTrack?.id === trackId) setRefreshKey(k => k + 1)
+                  }).catch(error => showToast(error?.message || 'Could not import lyrics.'))
                 }}
               />
             )}

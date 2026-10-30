@@ -1,7 +1,7 @@
 import { useTranslation } from '../i18n'
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mic2, Search, Languages, RotateCcw, Check, ChevronDown, Loader2, Save } from 'lucide-react'
+import { Mic2, Search, Languages, RotateCcw, Check, ChevronDown, Loader2, Save, Download } from 'lucide-react'
 import LyricsSearchDrawer from './LyricsSearchDrawer'
 import LyricBreakDots from './LyricBreakDots'
 import { api } from '../api'
@@ -492,8 +492,14 @@ export default function LyricsPanel({
     setSearchOpen(false)
     const trackId = track?.id
     if (!trackId) return
-    try { await api.importLyrics(trackId, lyrics, type) } catch {}
-    announceLyricsChanged(trackId)
+    try {
+      const imported = await api.importLyrics(trackId, lyrics, type)
+      if (!imported?.lines?.length) throw new Error('No usable lyrics were found in this selection.')
+      announceLyricsChanged(trackId)
+    } catch (error) {
+      setNotice(error?.message || t('Could not import lyrics.'))
+      return
+    }
     // The song may have changed while saving; its own load already ran.
     if (currentTrackId.current === trackId) load()
   }
@@ -724,6 +730,19 @@ export default function LyricsPanel({
     }
   }
 
+  const exportCurrentLyrics = async () => {
+    if (!track?.id || !result?.source || !api.isElectron) return
+    setSourceBusy(true)
+    try {
+      const saved = await api.exportLyricsFile(result.source, track.id, track.title, track.artist, track.album, track.duration)
+      if (saved?.saved) setNotice(t('Lyrics saved to file.'))
+    } catch (error) {
+      setNotice(error?.message || t('Could not save lyrics to file.'))
+    } finally {
+      setSourceBusy(false)
+    }
+  }
+
   const pickSource = (id) => {
     if (!track?.id) return
     const seq = ++requestSeq.current
@@ -781,6 +800,13 @@ export default function LyricsPanel({
                 {romanizationBusy ? <Loader2 size={11} className="animate-spin" /> : <span className="font-semibold leading-none">Aa</span>}
                 Romanize
               </Pill>
+            )}
+            {result?.source && api.isElectron && (
+              <button type="button" onClick={exportCurrentLyrics} disabled={sourceBusy || loading}
+                title={t('Save lyrics as .elrc, .lrc or .txt')} aria-label={t('Save lyrics to file')}
+                className={`rounded-full p-2 text-white/65 hover:text-white bg-white/[0.08] hover:bg-white/[0.14] disabled:opacity-40 ${TOOLBAR_FADE}`}>
+                <Download size={13} />
+              </button>
             )}
             {sources.length > 0 && result?.source && api.isElectron && track?.file_path && !String(track.file_path).startsWith('ghost://') && (
               <button type="button" onClick={embedCurrentLyrics} disabled={sourceBusy || loading}

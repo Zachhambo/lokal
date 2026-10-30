@@ -1,0 +1,42 @@
+name: Imported lyrics and ELRC regressions
+
+on:
+  pull_request:
+    paths:
+      - 'electron/lyrics/service.js'
+      - 'electron/lyrics/fileExport.js'
+      - 'electron/ipc/lyrics.js'
+      - 'electron/preload.js'
+      - 'src/api.js'
+      - 'src/components/LyricsPanel.jsx'
+      - 'src/components/LyricsFullscreen.jsx'
+      - 'src/components/FullscreenPlayer.jsx'
+      - 'scripts/issue-660-imported-elrc.test.mjs'
+      - '.github/workflows/issue-660-lyrics-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lyrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify file/IPC syntax
+        run: |
+          node --check electron/lyrics/service.js
+          node --check electron/lyrics/fileExport.js
+          node --check electron/ipc/lyrics.js
+          node --check electron/preload.js
+      - name: Run import, embedded, ELRC and lyrics tests
+        run: |
+          node --test scripts/issue-660-imported-elrc.test.mjs scripts/issue-458-regression.test.mjs scripts/lrc-voice-prefix.test.mjs scripts/lrc-translation-lines.test.mjs
+      - name: Compile desktop renderer
+        run: npx vite build
