@@ -391,7 +391,8 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
         const staged = await stageHttpSpatialAudio(stream.url, { signal: session.controller.signal })
         session.artifact = staged
         if (active !== session) throw new Error('Audio request was cancelled')
-        const inspected = await inspectAtmosFile(staged.file, findFfprobe())
+        const inspected = await inspectAtmosFile(
+          staged.file, require('../ipc/tools').findFfprobe())
         if (chosen.codec === 'ac4' && inspected.codec !== 'AC-4') {
           throw new Error('The HTTP add-on delivered audio other than the selected AC-4 codec. No stereo fallback.')
         }
