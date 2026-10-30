@@ -9,7 +9,7 @@ const { initDB, getDB } = require('../electron/ipc/db')
 const { scanFolder, applyFileChanges } = require('../electron/ipc/scanner')
 const { stopWatching } = require('../electron/libraryWatcher')
 const { noteFileWritten } = require('../electron/fileStamp')
-const mm = require('../electron/musicMetadata')
+const scanMetadata = require('../electron/ipc/scannerMetadata')
 
 // A music folder whose "tags" are what `tags` says for each file name; reads
 // counts how many files had their tags read (covers included: a scan's read).
@@ -23,7 +23,7 @@ function fixture(t) {
   fs.mkdirSync(music)
   const tags = {}
   const reads = []
-  t.mock.method(mm, 'parseFile', async (file, opts) => {
+  t.mock.method(scanMetadata, 'parseWithDeadline', async (file, opts) => {
     if (opts?.skipCovers === false) reads.push(path.basename(file))
     const own = tags[path.basename(file)] || {}
     return { common: { title: own.title || path.basename(file, '.mp3'), artist: 'Band', track: { no: own.track ?? null } }, format: { duration: 200, bitrate: 320000 } }
