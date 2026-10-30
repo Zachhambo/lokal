@@ -733,6 +733,7 @@ export default function App() {
     showMiniPlayer, likedIds, exclusiveSidePanels, hydrateExclusiveSidePanels,
   })))
   const miniSwitching = usePlayerStore(s => s.miniSwitching)
+  const castActive = usePlayerStore(s => s.castActive)
   // One output policy for search, albums, playlists, flows, queue skips and
   // direct plays. A saved spatial tier routes the queued addon ghost through
   // the existing native codec path, never through Chromium's PCM decoder.
@@ -773,8 +774,6 @@ export default function App() {
       showToast(error?.message || 'Could not start the configured native audio output.')
     })
   }, [currentTrack, isPlaying, castActive, addonPlaybackPrefs])
-  // Casting: the TV plays, and this computer's audio is parked (src/cast).
-  const castActive = usePlayerStore(s => s.castActive)
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
   const volumeRef = useRef(volume)
   const [audioOutputReady, setAudioOutputReady] = useState(0)
