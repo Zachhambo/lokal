@@ -39,6 +39,21 @@ async function isReadableRoot(folder, {
   }
 }
 
+// A late fs.watch notification after disconnect must not destroy indexed
+// music. Recheck each affected root immediately before any delete; group by
+// root so a bulk rename does not cause thousands of NAS probes.
+async function verifiedMissingPaths(paths, ownerFor, wasReadable, probe = isReadableRoot) {
+  const verified = []
+  const availability = new Map()
+  for (const filePath of new Set(paths)) {
+    const root = ownerFor(filePath)
+    if (!root || wasReadable.get(root) !== true) continue
+    if (!availability.has(root)) availability.set(root, await probe(root))
+    if (availability.get(root)) verified.push(filePath)
+  }
+  return verified
+}
+
 /// Preserve offline existing NAS roots while never scanning unavailable ones.
 /// This also protects the renderer from fs.statSync on disconnected UNC paths
 /// in the legacy scanner. Accessible roots still use its metadata workflow.
@@ -148,4 +163,4 @@ function registerNetworkLibraryHandlers(ipcMain) {
   })
 }
 
-module.exports = { registerNetworkLibraryHandlers, isReadableRoot, scanNetworkRoots, withTimeout }
+module.exports = { registerNetworkLibraryHandlers, isReadableRoot, scanNetworkRoots, withTimeout, verifiedMissingPaths }
