@@ -20,6 +20,7 @@ import AddonsSettings from '../components/AddonsSettings'
 import ProviderConnections from '../components/ProviderConnections'
 import { DEFAULT_DISCORD_CLIENT_ID } from '../discord'
 import PlaybackSourceSettings from '../components/PlaybackSourceSettings'
+import NetworkShareSettings from '../components/NetworkShareSettings'
 import { useAppStore, usePlayerStore } from '../store/player'
 import Modal from '../components/Modal'
 import LyricsSourcesSettings from '../components/LyricsSourcesSettings'
@@ -1419,6 +1420,20 @@ activeCategory === 'data' ? usersTried
           </Row>
         </Section>
 
+      )}
+
+      {inCategory('library') && api.isElectron && (
+      <Section title={t("Network libraries")}>
+        <NetworkShareSettings onConnected={(result) => {
+          if (result?.folders?.length) {
+            setSettings(current => ({
+              ...current,
+              music_folders: JSON.stringify(result.folders),
+              music_folder: result.folders[0],
+            }))
+          }
+        }} />
+      </Section>
       )}
 
       {inCategory('library') && (
