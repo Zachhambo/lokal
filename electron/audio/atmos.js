@@ -360,12 +360,51 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
     }
     const binary = mode === 'hdmi' ? await findMpv() : null
     if (mode === 'hdmi' && !binary) return { error: 'mpv was not found. Install mpv or use Locate mpv in the Atmos controls. An HDMI receiver is checked separately when playback starts.' }
-    if (typeof id !== 'string' || id.length > 200 || !/^[\w:.-]+$/.test(id)) return { error: 'Invalid track ID' }
+    if (typeof id !== 'string' || !id.length || id.length > 1024 ||
+        /[\x00-\x1f\x7f]/.test(id) || id === '.' || id === '..') {
+      return { error: 'Invalid track ID' }
+    }
     let session
     try {
       if (mode === 'hdmi') outputOptions(process.platform, device)
       const sources = require('../online/sources')
       const key = sources.addons.keyOfProvider(provider)
+      // HTTP addons use a different protocol from executable Mornye
+      // extensions. Their saved /stream quality is already applied by
+      // resolveStream(); stage the *returned file*, verify the original
+      // compressed codec and only then hand it to native output.
+      const httpAddon = key && sources.addons.findByKey(getDB(), key)
+      if (httpAddon) {
+        const { selectedHttpSpatial, stageHttpSpatialAudio } = require('../online/httpSpatial')
+        const chosen = selectedHttpSpatial(httpAddon)
+        if (!chosen) return { error: 'Select a Dolby Atmos rendition in this HTTP add-on settings first.' }
+        if (chosen.codec === 'ac4' && (mode !== 'headphones' || process.platform !== 'win32')) {
+          return { error: 'AC-4 requires the Windows native headphone output.' }
+        }
+        await stop()
+        if (generation !== startGeneration) return { error: 'This Atmos request was superseded.' }
+        session = { proc: null, artifact: null, controller: new AbortController() }
+        active = session
+        notify({ state: 'loading', provider, id: String(id), message: 'Retrieving selected HTTP audio quality…' })
+        const stream = await sources.addons.resolveStream(getDB(), key, id)
+        if (active !== session) throw new Error('Audio request was cancelled')
+        const staged = await stageHttpSpatialAudio(stream.url, { signal: session.controller.signal })
+        session.artifact = staged
+        if (active !== session) throw new Error('Audio request was cancelled')
+        const inspected = await inspectAtmosFile(
+          staged.file, require('../ipc/tools').findFfprobe())
+        if (chosen.codec === 'ac4' && inspected.codec !== 'AC-4') {
+          throw new Error('The HTTP add-on delivered audio other than the selected AC-4 codec. No stereo fallback.')
+        }
+        if (chosen.codec === 'eac3-joc' && (!inspected.spatialVerified || inspected.codec !== 'E-AC-3 JOC')) {
+          throw new Error('The HTTP add-on did not deliver verified E-AC-3 JOC Atmos. No stereo fallback.')
+        }
+        return await launchFile({
+          filename: staged.file, session, provider, id: String(id), device, binary, mode,
+          codec: inspected.codec,
+        })
+      }
+      if (!/^[\w:.-]+$/.test(id) || id.length > 200) return { error: 'Invalid Mornye track ID' }
       const service = require('../mornye/packages').service(getDB())
       const addon = key && service.find(key)
       const { isAtmosQuality, addonPlaybackQuality } = require('../mornye/playbackQuality')
