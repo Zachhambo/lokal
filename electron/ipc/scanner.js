@@ -375,14 +375,21 @@ function configuredMusicFolders(db = getDB()) {
 async function scanFolders(folderPaths = []) {
   const db = getDB()
   const folders = []
+  const onlineFolders = []
+  const offlineFolders = []
+  const previous = new Set(configuredMusicFolders(db).map(root => root.toLowerCase()))
   const seen = new Set()
   for (const value of Array.isArray(folderPaths) ? folderPaths : []) {
     if (typeof value !== 'string' || !value.trim()) continue
     const full = path.resolve(value.trim())
-    try { if (!fs.statSync(full).isDirectory()) continue } catch { continue }
     if (seen.has(full.toLowerCase())) continue
+    let available = false
+    try { available = fs.statSync(full).isDirectory() } catch {}
+    if (!available && !previous.has(full.toLowerCase())) continue
     seen.add(full.toLowerCase())
     folders.push(full)
+    if (available) onlineFolders.push(full)
+    else offlineFolders.push(full)
   }
   if (!folders.length) return { error: 'Choose at least one existing music folder', folders: configuredMusicFolders(db) }
 
@@ -393,7 +400,7 @@ async function scanFolders(folderPaths = []) {
   const artistNamePreference = getArtistNamePreference(db)
   const forceArtistNameRefresh = artistNamePreferenceNeedsRescan(db, artistNamePreference)
   const results = []
-  for (const folder of folders) {
+  for (const folder of onlineFolders) {
     results.push(await scanFolder(folder, {
       saveRoot: false,
       watch: false,
@@ -409,8 +416,10 @@ async function scanFolders(folderPaths = []) {
   // the last folder watched.
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
-  try { require('../libraryWatcher').watchLibraryRoots(folders) } catch (error) { console.warn('[scanner] Library watchers not started:', error.message) }
-  return { folders, results, status: scanStatus }
+  try { require('../libraryWatcher').watchLibraryRoots(onlineFolders) } catch (error) { console.warn('[scanner] Library watchers not started:', error.message) }
+  // Retain offline mounted shares so a temporary NAS outage cannot silently
+  // erase the configured roots. Reconnect and rescan when the host returns.
+  return { folders, offlineFolders, results, status: scanStatus }
 }
 
 function scansEveryRoot(db, folderPath) {
@@ -1179,6 +1188,14 @@ function registerScannerHandlers(ipcMain) {
   try { require('../genreList').registerGenreFunctions(getDB()) } catch (error) { console.warn('[scanner] Genre filters unavailable:', error.message) }
   ipcMain.handle('scanner:scan', async (e, folder) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolder(folder || DEFAULT_MUSIC_PATH) })
   ipcMain.handle('scanner:scanFolders', async (e, folders) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolders(folders) })
+  ipcMain.handle('scanner:connectNetworkShare', async (e, input) => {
+    const { probeNetworkLibraryLocation } = require('../networkShare')
+    const { folder } = await probeNetworkLibraryLocation(input)
+    const roots = configuredMusicFolders()
+    if (!roots.some(root => root.toLowerCase() === folder.toLowerCase())) roots.push(folder)
+    mainWindow = BrowserWindow.fromWebContents(e.sender)
+    return scanFolders(roots)
+  })
   ipcMain.handle('scanner:status', () => scanStatus)
   ipcMain.handle('scanner:artworkRepairStatus', () => require('../artwork/repairDownloads').artworkRepairStatus())
   ipcMain.handle('scanner:artworkRepairCancel', () => require('../artwork/repairDownloads').cancelArtworkRepair())
