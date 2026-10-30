@@ -368,18 +368,29 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       const key = sources.addons.keyOfProvider(provider)
       const service = require('../mornye/packages').service(getDB())
       const addon = key && service.find(key)
+      const { isAtmosQuality, addonPlaybackQuality } = require('../mornye/playbackQuality')
       const amazon = /^amazon(?:-(?:new|web))?$/i.test(addon?.name || '')
-      if (!addon || (!amazon && !/tidal/i.test(addon.name || ''))) return { error: 'Choose an Amazon or Tidal Mornye track' }
-      if (amazon && !(addon.manifest?.qualityOptions || []).some(q => q.id === 'ac4')) return { error: 'This Amazon addon does not offer AC-4 audio' }
-      if (amazon && mode !== 'headphones') return { error: 'Amazon AC-4 uses Windows native media and the default Windows output. Select Headphones / Windows Spatial Sound, not E-AC-3 HDMI passthrough.' }
-      if (amazon && process.platform !== 'win32') return { error: 'Amazon AC-4 native decoding currently requires the Windows audio codec route.' }
+      if (!addon) return { error: 'Choose an installed Mornye track' }
+      const options = addon.manifest?.qualityOptions || []
+      const selected = addonPlaybackQuality(addon, service.settings(addon))
+      // Saved native preference takes priority. Manual "Play Atmos" may still
+      // choose a manifest Atmos tier when FLAC is configured.
+      const preferred = options.find(q => q.id === selected && isAtmosQuality(q.id))
+      const offered = preferred || options.find(q =>
+        String(q?.id || '').toLowerCase() === (amazon ? 'ac4' : 'dolby_atmos')) ||
+        options.find(q => isAtmosQuality(q.id))
+      if (!offered) return { error: 'This add-on does not advertise a native Atmos-quality tier' }
+      const nativeQuality = offered.id
+      const ac4 = /^ac-?4$/i.test(nativeQuality)
+      if (ac4 && mode !== 'headphones') return { error: 'AC-4 requires Windows native output. Select Headphones / Windows Spatial Sound, not E-AC-3 HDMI passthrough.' }
+      if (ac4 && process.platform !== 'win32') return { error: 'AC-4 native playback currently requires Windows.' }
       await stop()
       if (generation !== startGeneration) return { error: 'This Atmos request was superseded by a newer request.' }
       session = { proc: null, artifact: null, controller: new AbortController() }
       active = session
       notify({ state: 'loading', provider, id: String(id) })
       const artifact = await service.download(key, id, {
-        quality: amazon ? 'ac4' : 'DOLBY_ATMOS', purpose: 'download', allowAtmos: true, signal: session.controller.signal,
+        quality: nativeQuality, purpose: 'download', allowAtmos: true, signal: session.controller.signal,
         onProgress: ({ percent, message }) => {
           if (active !== session) return
           const value = Number(percent)
@@ -390,12 +401,14 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
       })
       session.artifact = artifact
       if (active !== session) throw new Error('Atmos request was cancelled')
-      if (amazon) {
-        if (artifact.info?.codec !== 'ac4') throw new Error('Amazon did not deliver AC-4 audio; stereo was not substituted.')
-      } else if (!hasAtmosMetadata(artifact.metadata) || artifact.info?.codec !== 'eac3') {
-        throw new Error('Tidal supplied stereo instead of an E-AC-3 Atmos stream')
+      if (ac4) {
+        if (artifact.info?.codec !== 'ac4') throw new Error('The addon did not deliver AC-4; no stereo substitution was accepted.')
+      } else if (artifact.info?.codec !== 'eac3') {
+        // packages.download() independently verifies the decoded file's JOC
+        // presentation before returning it. Catalogue tags are not required.
+        throw new Error('The addon did not deliver verified E-AC-3 JOC Atmos audio.')
       }
-      return await launchFile({ filename: artifact.file, session, provider, id: String(id), device, binary, mode, codec: amazon ? 'AC-4' : 'E-AC-3 JOC' })
+      return await launchFile({ filename: artifact.file, session, provider, id: String(id), device, binary, mode, codec: ac4 ? 'AC-4' : 'E-AC-3 JOC' })
     } catch (error) {
       if (active === session) await stop()
       else { try { await session?.artifact?.cleanup() } catch {} }
