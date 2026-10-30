@@ -385,6 +385,32 @@ export default function App() {
   }, [performanceMode])
   // Pages lay out by the space they get between the sidebars (pageWidth.js).
   const pageWidthRef = usePageWidth()
+  // The renderer needs only the saved codec tier, never addon credentials.
+  const [addonPlaybackPrefs, setAddonPlaybackPrefs] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const refresh = async () => {
+      try {
+        const providers = await api.onlineProviders()
+        if (!alive) return
+        setAddonPlaybackPrefs(Object.fromEntries((providers || [])
+          .filter(p => isAddonProvider(p.id))
+          .map(p => [p.id, p])))
+      } catch (error) {
+        if (alive) {
+          console.warn('[mornye] Could not load addon playback preferences', error?.message)
+          setAddonPlaybackPrefs({})
+        }
+      }
+    }
+    refresh()
+    window.addEventListener('lokal:addons-changed', refresh)
+    return () => {
+      alive = false
+      window.removeEventListener('lokal:addons-changed', refresh)
+    }
+  }, [])
+
   const audioRef = useRef(null)
   const cfAudioRef = useRef(null)
   const lastRemoteStateRef = useRef('')
@@ -707,6 +733,46 @@ export default function App() {
     showMiniPlayer, likedIds, exclusiveSidePanels, hydrateExclusiveSidePanels,
   })))
   const miniSwitching = usePlayerStore(s => s.miniSwitching)
+  // One output policy for search, albums, playlists, flows, queue skips and
+  // direct plays. A saved spatial tier routes the queued addon ghost through
+  // the existing native codec path, never through Chromium's PCM decoder.
+  useEffect(() => {
+    const ref = streamRef(currentTrack)
+    if (!ref || !isAddonProvider(ref.provider) || !addonPlaybackPrefs || castActive) return
+    const preference = addonPlaybackPrefs[ref.provider]
+    if (currentTrack?.atmosAuto && !preference?.nativeSpatialPreferred) {
+      const ordinary = { ...currentTrack, atmosNative: false, atmosAuto: false }
+      usePlayerStore.setState({ currentTrack: ordinary })
+      Promise.resolve(api.atmosStop()).catch(() => {})
+      return
+    }
+    if (!preference?.nativeSpatialPreferred || currentTrack?.atmosNative || !isPlaying) return
+    const windows = /Win/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+    const mode = windows ? 'headphones' : 'hdmi'
+    const auto = {
+      ...currentTrack, atmosNative: true, atmosAuto: true,
+      atmosMode: mode, atmosProvider: ref.provider,
+      atmosSourceId: String(ref.id),
+      atmosRequestId: Date.now(),
+    }
+    usePlayerStore.setState({ currentTrack: auto, isBuffering: true })
+    Promise.resolve().then(async () => {
+      await awaitAtmosOutputRelease()
+      if (usePlayerStore.getState().currentTrack !== auto) return
+      const result = await api.atmosPlay(ref.provider, String(ref.id), '', mode)
+      if (usePlayerStore.getState().currentTrack !== auto) return
+      if (!result?.ok) {
+        usePlayerStore.setState({ isPlaying: false, isBuffering: false })
+        showToast(result?.error || 'The selected Dolby stream is unavailable on this output. Change the add-on quality to lossless to play stereo.')
+      } else {
+        usePlayerStore.setState({ isBuffering: false })
+      }
+    }).catch(error => {
+      if (usePlayerStore.getState().currentTrack !== auto) return
+      usePlayerStore.setState({ isPlaying: false, isBuffering: false })
+      showToast(error?.message || 'Could not start the configured native audio output.')
+    })
+  }, [currentTrack, isPlaying, castActive, addonPlaybackPrefs])
   // Casting: the TV plays, and this computer's audio is parked (src/cast).
   const castActive = usePlayerStore(s => s.castActive)
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
@@ -2747,6 +2813,18 @@ export default function App() {
       else return
     }
 
+    const preferredRef = currentTrack && streamRef(currentTrack)
+    if (preferredRef && isAddonProvider(preferredRef.provider) && !currentTrack.atmosNative &&
+        !castActive && (!addonPlaybackPrefs || addonPlaybackPrefs[preferredRef.provider]?.nativeSpatialPreferred)) {
+      // Wait for add-on preferences (including saved Atmos) before loading a
+      // Chromium stream. The preference effect above selects native output.
+      for (const element of [audioRef.current, cfAudioRef.current]) {
+        if (!element) continue
+        try { element.pause(); element.removeAttribute('src'); element.load() } catch {}
+      }
+      return
+    }
+
     if (currentTrack?.atmosNative) {
       // Native Dolby playback owns the output. The regular React player still
       // owns the queue/UI, but Chromium must never decode these JOC frames
@@ -2959,7 +3037,7 @@ export default function App() {
     }
     start()
     return () => { cancelled = true; el.dataset.fallbackPending = ''; el.dataset.lokalTrackPending = '' }
-  }, [currentTrack?.id, currentTrack?.file_path, currentTrack?.atmosNative, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
+  }, [currentTrack?.id, currentTrack?.file_path, currentTrack?.atmosNative, addonPlaybackPrefs, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
 
   useEffect(() => {
     if (!api.isElectron) return
