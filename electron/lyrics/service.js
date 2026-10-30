@@ -378,7 +378,9 @@ async function getLyricsForSaving(db, args, providerId) {
   const meta = parseMeta(row)
   if (row?.track_id === args.trackId && row.source === providerId && meta?.pinned) {
     const selected = fromRow(row, meta, db)
-    if (selected.lines?.some(line => line?.text || line?.bgText)) return selected
+    if (selected.lines?.some(line => line?.text || line?.bgText)) {
+      return { ...selected, ...(meta.rawImport ? { rawImport: meta.rawImport } : {}) }
+    }
   }
   if (providerId === 'imported') {
     throw new Error('The imported lyrics are no longer selected. Import the file again before saving.')
@@ -393,7 +395,13 @@ function importLyrics(db, trackId, content, type) {
   const text = typeof content === 'string' ? content : Array.isArray(content) ? content.join('\n') : String(content ?? '')
   const result = parseImported(text.replace(/\r\n/g, '\n'), type)
   if (!result) return null
-  writeRow(db, trackId, filePath, result, { pinned: true })
+  // Keep the imported document's original text, like Mobile's normal Save:
+  // reconstructed ELRC/TTML may otherwise lose metadata, whitespace or
+  // unsupported vendor extensions. Do not duplicate unusually huge files.
+  const rawImport = Buffer.byteLength(text, 'utf8') <= 512 * 1024
+    ? { type: String(type || '').toLowerCase(), content: text }
+    : null
+  writeRow(db, trackId, filePath, result, { pinned: true, ...(rawImport ? { rawImport } : {}) })
   return result
 }
 
