@@ -2167,11 +2167,19 @@ async function indexSingleFile(filePath, opts = {}) {
 }
 
 
-async function applyFileChanges(changes = []) {
+async function applyFileChanges(changes = [], activeRoots) {
+  // Watcher events must only be attributed to folders known to be online.
+  // Synchronously probing all persisted roots can freeze Electron when a
+  // separate NAS is offline.
   const db = getDB()
-  const roots = configuredMusicFolders(db).filter(root => {
-    try { return fs.statSync(root).isDirectory() } catch { return false }
-  })
+  const configured = configuredMusicFolders(db)
+  const roots = Array.isArray(activeRoots)
+    ? activeRoots.map(root => path.resolve(root)).filter(root =>
+        configured.some(saved => path.resolve(saved).toLowerCase() === root.toLowerCase()))
+    : await Promise.all(configured.map(async root => {
+        try { return (await fs.stat(root)).isDirectory() ? root : null }
+        catch { return null }
+      })).then(results => results.filter(Boolean))
   if (!roots.length || !Array.isArray(changes)) return { added: [], updated: [], removed: [] }
 
   const rootFor = filePath => {
