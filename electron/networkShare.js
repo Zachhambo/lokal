@@ -54,7 +54,10 @@ function resolveNetworkLibraryLocation(value, platform = process.platform) {
     if (uri.protocol !== 'https:') {
       throw new Error('Use HTTPS for WebDAV with credentials; HTTP is not supported for automatic import.')
     }
-    if (uri.username || uri.password || uri.search || uri.hash) {
+    // WHATWG URL exposes empty '?' and '#' components as empty strings.
+    // Reject their raw delimiters too, or they become part of a UNC folder.
+    if (uri.username || uri.password || uri.search || uri.hash ||
+        input.includes('?') || input.includes('#')) {
       throw new Error('WebDAV URLs must not contain credentials, query or fragment.')
     }
     const raw = input.match(/^https:\/\/[^/]+(?:\/(.*))?$/i)?.[1] ?? ''
