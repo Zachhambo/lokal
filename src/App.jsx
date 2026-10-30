@@ -749,7 +749,14 @@ export default function App() {
     }
     if (!preference?.nativeSpatialPreferred || currentTrack?.atmosNative || !isPlaying) return
     const windows = /Win/i.test(navigator.userAgentData?.platform || navigator.platform || '')
-    const mode = windows ? 'headphones' : 'hdmi'
+    // Honor the same output choice and device as the explicit Atmos controls.
+    // AC-4 has no supported HDMI passthrough path in the native bridge.
+    const savedMode = localStorage.getItem('lokal-atmos-output-mode')
+    const mode = preference.nativeSpatialCodec === 'ac4'
+      ? 'headphones'
+      : savedMode === 'headphones' && windows ? 'headphones' : 'hdmi'
+    const device = mode === 'hdmi'
+      ? (localStorage.getItem('lokal-atmos-output-device') || '') : ''
     const auto = {
       ...currentTrack, atmosNative: true, atmosAuto: true,
       atmosMode: mode, atmosProvider: ref.provider,
@@ -760,7 +767,7 @@ export default function App() {
     Promise.resolve().then(async () => {
       await awaitAtmosOutputRelease()
       if (usePlayerStore.getState().currentTrack !== auto) return
-      const result = await api.atmosPlay(ref.provider, String(ref.id), '', mode)
+      const result = await api.atmosPlay(ref.provider, String(ref.id), device, mode)
       if (usePlayerStore.getState().currentTrack !== auto) return
       if (!result?.ok) {
         usePlayerStore.setState({ isPlaying: false, isBuffering: false })
