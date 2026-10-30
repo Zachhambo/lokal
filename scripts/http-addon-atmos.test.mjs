@@ -8,6 +8,7 @@ import path from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { selectedHttpSpatial, stageHttpSpatialAudio } = require('../electron/online/httpSpatial.js')
+const { registerAtmosHandlers } = require('../electron/audio/atmos.js')
 const realFile = fileURLToPath(import.meta.url)
 const root = path.resolve(path.dirname(realFile), '..')
 
@@ -80,4 +81,73 @@ test('native handler verifies the delivered HTTP file, never catalogue metadata'
   assert.match(handler, /No stereo fallback/)
   const provider = readFileSync(path.join(root, 'electron/ipc/online.js'), 'utf8')
   assert.match(provider, /nativeSpatialPreferred: !!httpSpatial/)
+})
+
+
+test('native handler validates HTTP and Mornye track IDs before resolving them', async (t) => {
+  const addons = require('../electron/online/sources.js').addons
+  const packages = require('../electron/mornye/packages.js')
+  t.mock.method(addons, 'keyOfProvider', () => 'test')
+  t.mock.method(addons, 'findByKey', (_db, _key) => httpAddon)
+  t.mock.method(packages, 'service', () => ({ find: () => null }))
+  let httpAddon = { manifest: { settings: [] }, settings: {} }
+  const handlers = new Map()
+  registerAtmosHandlers({ handle: (name, handler) => handlers.set(name, handler) }, {
+    getDB: () => ({ prepare: () => ({ get: () => ({ value: process.execPath }) }) }),
+  })
+  const play = id => handlers.get('atmos:play')(null, 'a-test', id)
+
+  for (const id of ['12345', 'abc123', 'http/track?x=1', 'é']) {
+    assert.match((await play(id)).error, /Select a Dolby Atmos rendition/, `HTTP ID ${id}`)
+  }
+  for (const id of ['', '.', '..', 'bad\x00id', 'bad\x1fid', 'bad\x7fid', 'a'.repeat(1025), 123]) {
+    assert.equal((await play(id)).error, 'Invalid track ID', `HTTP ID ${JSON.stringify(id)}`)
+  }
+
+  httpAddon = null
+  for (const id of ['12345', 'abc123', 'abc_123:.-']) {
+    assert.equal((await play(id)).error, 'Choose an installed Mornye track', `Mornye ID ${id}`)
+  }
+  for (const id of ['bad/id', 'bad id', 'é', 'a'.repeat(201)]) {
+    assert.equal((await play(id)).error, 'Invalid Mornye track ID', `Mornye ID ${id}`)
+  }
+})
+
+test('HTTP native staging rejects private hosts on the initial URL and redirects', async () => {
+  const privateHosts = [
+    '127.0.0.1', '10.2.3.4', '192.168.1.2', '169.254.1.2',
+    '172.16.0.1', '172.29.0.1', '172.31.255.254',
+    'music.local', 'music.internal', 'music.lan',
+  ]
+  for (const host of privateHosts) {
+    let requests = 0
+    await assert.rejects(stageHttpSpatialAudio(`https://${host}/audio`, {
+      fetchImpl: async () => { requests++; throw new Error('unexpected request') },
+    }), /Selected audio points to a private host/, `initial ${host}`)
+    assert.equal(requests, 0, `initial ${host} must not be fetched`)
+
+    await assert.rejects(stageHttpSpatialAudio('https://media.example/audio', {
+      fetchImpl: async () => {
+        requests++
+        return new Response(null, { status: 302, headers: { location: `https://${host}/audio` } })
+      },
+    }), /Media redirect to a private host was refused/, `redirect ${host}`)
+    assert.equal(requests, 1, `redirect ${host} must not be fetched`)
+  }
+})
+
+test('HTTP native staging permits public hosts and its explicit private-host override', async () => {
+  for (const [host, allowPrivate] of [
+    ['172.15.1.1', false], ['172.32.1.1', false], ['music.local.example', false],
+    ['10.2.3.4', true], ['music.local', true],
+  ]) {
+    const staged = await stageHttpSpatialAudio(`https://${host}/audio`, {
+      allowPrivate, fetchImpl: async () => new Response('audio'),
+    })
+    try {
+      assert.equal(await readFile(staged.file, 'utf8'), 'audio')
+    } finally {
+      await staged.cleanup()
+    }
+  }
 })

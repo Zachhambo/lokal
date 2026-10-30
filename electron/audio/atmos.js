@@ -361,7 +361,7 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
     const binary = mode === 'hdmi' ? await findMpv() : null
     if (mode === 'hdmi' && !binary) return { error: 'mpv was not found. Install mpv or use Locate mpv in the Atmos controls. An HDMI receiver is checked separately when playback starts.' }
     if (typeof id !== 'string' || !id.length || id.length > 1024 ||
-        /[\\x00-\\x1f\\x7f]/.test(id) || id === '.' || id === '..') {
+        /[\x00-\x1f\x7f]/.test(id) || id === '.' || id === '..') {
       return { error: 'Invalid track ID' }
     }
     let session
@@ -404,7 +404,7 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
           codec: inspected.codec,
         })
       }
-      if (!/^[\\w:.-]+$/.test(id) || id.length > 200) return { error: 'Invalid Mornye track ID' }
+      if (!/^[\w:.-]+$/.test(id) || id.length > 200) return { error: 'Invalid Mornye track ID' }
       const service = require('../mornye/packages').service(getDB())
       const addon = key && service.find(key)
       const { isAtmosQuality, addonPlaybackQuality } = require('../mornye/playbackQuality')

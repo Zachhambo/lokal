@@ -48,8 +48,8 @@ async function stageHttpSpatialAudio(url, { signal, fetchImpl = fetch, maxBytes 
   deadline.addEventListener('abort', cancel, { once: true })
   try {
     let current = checkUrl(url)
-    const local = host => !host.includes('.') || /^(?:localhost|127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.|\\[?::1\\]?)/i.test(host) ||
-      /\\.(?:local|internal|lan)$/.test(host)
+    const local = host => !host.includes('.') || /^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?::1\]?)/i.test(host) ||
+      /\.(?:local|internal|lan)$/.test(host)
     if (!allowPrivate && local(current.hostname)) {
       throw new Error('Selected audio points to a private host')
     }
