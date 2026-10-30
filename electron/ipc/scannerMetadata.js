@@ -90,4 +90,13 @@ function parseWithDeadline(filePath, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   return task
 }
 
-module.exports = { parseWithDeadline }
+// Allow deterministic cleanup in tests and when the scanner shuts down.
+async function stopMetadataWorker() {
+  const session = current
+  current = null
+  if (!session) return
+  clearPending(session, new Error('Metadata worker stopped'))
+  try { await session.worker.terminate() } catch {}
+}
+
+module.exports = { parseWithDeadline, stopMetadataWorker }
