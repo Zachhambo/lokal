@@ -195,6 +195,8 @@ contextBridge.exposeInMainWorld('electron', {
   onYoutubeSignInStatus: fn => on('online:signInStatus', (_, status) => fn(status)),
   youtubeDisconnect: () => invoke('online:disconnect'),
   youtubeAccountPlaylist: (playlistId) => invoke('online:accountPlaylist', playlistId),
+  youtubeLibraryPlaylists: (force) => invoke('online:libraryPlaylists', force),
+  youtubeLibraryPlaylistTracks: (id, force) => invoke('online:libraryPlaylistTracks', id, force),
   youtubeRadio: (videoId) => invoke('online:radio', videoId),
   youtubeSetLiked: (videoId, liked) => invoke('online:setAccountLiked', videoId, liked),
   onlineDownloadUrl: (provider, id) => invoke('online:downloadUrl', provider, id),
