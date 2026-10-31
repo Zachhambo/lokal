@@ -378,13 +378,18 @@ function AnimatedRoutes() {
 /** Only a pathname and a bounded scroll offset survive a full app restart. */
 function ViewStateRecorder() {
   const location = useLocation()
+  // Restoring scroll during ordinary navigation would override route transitions
+  // and can introduce visible jumps. Restore only on a fresh app mount.
+  const startupRestorePending = useRef(true)
   useEffect(() => { writeSavedRoute(location.pathname) }, [location.pathname])
   useEffect(() => {
     if (!statePersistenceEnabled()) return
     const main = document.querySelector('main.flex-1.overflow-y-auto')
     if (!main) return
     const path = location.pathname
-    const remembered = readViewState('navigation:scrollPath') === path
+    const restoreOnStartup = startupRestorePending.current
+    startupRestorePending.current = false
+    const remembered = restoreOnStartup && readViewState('navigation:scrollPath') === path
       ? Number(readViewState('navigation:scrollTop')) || 0 : 0
     let restoring = remembered > 0
     let lastOffset = main.scrollTop
