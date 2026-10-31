@@ -105,15 +105,59 @@ function registerSpotifyLikesHandlers(ipcMain) {
     try { return { mixes: await cached('home', !!force, () => spotify.madeForYou(settings().spotify_sp_dc)) } }
     catch (error) { return { mixes: [], error: error.message } }
   })
-  ipcMain.handle('spotify:libraryPlaylists', async (_, force) => {
-    try { return { playlists: await cached('libraryPlaylists', !!force, () => spotify.libraryPlaylists(settings().spotify_sp_dc)) } }
-    catch (error) { return { playlists: [], error: error.message } }
-  })
+  // Playlist metadata persists across launches, unlike rotating Discovery
+  // mixes. Cached content is returned immediately even if an automatic update
+  // is due; the renderer may refresh quietly after showing it.
+  const { createSpotifyPlaylistCache } = require('./spotifyPlaylistCache')
+  const spotifyPlaylistDisk = createSpotifyPlaylistCache(require('path').join(
+    require('electron').app.getPath('userData'), 'spotify-playlists-v1.json'))
+  const playlistRequests = new Map()
+  const libraryResource = async (key, force, load, empty) => {
+    const cookie = spotify.cookieValue(settings().spotify_sp_dc)
+    if (!cookie) return { ...empty, error: 'Connect Spotify in Settings → Integrations first.' }
+    const hit = spotifyPlaylistDisk.read(cookie, key)
+    const autoUpdate = settings().spotify_playlist_auto_update === '1'
+    if (hit && !force) return { ...hit.value, lastUpdated: hit.at, autoUpdate,
+      refreshDue: spotifyPlaylistDisk.due(cookie, key, autoUpdate) }
+    const requestKey = `${cookie}\0${key}`
+    if (playlistRequests.has(requestKey)) return playlistRequests.get(requestKey)
+    const promise = (async () => {
+      try {
+        const value = await load(cookie)
+        // Do not overwrite the new account's data with a late old-account request.
+        if (spotify.cookieValue(settings().spotify_sp_dc) !== cookie) {
+          return { ...empty, error: 'Spotify account changed. Refresh again.' }
+        }
+        spotifyPlaylistDisk.save(cookie, key, value)
+        const saved = spotifyPlaylistDisk.read(cookie, key)
+        return { ...value, lastUpdated: saved?.at || Date.now(), autoUpdate, refreshDue: false }
+      } catch (error) {
+        if (spotify.cookieValue(settings().spotify_sp_dc) === cookie)
+          spotifyPlaylistDisk.failed(cookie, key)
+        return hit
+          ? { ...hit.value, lastUpdated: hit.at, autoUpdate, refreshDue: false,
+              error: error.message || 'Could not refresh Spotify playlists.' }
+          : { ...empty, error: error.message || 'Could not load Spotify playlists.' }
+      }
+    })().finally(() => playlistRequests.delete(requestKey))
+    playlistRequests.set(requestKey, promise)
+    return promise
+  }
+  ipcMain.handle('spotify:libraryPlaylists', async (_, force) => libraryResource(
+    'libraryPlaylists', !!force,
+    cookie => spotify.libraryPlaylists(cookie).then(playlists => ({ playlists })),
+    { playlists: [] },
+  ))
   // Explicit user-library browsing allows longer playlists without
   // increasing Home Discovery's 200-song mix limit.
   ipcMain.handle('spotify:libraryPlaylistTracks', async (_, uri, force) => {
-    try { return await cached(`libraryPlaylist:${uri}`, !!force, () => spotify.playlistTracks(settings().spotify_sp_dc, String(uri || ''), { max: 1000 })) }
-    catch (error) { return { tracks: [], error: error.message } }
+    if (!/^spotify:playlist:[A-Za-z0-9]{22}$/.test(String(uri || '')))
+      return { tracks: [], error: 'Invalid Spotify playlist.' }
+    return libraryResource(
+      `libraryPlaylist:${uri}`, !!force,
+      cookie => spotify.playlistTracks(cookie, String(uri), { max: 1000 }),
+      { tracks: [] },
+    )
   })
   ipcMain.handle('spotify:playlist', async (_, uri, force) => {
     try { return await cached(`playlist:${uri}`, !!force, () => spotify.playlistTracks(settings().spotify_sp_dc, String(uri || ''))) }
