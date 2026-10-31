@@ -20,6 +20,28 @@ function folderOriginalCandidates(thumbnailPath) {
 const hasFolderOriginal = thumbnailPath =>
   folderOriginalCandidates(thumbnailPath).some(file => require('node:fs').existsSync(file))
 
+// Only covers from actual network roots need a durable copy. Local folder
+// images must keep their original path and resolution in the library database.
+// Explicitly registered mounted shares are tracked in settings because their
+// drive letters / POSIX mount paths do not otherwise identify them as remote.
+function isNetworkArtworkPath(filePath, configuredRoots = [], platform = process.platform) {
+  if (typeof filePath !== 'string' || !filePath) return false
+  const paths = platform === 'win32' ? path.win32 : path.posix
+  if (platform === 'win32' && /^(?:\\\\|\/\/)/.test(filePath)) return true
+  const candidate = paths.resolve(filePath)
+  return configuredRoots.some(root => {
+    if (typeof root !== 'string' || !root) return false
+    const parent = paths.resolve(root)
+    const relative = paths.relative(parent, candidate)
+    return relative === '' || (relative !== '..' &&
+      !relative.startsWith('..' + paths.sep) && !paths.isAbsolute(relative))
+  })
+}
+
+function isCachedFolderArtwork(filePath) {
+  return /^nas-folder-[a-f0-9]{24}\.(?:webp|jpe?g)$/i.test(path.basename(String(filePath || '')))
+}
+
 function fullCoverExtension(bytes) {
   if (bytes?.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return '.jpg'
   if (bytes?.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return '.png'
@@ -182,4 +204,4 @@ async function cacheFolderArtwork(sourcePath, artworkDir, {
   }
 }
 
-module.exports = { findFolderArtworkAsync, coverPriority, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal }
+module.exports = { findFolderArtworkAsync, coverPriority, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal, isNetworkArtworkPath, isCachedFolderArtwork }
