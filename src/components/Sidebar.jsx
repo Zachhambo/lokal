@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { usePanelWidths, usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic } from 'lucide-react'
+import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic, Eye, EyeOff } from 'lucide-react'
 import { useAppStore } from '../store/player'
 import { api, peekSettings } from '../api'
 import { SIDEBAR_ITEMS, sidebarNavOrder, splitSidebarNav } from '../sidebarNav'
@@ -11,6 +11,7 @@ import { openSmartPlaylistEditor } from '../smartPlaylists'
 import { openPlaylistImport } from '../playlistImport'
 import { getLastHomePath } from '../recommendationSession'
 import { useTranslation } from '../i18n'
+import { hiddenPlaylistIds, setPlaylistHidden } from '../providerPlaylistVisibility'
 
 
 
@@ -40,6 +41,66 @@ function NavItem({ icon: Icon, label, active, onClick, collapsed, badge, tour })
   )
 }
 
+/** Spotify and YouTube playlists share one compact, hideable sidebar shelf. */
+function ProviderPlaylistSection({ provider, title, playlists, accountId, loading, error, refresh, collapsed, nav, pathname }) {
+  const { t } = useTranslation()
+  const [hidden, setHidden] = useState([])
+  const [showHidden, setShowHidden] = useState(false)
+  useEffect(() => {
+    setHidden(hiddenPlaylistIds(provider, accountId))
+    setShowHidden(false)
+  }, [provider, accountId])
+  const hiddenSet = new Set(hidden)
+  const visible = playlists.filter(pl => showHidden || !hiddenSet.has(pl.id))
+  const changeHidden = (id, value) => setHidden(setPlaylistHidden(provider, accountId, id, value))
+  return (
+    <section className="mt-4" aria-label={title}>
+      <div className={`mb-1 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
+        {!collapsed && <p className="text-xs font-display text-muted uppercase tracking-widest">{t(title)}</p>}
+        <div className="flex gap-1">
+          {hidden.length > 0 && <button type="button"
+            title={t(showHidden ? 'Hide disabled playlists' : 'Manage hidden playlists')}
+            aria-label={t(showHidden ? 'Hide disabled playlists' : 'Manage hidden playlists')}
+            aria-pressed={showHidden}
+            onClick={() => setShowHidden(value => !value)}
+            className="rounded p-1 text-muted hover:text-white">
+            {showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>}
+          <button type="button" onClick={refresh} disabled={loading}
+            title={t(`Update ${title} playlists`)} aria-label={t(`Update ${title} playlists`)}
+            className="rounded p-1 text-muted hover:text-white disabled:opacity-40">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+      {visible.map(pl => {
+        const off = hiddenSet.has(pl.id)
+        const route = `/${provider}/playlist/${encodeURIComponent(pl.id)}`
+        return <div key={pl.id} className="group flex items-center">
+          <button type="button" onClick={() => nav(route)}
+            title={pl.name || pl.title}
+            aria-current={pathname === route ? 'page' : undefined}
+            className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 text-xs transition-all ${collapsed ? 'justify-center px-0' : 'px-2'} ${pathname === route ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-elevated hover:text-white'} ${off ? 'opacity-50' : ''}`}>
+            {pl.thumbnail
+              ? <img src={pl.thumbnail} alt="" className="h-7 w-7 flex-shrink-0 rounded object-cover" loading="lazy" />
+              : <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-accent/15"><ListMusic size={13} /></span>}
+            {!collapsed && <span className="truncate">{pl.name || pl.title}</span>}
+          </button>
+          {!collapsed && <button type="button" onClick={() => changeHidden(pl.id, !off)}
+            title={t(off ? 'Show playlist' : 'Hide playlist')}
+            aria-label={t(`${off ? 'Show' : 'Hide'} ${pl.name || pl.title}`)}
+            className="rounded p-1 text-muted opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100">
+            {off ? <Eye size={14} /> : <EyeOff size={14} />}
+          </button>}
+        </div>
+      })}
+      {!collapsed && error && <p className="px-2 py-2 text-xs text-muted" role="status">{t(error)}</p>}
+      {!collapsed && !loading && !error && visible.length === 0 &&
+        <p className="px-2 py-2 text-xs text-muted">{t(hidden.length ? 'All playlists are hidden. Use the eye button to manage them.' : 'No saved playlists.')}</p>}
+    </section>
+  )
+}
+
 /** Left sidebar: account, navigation and playlists; collapsible to icons. */
 export default function Sidebar() {
   const nav = useNavigate()
@@ -49,6 +110,11 @@ export default function Sidebar() {
   const panelWidth = usePanelWidth('left')
   const [playlists, setPlaylists] = useState([])
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
+  const [spotifyAccountId, setSpotifyAccountId] = useState('')
+  const [youtubePlaylists, setYoutubePlaylists] = useState([])
+  const [youtubeAccountId, setYoutubeAccountId] = useState('')
+  const [youtubeLoading, setYoutubeLoading] = useState(false)
+  const [youtubeError, setYoutubeError] = useState('')
   const [spotifyLoading, setSpotifyLoading] = useState(false)
   const [spotifyError, setSpotifyError] = useState('')
   const [showNewPlaylist, setShowNewPlaylist] = useState(false)
@@ -93,6 +159,7 @@ export default function Sidebar() {
         const result = await api.spotifyLibraryPlaylists(force)
         if (!alive || seq !== request) return
         setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
+        setSpotifyAccountId(result?.accountId || '')
         setSpotifyError(result?.error || '')
         // Populate from disk first, then perform one quiet due update.
         if (!force && result?.refreshDue) void load(true)
@@ -120,12 +187,49 @@ export default function Sidebar() {
       const result = await api.spotifyLibraryPlaylists(true)
       // Keep the cached list even when a manual update fails.
       if (Array.isArray(result?.playlists)) setSpotifyPlaylists(result.playlists)
+      setSpotifyAccountId(result?.accountId || '')
       setSpotifyError(result?.error || '')
     } catch (error) {
       setSpotifyError(error.message || 'Could not refresh Spotify playlists.')
     } finally {
       setSpotifyLoading(false)
     }
+  }
+
+  useEffect(() => {
+    if (!api.isElectron) return
+    let alive = true
+    let counter = 0
+    const load = async (force = false) => {
+      const number = ++counter
+      if (force) setYoutubeLoading(true)
+      try {
+        const response = await api.youtubeLibraryPlaylists(force)
+        if (!alive || counter !== number) return
+        setYoutubePlaylists(Array.isArray(response?.playlists) ? response.playlists : [])
+        setYoutubeAccountId(response?.accountId || '')
+        setYoutubeError(response?.error || '')
+        if (!force && response?.refreshDue) void load(true)
+      } catch (error) {
+        if (alive && counter === number) setYoutubeError(error.message || 'Could not read YouTube Music playlists.')
+      } finally { if (alive && counter === number) setYoutubeLoading(false) }
+    }
+    void load()
+    const refresh = () => { void load() }
+    window.addEventListener('lokal:settings-saved', refresh)
+    return () => { alive = false; window.removeEventListener('lokal:settings-saved', refresh) }
+  }, [])
+
+  const refreshYoutubePlaylists = async () => {
+    if (youtubeLoading) return
+    setYoutubeLoading(true)
+    try {
+      const result = await api.youtubeLibraryPlaylists(true)
+      if (Array.isArray(result?.playlists)) setYoutubePlaylists(result.playlists)
+      setYoutubeAccountId(result?.accountId || '')
+      setYoutubeError(result?.error || '')
+    } catch (error) { setYoutubeError(error.message || 'Could not refresh YouTube Music playlists.') }
+    finally { setYoutubeLoading(false) }
   }
 
   const loadPlaylists = () => {
@@ -450,29 +554,16 @@ export default function Sidebar() {
           </div>
         ))}
         {api.isElectron && <>
-          <div className={`mt-4 mb-1 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
-            {!collapsed && <p className="text-xs font-display text-muted uppercase tracking-widest">{t('Spotify')}</p>}
-            <button type="button" onClick={refreshSpotifyPlaylists} disabled={spotifyLoading}
-              title={t('Refresh Spotify playlists')} aria-label={t('Refresh Spotify playlists')}
-              className="rounded p-1 text-muted hover:text-white disabled:opacity-40">
-              <RefreshCw size={13} className={spotifyLoading ? 'animate-spin' : ''} />
-            </button>
-          </div>
-          {spotifyPlaylists.map(pl => (
-            <button key={pl.id} type="button"
-              onClick={() => nav(`/spotify/playlist/${pl.id}`)}
-              title={pl.name}
-              aria-current={loc.pathname === `/spotify/playlist/${pl.id}` ? 'page' : undefined}
-              className={`w-full flex items-center gap-2.5 rounded-lg py-2 text-xs transition-all ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === `/spotify/playlist/${pl.id}` ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-elevated hover:text-white'}`}>
-              {pl.thumbnail
-                ? <img src={pl.thumbnail} alt="" className="h-7 w-7 flex-shrink-0 rounded object-cover" loading="lazy" />
-                : <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-accent/15"><ListMusic size={13} /></span>}
-              {!collapsed && <span className="truncate">{pl.name}</span>}
-            </button>
-          ))}
-          {!collapsed && spotifyError && <p className="px-2 py-2 text-xs text-muted" role="status">{t(spotifyError)}</p>}
-          {!collapsed && !spotifyLoading && !spotifyError && !spotifyPlaylists.length &&
-            <p className="px-2 py-2 text-xs text-muted">{t('No Spotify playlists saved.')}</p>}
+          <ProviderPlaylistSection provider="spotify" title="Spotify"
+            playlists={spotifyPlaylists} accountId={spotifyAccountId}
+            loading={spotifyLoading} error={spotifyError}
+            refresh={refreshSpotifyPlaylists} collapsed={collapsed}
+            nav={nav} pathname={loc.pathname} />
+          <ProviderPlaylistSection provider="youtube" title="YouTube"
+            playlists={youtubePlaylists} accountId={youtubeAccountId}
+            loading={youtubeLoading} error={youtubeError}
+            refresh={refreshYoutubePlaylists} collapsed={collapsed}
+            nav={nav} pathname={loc.pathname} />
         </>}
       </div>
 
