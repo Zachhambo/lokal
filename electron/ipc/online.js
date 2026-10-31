@@ -206,6 +206,9 @@ function registerOnlineHandlers(ipcMain) {
             youtubePlaylistDisk.save(cookie, key, value)
             return { ...value, accountId, lastUpdated: Date.now(), autoUpdate, refreshDue: false }
           } catch (error) {
+            const current = await accountSession.credentials()
+            if (youtube.normalizeAccountCookies(current.cookies || '') !== cookie)
+              return { ...empty, accountId: '', error: 'YouTube Music account changed.' }
             youtubePlaylistDisk.failed(cookie, key)
             return hit
               ? { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate, error: error.message, refreshDue: false }

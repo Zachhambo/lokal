@@ -39,7 +39,8 @@ export default function SpotifyPlaylist({ provider = 'spotify' }) {
         if (result?.tracks) setPlaylist({
           title: result?.title || `${label} playlist`,
           tracks: result.tracks.map((row, i) => ({
-            ...row, id: row.spotifyUri || row.videoId || row.id || `${provider}-row:${id}:${i}`,
+            ...row, id: youtube ? (row.spotifyUri || row.videoId || row.id || `${provider}-row:${id}:${i}`)
+              : `${row.spotifyUri || row.videoId || row.id || `${provider}-row:${id}:${i}`}:${i}`,
             artist: row.artist || row.author || '',
             artwork_url: row.artwork_url || row.thumbnail || '',
           })),

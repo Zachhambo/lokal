@@ -133,8 +133,9 @@ function registerSpotifyLikesHandlers(ipcMain) {
         const saved = spotifyPlaylistDisk.read(cookie, key)
         return { ...value, accountId, lastUpdated: saved?.at || Date.now(), autoUpdate, refreshDue: false }
       } catch (error) {
-        if (spotify.cookieValue(settings().spotify_sp_dc) === cookie)
-          spotifyPlaylistDisk.failed(cookie, key)
+        if (spotify.cookieValue(settings().spotify_sp_dc) !== cookie)
+          return { ...empty, error: 'Spotify account changed. Refresh again.' }
+        spotifyPlaylistDisk.failed(cookie, key)
         return hit
           ? { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate, refreshDue: false,
               error: error.message || 'Could not refresh Spotify playlists.' }

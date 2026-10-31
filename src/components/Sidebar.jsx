@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { usePanelWidths, usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic, Eye, EyeOff } from 'lucide-react'
@@ -113,10 +113,12 @@ export default function Sidebar() {
   const [spotifyAccountId, setSpotifyAccountId] = useState('')
   const [youtubePlaylists, setYoutubePlaylists] = useState([])
   const [youtubeAccountId, setYoutubeAccountId] = useState('')
-  const [youtubeLoading, setYoutubeLoading] = useState(false)
+  const [youtubeLoading, setYoutubeLoading] = useState(api.isElectron)
   const [youtubeError, setYoutubeError] = useState('')
-  const [spotifyLoading, setSpotifyLoading] = useState(false)
+  const [spotifyLoading, setSpotifyLoading] = useState(api.isElectron)
   const [spotifyError, setSpotifyError] = useState('')
+  const spotifyPlaylistLoad = useRef(null)
+  const youtubePlaylistLoad = useRef(null)
   const [showNewPlaylist, setShowNewPlaylist] = useState(false)
   const [newPlName, setNewPlName] = useState('')
   const [confirmSignOut, setConfirmSignOut] = useState(false)
@@ -152,84 +154,71 @@ export default function Sidebar() {
     if (!api.isElectron) return
     let alive = true
     let request = 0
-    const load = async (force = false) => {
+    const load = async (force = false, manual = false) => {
       const seq = ++request
       if (force) setSpotifyLoading(true)
       try {
         const result = await api.spotifyLibraryPlaylists(force)
         if (!alive || seq !== request) return
-        setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
+        if (Array.isArray(result?.playlists)) setSpotifyPlaylists(result.playlists)
+        else if (!manual) setSpotifyPlaylists([])
         setSpotifyAccountId(result?.accountId || '')
         setSpotifyError(result?.error || '')
         // Populate from disk first, then perform one quiet due update.
         if (!force && result?.refreshDue) void load(true)
       } catch (error) {
-        if (alive && seq === request) setSpotifyError(error.message || 'Could not load Spotify playlists.')
+        if (alive && seq === request) setSpotifyError(error.message || (manual ? 'Could not refresh Spotify playlists.' : 'Could not load Spotify playlists.'))
       } finally {
         if (alive && seq === request) setSpotifyLoading(false)
       }
     }
+    spotifyPlaylistLoad.current = load
     void load()
     const refresh = () => { void load() } // settings edits are not forced resyncs
     window.addEventListener('lokal:settings-saved', refresh)
     window.addEventListener('lokal:spotify-playlists-update', refresh)
     return () => {
       alive = false
+      spotifyPlaylistLoad.current = null
       window.removeEventListener('lokal:settings-saved', refresh)
       window.removeEventListener('lokal:spotify-playlists-update', refresh)
     }
   }, [])
 
-  const refreshSpotifyPlaylists = async () => {
+  const refreshSpotifyPlaylists = () => {
     if (spotifyLoading) return
-    setSpotifyLoading(true)
-    try {
-      const result = await api.spotifyLibraryPlaylists(true)
-      // Keep the cached list even when a manual update fails.
-      if (Array.isArray(result?.playlists)) setSpotifyPlaylists(result.playlists)
-      setSpotifyAccountId(result?.accountId || '')
-      setSpotifyError(result?.error || '')
-    } catch (error) {
-      setSpotifyError(error.message || 'Could not refresh Spotify playlists.')
-    } finally {
-      setSpotifyLoading(false)
-    }
+    void spotifyPlaylistLoad.current?.(true, true)
   }
 
   useEffect(() => {
     if (!api.isElectron) return
     let alive = true
     let counter = 0
-    const load = async (force = false) => {
+    const load = async (force = false, manual = false) => {
       const number = ++counter
       if (force) setYoutubeLoading(true)
       try {
         const response = await api.youtubeLibraryPlaylists(force)
         if (!alive || counter !== number) return
-        setYoutubePlaylists(Array.isArray(response?.playlists) ? response.playlists : [])
+        if (Array.isArray(response?.playlists)) setYoutubePlaylists(response.playlists)
+        else if (!manual) setYoutubePlaylists([])
         setYoutubeAccountId(response?.accountId || '')
         setYoutubeError(response?.error || '')
         if (!force && response?.refreshDue) void load(true)
       } catch (error) {
-        if (alive && counter === number) setYoutubeError(error.message || 'Could not read YouTube Music playlists.')
+        if (alive && counter === number) setYoutubeError(error.message || (manual ? 'Could not refresh YouTube Music playlists.' : 'Could not read YouTube Music playlists.'))
       } finally { if (alive && counter === number) setYoutubeLoading(false) }
     }
+    youtubePlaylistLoad.current = load
     void load()
     const refresh = () => { void load() }
     window.addEventListener('lokal:settings-saved', refresh)
-    return () => { alive = false; window.removeEventListener('lokal:settings-saved', refresh) }
+    return () => { alive = false; youtubePlaylistLoad.current = null; window.removeEventListener('lokal:settings-saved', refresh) }
   }, [])
 
-  const refreshYoutubePlaylists = async () => {
+  const refreshYoutubePlaylists = () => {
     if (youtubeLoading) return
-    setYoutubeLoading(true)
-    try {
-      const result = await api.youtubeLibraryPlaylists(true)
-      if (Array.isArray(result?.playlists)) setYoutubePlaylists(result.playlists)
-      setYoutubeAccountId(result?.accountId || '')
-      setYoutubeError(result?.error || '')
-    } catch (error) { setYoutubeError(error.message || 'Could not refresh YouTube Music playlists.') }
-    finally { setYoutubeLoading(false) }
+    void youtubePlaylistLoad.current?.(true, true)
   }
 
   const loadPlaylists = () => {
