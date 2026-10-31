@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { readViewState, writeViewState } from '../statePersistence.mjs'
 import { usePanelWidths, usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic, Eye, EyeOff } from 'lucide-react'
@@ -15,10 +16,8 @@ import { hiddenPlaylistIds, setPlaylistHidden } from '../providerPlaylistVisibil
 
 
 
-// Collapsed, the sidebar shows only icons (their names on hover); the
-// choice is remembered.
-const COLLAPSED_KEY = 'lokal-sidebar-collapsed'
-const readCollapsed = () => { try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false } }
+// The collapsed state survives an app restart only if the user opts in.
+const readCollapsed = () => readViewState('sidebar:collapsed') === '1'
 
 /** A menu entry: icon and name, or just the icon (named on hover) when collapsed. */
 function NavItem({ icon: Icon, label, active, onClick, collapsed, badge, tour }) {
@@ -130,7 +129,7 @@ export default function Sidebar() {
   const { user, openAuth, logout } = useAppStore()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggleCollapsed = () => setCollapsed(value => {
-    try { localStorage.setItem(COLLAPSED_KEY, value ? '0' : '1') } catch {}
+    writeViewState('sidebar:collapsed', value ? '0' : '1')
     return !value
   })
   // "+" on the collapsed sidebar: open it, with the new playlist's name to type.

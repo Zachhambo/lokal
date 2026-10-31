@@ -5,6 +5,7 @@
 
 import React, { useRef } from 'react'
 import { create } from 'zustand'
+import { readViewState, writeViewState } from './statePersistence.mjs'
 
 const KEY = 'lokal-panel-widths'
 export const LEFT = { min: 180, max: 420, fixed: 224 }
@@ -13,7 +14,13 @@ export const RIGHT = { min: 260, max: 620, fixed: 300 }
 function read() {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}')
-    return { freeform: !!saved.freeform, left: Number(saved.left) || LEFT.fixed, right: Number(saved.right) || RIGHT.fixed }
+    const left = Number(readViewState('sidebar:leftWidth')) || LEFT.fixed
+    const right = Number(readViewState('sidebar:rightWidth')) || RIGHT.fixed
+    return {
+      freeform: !!saved.freeform,
+      left: Math.max(LEFT.min, Math.min(LEFT.max, left)),
+      right: Math.max(RIGHT.min, Math.min(RIGHT.max, right)),
+    }
   } catch { return { freeform: false, left: LEFT.fixed, right: RIGHT.fixed } }
 }
 
@@ -22,7 +29,11 @@ export const usePanelWidths = create((set, get) => ({
   set(patch) {
     set(patch)
     const { freeform, left, right } = get()
-    try { localStorage.setItem(KEY, JSON.stringify({ freeform, left, right })) } catch {}
+    // Freeform mode is a normal appearance preference. Actual widths are
+    // session-only unless State Persistence is enabled.
+    try { localStorage.setItem(KEY, JSON.stringify({ freeform })) } catch {}
+    writeViewState('sidebar:leftWidth', String(left))
+    writeViewState('sidebar:rightWidth', String(right))
   },
 }))
 

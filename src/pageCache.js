@@ -13,6 +13,7 @@
 //                   so a slow load never hides a page for long).
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { readViewState, writeViewState } from './statePersistence.mjs'
 
 const cache = new Map()
 const MAX_PAGE_CACHE_ENTRIES = 32
@@ -50,7 +51,7 @@ export function writeCache(key, value) {
  */
 export function useCachedState(key, initial) {
   const wasCached = useRef(cache.has(key)).current
-  const [value, setValue] = useState(() => (cache.has(key) ? readCache(key) : (typeof initial === 'function' ? initial() : initial)))
+  const [value, setValue] = useState(() => (cache.has(key) ? readCache(key) : (readViewState(key) ?? (typeof initial === 'function' ? initial() : initial))))
   const keyRef = useRef(key)
   keyRef.current = key
   // Only values set through `set` are stored (not the initial one), and only
@@ -61,7 +62,10 @@ export function useCachedState(key, initial) {
     setValue(next)
   }, [])
   useEffect(() => {
-    if (dirty.current) storeCache(keyRef.current, value)
+    if (dirty.current) {
+      storeCache(keyRef.current, value)
+      if (typeof value === 'string') writeViewState(keyRef.current, value)
+    }
   }, [value])
   return [value, set, wasCached]
 }
