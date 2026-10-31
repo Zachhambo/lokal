@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { usePanelWidths, usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal } from 'lucide-react'
+import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic } from 'lucide-react'
 import { useAppStore } from '../store/player'
 import { api, peekSettings } from '../api'
 import { SIDEBAR_ITEMS, sidebarNavOrder, splitSidebarNav } from '../sidebarNav'
@@ -48,6 +48,9 @@ export default function Sidebar() {
   const freeform = usePanelWidths(s => s.freeform)
   const panelWidth = usePanelWidth('left')
   const [playlists, setPlaylists] = useState([])
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
+  const [spotifyLoading, setSpotifyLoading] = useState(false)
+  const [spotifyError, setSpotifyError] = useState('')
   const [showNewPlaylist, setShowNewPlaylist] = useState(false)
   const [newPlName, setNewPlName] = useState('')
   const [confirmSignOut, setConfirmSignOut] = useState(false)
@@ -74,6 +77,40 @@ export default function Sidebar() {
       return loc.pathname === '/artists' || loc.pathname.startsWith('/artist/')
     }
     return loc.pathname === path
+  }
+
+
+  // Playlist metadata is retrieved in Electron; never expose the cookie or
+  // bearer token to the renderer. Refresh on an account-settings change.
+  useEffect(() => {
+    if (!api.isElectron) return
+    let alive = true
+    const load = async (force = false) => {
+      setSpotifyLoading(true)
+      try {
+        const result = await api.spotifyLibraryPlaylists(force)
+        if (!alive) return
+        setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
+        setSpotifyError(result?.error || '')
+      } catch (error) {
+        if (alive) { setSpotifyPlaylists([]); setSpotifyError(error.message || 'Could not load Spotify playlists.') }
+      } finally { if (alive) setSpotifyLoading(false) }
+    }
+    load()
+    const refresh = () => load(true)
+    window.addEventListener('lokal:settings-saved', refresh)
+    return () => { alive = false; window.removeEventListener('lokal:settings-saved', refresh) }
+  }, [])
+
+  const refreshSpotifyPlaylists = async () => {
+    if (spotifyLoading) return
+    setSpotifyLoading(true)
+    try {
+      const result = await api.spotifyLibraryPlaylists(true)
+      setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
+      setSpotifyError(result?.error || '')
+    } catch (error) { setSpotifyError(error.message || 'Could not load Spotify playlists.') }
+    finally { setSpotifyLoading(false) }
   }
 
   const loadPlaylists = () => {
@@ -397,6 +434,31 @@ export default function Sidebar() {
             </button>
           </div>
         ))}
+        {api.isElectron && <>
+          <div className={`mt-4 mb-1 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
+            {!collapsed && <p className="text-xs font-display text-muted uppercase tracking-widest">{t('Spotify')}</p>}
+            <button type="button" onClick={refreshSpotifyPlaylists} disabled={spotifyLoading}
+              title={t('Refresh Spotify playlists')} aria-label={t('Refresh Spotify playlists')}
+              className="rounded p-1 text-muted hover:text-white disabled:opacity-40">
+              <RefreshCw size={13} className={spotifyLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {spotifyPlaylists.map(pl => (
+            <button key={pl.id} type="button"
+              onClick={() => nav(`/spotify/playlist/${pl.id}`)}
+              title={pl.name}
+              aria-current={loc.pathname === `/spotify/playlist/${pl.id}` ? 'page' : undefined}
+              className={`w-full flex items-center gap-2.5 rounded-lg py-2 text-xs transition-all ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === `/spotify/playlist/${pl.id}` ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-elevated hover:text-white'}`}>
+              {pl.thumbnail
+                ? <img src={pl.thumbnail} alt="" className="h-7 w-7 flex-shrink-0 rounded object-cover" loading="lazy" />
+                : <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-accent/15"><ListMusic size={13} /></span>}
+              {!collapsed && <span className="truncate">{pl.name}</span>}
+            </button>
+          ))}
+          {!collapsed && spotifyError && <p className="px-2 py-2 text-xs text-muted" role="status">{t(spotifyError)}</p>}
+          {!collapsed && !spotifyLoading && !spotifyError && !spotifyPlaylists.length &&
+            <p className="px-2 py-2 text-xs text-muted">{t('No Spotify playlists saved.')}</p>}
+        </>}
       </div>
 
     </aside>
