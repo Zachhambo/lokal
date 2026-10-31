@@ -23,7 +23,7 @@ export default function SpotifyPlaylist() {
     setLoading(true)
     setError('')
     // Force the IPC cache on explicit refresh only.
-    api.spotifyPlaylist(`spotify:playlist:${id}`, revision > 0).then(result => {
+    api.spotifyLibraryPlaylistTracks(`spotify:playlist:${id}`, revision > 0).then(result => {
       if (!active) return
       if (result?.error) { setError(result.error); setPlaylist({ title: '', tracks: [] }) }
       else setPlaylist({
