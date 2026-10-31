@@ -2,6 +2,7 @@
 // the original is read from the source audio only when a large image is requested.
 const fs = require('fs')
 const path = require('path')
+const { folderOriginalCandidates } = require('../networkArtwork')
 
 function mimeOf(bytes, reported = '') {
   const value = String(reported || '').toLowerCase()
@@ -65,6 +66,19 @@ async function fullCoverForTrack(db, trackId) {
   const artworkDir = storageDir ? path.resolve(storageDir, 'artwork') : null
   const isCacheThumbnail = artworkDir && within(artworkDir, filePath) && path.extname(filePath).toLowerCase() === '.webp'
   if (isCacheThumbnail) {
+    // Folder.jpg/cover.png does not live inside the song. Its shared cache
+    // thumbnail is only 150px, so use the original preserved beside it
+    // before attempting an expensive metadata parse of the audio file.
+    for (const originalPath of folderOriginalCandidates(filePath)) {
+      try {
+        // Validate the resolved path too: a symlink in app artwork storage
+        // must never allow the cover protocol to read arbitrary files.
+        if (!within(artworkDir, fs.realpathSync(originalPath)) ||
+            !allowedArtworkPath(db, originalPath)) continue
+        const bytes = fs.readFileSync(originalPath)
+        if (bytes.length) return { bytes, mime: mimeOf(bytes) }
+      } catch { /* Another format may be present, or just the thumbnail. */ }
+    }
     const embedded = await filePicture(track.file_path)
     if (embedded) return embedded
   }
