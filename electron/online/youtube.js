@@ -624,6 +624,25 @@ async function fetchAccountData({ cookies, fetchImpl = fetch, limit = 100, force
   return data
 }
 
+/** The signed-in listener's saved playlists, not the Discovery Home mixes. */
+async function fetchLibraryPlaylists({ cookies, fetchImpl = fetch, limit = 2000 } = {}) {
+  const header = String(cookies || '')
+  if (!accountHeaders(header)) throw new Error('Sign in to YouTube Music in Integrations.')
+  const config = await musicContext(header, fetchImpl)
+  const root = await accountBrowse('FEmusic_liked_playlists', header, fetchImpl, config)
+  const pages = await browsePages('FEmusic_liked_playlists', root, header, fetchImpl, config, {
+    types: ['gridRenderer', 'gridContinuation', 'musicShelfRenderer',
+      'musicShelfContinuation', 'sectionListRenderer', 'sectionListContinuation',
+      'appendContinuationItemsAction', 'reloadContinuationItemsCommand'],
+  })
+  if (pages.error) throw new Error(pages.error.replace('mix loading', 'playlist loading'))
+  const playlists = new Map()
+  for (const page of pages.pages) for (const item of parseAccountPlaylists(page, limit)) {
+    if (!/^RD/.test(item.id)) playlists.set(item.id, item)
+  }
+  return [...playlists.values()].slice(0, limit)
+}
+
 /** YouTube Music's own song radio, rather than searching for the word "radio". */
 async function fetchRadio(videoId, { cookies = '', fetchImpl = fetch, limit = 50 } = {}) {
   if (!VIDEO_ID.test(String(videoId || ''))) return []
@@ -1217,7 +1236,7 @@ function videoIdFromUrl(url) {
 
 module.exports = {
   searchSongs, innertubeSearch, spellCheck, parseSearch, parseItem, parseDuration,
-  fetchAccountData, fetchAccountPlaylist, fetchMusicPlaylistInfo, fetchMusicPlaylist, parseMusicPlaylistMetadata, youtubeMusicPlaylistId, setAccountLiked, fetchCatalogue, parseArtistPage,
+  fetchAccountData, fetchLibraryPlaylists, fetchAccountPlaylist, fetchMusicPlaylistInfo, fetchMusicPlaylist, parseMusicPlaylistMetadata, youtubeMusicPlaylistId, setAccountLiked, fetchCatalogue, parseArtistPage,
   fetchRadio, parseAccountTracks, parseAccountMixes, parseAccountHomeCategories, youtubeHomeCategory, clearAccountCache, accountHeaders, normalizeAccountCookies, parseMusicConfig, isLoggedOutResponse,
   resolveStream, fetchStream, streamError, videoIdFromUrl, fastFailure,
 }
