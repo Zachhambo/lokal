@@ -5,6 +5,7 @@ import SplitWordsSettings from '../components/SplitWordsSettings'
 import { normalizeSidebarCardLayout } from '../sideCardView'
 import { collectLocalPrefs, restoreLocalPrefs } from '../localPrefsBackup'
 import AppTabsSettings from '../components/AppTabsSettings'
+import { statePersistenceEnabled, setStatePersistenceEnabled, writeSavedRoute } from '../statePersistence.mjs'
 import { APP_LANGUAGES, useTranslation } from '../i18n'
 import TvModeSettings from '../tv/TvModeSettings'
 ﻿import React, { useEffect, useLayoutEffect, useState, useRef, createContext, useContext } from 'react'
@@ -265,6 +266,7 @@ export default function Settings() {
   const location = useLocation()
   const navigate = useNavigate()
   const { t, language, setLanguage } = useTranslation()
+  const [statePersistenceOn, setStatePersistenceOn] = useState(() => statePersistenceEnabled())
   const panelFreeform = usePanelWidths(s => s.freeform)
   const setPanelFreeform = (freeform) => usePanelWidths.getState().set({ freeform })
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
@@ -2601,6 +2603,21 @@ activeCategory === 'data' ? usersTried
 
       {inCategory('appearance') && (
       <Section title={t("Navigation")}>
+        <Row label={t("State Persistence")} desc={t("Remember the last page, Library and Artists views, sidebar collapse and widths, and scroll position after fully quitting and reopening Lokal. Off by default; no library data or artwork is stored.")}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={statePersistenceOn}
+            onClick={() => {
+              const next = !statePersistenceOn
+              if (!setStatePersistenceEnabled(next)) return
+              setStatePersistenceOn(next)
+              if (next) writeSavedRoute(location.pathname)
+            }}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${statePersistenceOn ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {statePersistenceOn ? t('On') : t('Off')}
+          </button>
+        </Row>
         <Row stacked label={t("Sidebar order")} desc={t("Drag items to reorder the sidebar. Move items below the divider to group them under More.")}>
           <AppTabsSettings value={settings.sidebar_nav || ''} onChange={value => set('sidebar_nav', value)} />
         </Row>
