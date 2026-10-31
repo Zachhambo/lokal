@@ -115,9 +115,10 @@ function registerSpotifyLikesHandlers(ipcMain) {
   const libraryResource = async (key, force, load, empty) => {
     const cookie = spotify.cookieValue(settings().spotify_sp_dc)
     if (!cookie) return { ...empty, error: 'Connect Spotify in Settings → Integrations first.' }
+    const accountId = require('node:crypto').createHash('sha256').update(cookie).digest('hex')
     const hit = spotifyPlaylistDisk.read(cookie, key)
     const autoUpdate = settings().spotify_playlist_auto_update === '1'
-    if (hit && !force) return { ...hit.value, lastUpdated: hit.at, autoUpdate,
+    if (hit && !force) return { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate,
       refreshDue: spotifyPlaylistDisk.due(cookie, key, autoUpdate) }
     const requestKey = `${cookie}\0${key}`
     if (playlistRequests.has(requestKey)) return playlistRequests.get(requestKey)
@@ -130,14 +131,14 @@ function registerSpotifyLikesHandlers(ipcMain) {
         }
         spotifyPlaylistDisk.save(cookie, key, value)
         const saved = spotifyPlaylistDisk.read(cookie, key)
-        return { ...value, lastUpdated: saved?.at || Date.now(), autoUpdate, refreshDue: false }
+        return { ...value, accountId, lastUpdated: saved?.at || Date.now(), autoUpdate, refreshDue: false }
       } catch (error) {
         if (spotify.cookieValue(settings().spotify_sp_dc) === cookie)
           spotifyPlaylistDisk.failed(cookie, key)
         return hit
-          ? { ...hit.value, lastUpdated: hit.at, autoUpdate, refreshDue: false,
+          ? { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate, refreshDue: false,
               error: error.message || 'Could not refresh Spotify playlists.' }
-          : { ...empty, error: error.message || 'Could not load Spotify playlists.' }
+          : { ...empty, accountId, error: error.message || 'Could not load Spotify playlists.' }
       }
     })().finally(() => playlistRequests.delete(requestKey))
     playlistRequests.set(requestKey, promise)
