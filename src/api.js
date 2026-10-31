@@ -459,6 +459,8 @@ export const api = {
     }
     return result
   },
+  youtubeLibraryPlaylists: (force = false) => isE() ? el().youtubeLibraryPlaylists(force) : Promise.resolve({ playlists: [], error: 'Desktop-only YouTube Music account.' }),
+  youtubeLibraryPlaylistTracks: (id, force = false) => isE() ? el().youtubeLibraryPlaylistTracks(id, force) : Promise.resolve({ tracks: [], error: 'Desktop-only YouTube Music account.' }),
   youtubeAccountPlaylist: (playlistId) => isE() ? el().youtubeAccountPlaylist(playlistId) : apiFetch(`/online/account-playlist/${encodeURIComponent(playlistId)}`),
   youtubeRadio: (videoId) => isE() ? el().youtubeRadio(videoId) : apiFetch(`/online/radio/${encodeURIComponent(videoId)}`),
   youtubeSetLiked: (videoId, liked) => isE() ? el().youtubeSetLiked(videoId, liked) : apiFetch('/online/account-liked', { method: 'POST', body: { videoId, liked } }),
