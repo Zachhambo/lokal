@@ -2007,6 +2007,14 @@ activeCategory === 'data' ? usersTried
             )}
           </div>
         </Row>
+        <Row label={t("Auto-update Spotify playlists")} desc={t("Keep saved Spotify playlists and songs locally. When enabled, refresh cached lists at most once every 24 hours while browsing. When disabled, only the first load or the Update button contacts Spotify.")}>
+          <button type="button"
+            onClick={() => set('spotify_playlist_auto_update', settings.spotify_playlist_auto_update === '1' ? '0' : '1')}
+            aria-pressed={settings.spotify_playlist_auto_update === '1'}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.spotify_playlist_auto_update === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {settings.spotify_playlist_auto_update === '1' ? t('On') : t('Off')}
+          </button>
+        </Row>
         <SpotifyLikesRow hasCookie={!!settings.spotify_sp_dc} userId={user?.id || 'guest'} />
       </Section>
       )}
