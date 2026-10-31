@@ -92,10 +92,19 @@ async function youtubeFallback(query) {
 }
 
 /** Songs for `query` on a provider ('yt' YouTube Music, 'sc' SoundCloud). */
-async function search(query, provider = 'yt') {
+async function search(query, provider = 'yt', options = {}) {
   try {
     const auth = provider === 'yt' && accountSession ? await accountSession.credentials() : {}
-    return await sources.search(sources.providerOf(provider) ? provider : 'yt', query, { db: getDB(), ytdlp: findYtDlp(), fetchImpl: auth.fetchImpl, fallbackSearch: youtubeFallback })
+    // Only automatic HTTP add-on fallback gets the short connection deadline.
+    // A Morneye package may be staging a real file and must not inherit it.
+    const isHttpAddon = sources.addons.keyOfProvider(provider) &&
+      sources.addons.searchable(getDB()).some(addon =>
+        addon.provider === provider && addon.kind !== 'mornye')
+    const addonTimeoutMs = options?.automatic === true && isHttpAddon ? 3000 : undefined
+    return await sources.search(sources.providerOf(provider) ? provider : 'yt', query, {
+      db: getDB(), ytdlp: findYtDlp(), fetchImpl: auth.fetchImpl,
+      fallbackSearch: youtubeFallback, addonTimeoutMs,
+    })
   } catch (e) {
     return { error: e.message, results: [] }
   }
@@ -150,7 +159,7 @@ function registerOnlineHandlers(ipcMain) {
   sources.pruneOnlineTracks(getDB())
   // Streamed songs' genres (see genres.js): those already played, once the app has settled.
   setTimeout(() => genres.backfillOnlineGenres(getDB()), 20000).unref?.()
-  ipcMain.handle('online:search', (_, query, provider) => search(query, provider))
+  ipcMain.handle('online:search', (_, query, provider, options) => search(query, provider, options))
   ipcMain.handle('online:globalSearch', (_, query, options) => {
     const saved = settings()
     const source = saved.global_catalogue_source === 'spotify' ? 'spotify' : 'apple'
@@ -356,12 +365,14 @@ function registerOnlineHandlers(ipcMain) {
     require('../online/videoPreview').animatedPreview(String(videoId || ''), String(query || ''), { force: force === true }).catch(() => null))
   ipcMain.handle('musicVideo:cancelIndex', () => { if (videoIndexJob) videoIndexJob.cancelled = true })
   ipcMain.handle('musicVideo:indexStatus', () => videoIndexStatus)
-  ipcMain.handle('online:prepare', async (_, provider, id, force = false) => {
+  ipcMain.handle('online:prepare', async (_, provider, id, force = false, options = {}) => {
     try {
       const key = sources.addons.keyOfProvider(provider)
       if (key && sources.addons.packageService(getDB()).find(key)) return require('../mornye/media').prepare(getDB(), key, id, { force: !!force })
       if (provider === 'yt') await accountSession.credentials()
-      const stream = await sources.resolveStream(provider, id, { ...streamOptions(), force: !!force })
+      // Bound the actual HTTP request, not only the renderer's Promise.race.
+      const addonTimeoutMs = key && options?.automatic === true ? 3000 : undefined
+      const stream = await sources.resolveStream(provider, id, { ...streamOptions(), force: !!force, addonTimeoutMs })
       return { ok: true, preview: !!stream.preview }
     } catch (e) { return { error: e.message } }
   })
