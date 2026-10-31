@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { readViewState, writeViewState } from '../statePersistence.mjs'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { Clock, Grid2x2, Grid3x3, List, Loader2, Music, Play, Radio, RefreshCw, Search, Sparkles, UserMinus, UserPlus, Users } from 'lucide-react'
@@ -150,12 +151,12 @@ const VIEWS = [
 
 export default function Artists() {
   const { t } = useTranslation()
-  const [sort, setSort] = useState(() => localStorage.getItem('lokal-artists-sort') || 'name')
+  const [sort, setSort] = useState(() => readViewState('artists:sort') || 'name')
   // All artists, or only the ones you follow (their releases fill Home → Releases).
-  const [followedOnly, setFollowedOnly] = useState(() => { try { return localStorage.getItem('lokal-artists-followed') === '1' } catch { return false } })
+  const [followedOnly, setFollowedOnly] = useState(() => readViewState('artists:followed') === '1')
   const followedRef = useRef(followedOnly)
   followedRef.current = followedOnly
-  const [mainOnly, setMainOnly] = useState(() => { try { return localStorage.getItem('lokal-artists-main-only') === '1' } catch { return false } })
+  const [mainOnly, setMainOnly] = useState(() => readViewState('artists:mainOnly') === '1')
   const mainOnlyRef = useRef(mainOnly)
   mainOnlyRef.current = mainOnly
   const listKey = (sortMode, followed = followedRef.current, main = mainOnlyRef.current) => `artists:${sortMode}${followed ? ':followed' : ''}${main ? ':main-only' : ''}`
@@ -170,7 +171,7 @@ export default function Artists() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [query, setQuery] = useState('')
   usePageReady(!loading)
-  const [density, setDensity] = useState(() => localStorage.getItem('lokal-artists-density') || 'spaced')
+  const [density, setDensity] = useState(() => readViewState('artists:density') || 'spaced')
   const [refreshOpen, setRefreshOpen] = useState(false)
   const [refreshStatus, setRefreshStatus] = useState(null)
   const loadMoreRef = useRef(null)
@@ -260,7 +261,7 @@ export default function Artists() {
     setHasMore(!!seen?.hasMore)
     setLoading(!seen)
     setFollowedOnly(next)
-    try { localStorage.setItem('lokal-artists-followed', next ? '1' : '0') } catch {}
+    writeViewState('artists:followed', next ? '1' : '0')
   }
 
   const changeMainOnly = (next) => {
@@ -272,7 +273,7 @@ export default function Artists() {
     setLoading(!seen)
     setMainOnly(next)
     setTopArtists(peekCache(`artists:top${next ? ':main-only' : ''}`) || [])
-    try { localStorage.setItem('lokal-artists-main-only', next ? '1' : '0') } catch {}
+    writeViewState('artists:mainOnly', next ? '1' : '0')
   }
 
   useEffect(() => { loadTopArtists() }, [mainOnly])
@@ -302,13 +303,13 @@ export default function Artists() {
 
   const changeSort = (value) => {
     setSort(value)
-    localStorage.setItem('lokal-artists-sort', value)
+    writeViewState('artists:sort', value)
   }
 
   // Grid, compact grid, or list (long names are easier to read and scan in a list).
   const changeView = (next) => {
     setDensity(next)
-    try { localStorage.setItem('lokal-artists-density', next) } catch {}
+    writeViewState('artists:density', next)
   }
 
   // List view sorted by name: a letter header before each new first letter.
