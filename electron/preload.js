@@ -180,10 +180,10 @@ contextBridge.exposeInMainWorld('electron', {
 
   
   downloadYT: (url, opts) => invoke('downloader:download', url, opts),
-  onlineSearch: (query, provider) => invoke('online:search', query, provider),
+  onlineSearch: (query, provider, options) => invoke('online:search', query, provider, { automatic: options?.automatic === true }),
   globalCatalogueSearch: (query, options) => invoke('online:globalSearch', query, options),
   onlineSave: (items) => invoke('online:save', items),
-  onlinePrepare: (provider, id, force) => invoke('online:prepare', provider, id, force),
+  onlinePrepare: (provider, id, force, options) => invoke('online:prepare', provider, id, force, { automatic: options?.automatic === true }),
   onlineProviders: () => invoke('online:providers'),
   onlineGenre: (trackId) => invoke('online:genre', trackId),
   searchSpelling: (q) => invoke('online:spelling', q),
