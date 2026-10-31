@@ -223,7 +223,7 @@ function registerOnlineHandlers(ipcMain) {
     { playlists: [] },
   ))
   ipcMain.handle('online:libraryPlaylistTracks', (_, id, force) => {
-    if (!/^[\\w.-]{1,120}$/.test(String(id || '')) || String(id).startsWith('RD'))
+    if (!/^[A-Za-z0-9_.-]{1,120}$/.test(String(id || '')) || String(id).startsWith('RD'))
       return { tracks: [], error: 'Invalid YouTube Music playlist id.' }
     return youtubeLibraryResource(
       `libraryPlaylist:${id}`, !!force,
