@@ -10,6 +10,8 @@ on:
       - 'src/api.js'
       - 'src/pages/Home.jsx'
       - 'src/recommendations.js'
+      - 'src/onlineAddonHealth.mjs'
+      - 'scripts/http-addon-auto-fallback.test.mjs'
       - 'src/App.jsx'
       - 'src/audio/addonPlaybackOutputKey.mjs'
       - 'scripts/addon-verification-playback.test.mjs'
@@ -40,7 +42,7 @@ jobs:
           node --check electron/artwork/spotify.js
           node --check electron/ipc/spotifyLikes.js
           node --check electron/preload.js
-          node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs
+          node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs scripts/http-addon-auto-fallback.test.mjs
       - name: Preserve playing song through addon verification refresh
         run: node --test scripts/addon-verification-playback.test.mjs
       - name: Compile desktop Discovery UI
