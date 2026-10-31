@@ -10,6 +10,9 @@ on:
       - 'src/api.js'
       - 'src/pages/Home.jsx'
       - 'src/recommendations.js'
+      - 'src/App.jsx'
+      - 'src/audio/addonPlaybackOutputKey.mjs'
+      - 'scripts/addon-verification-playback.test.mjs'
       - 'src/recommendationSession.js'
       - 'src/discoveryShelfLayout.mjs'
       - 'src/components/DiscoveryShelfEditor.jsx'
@@ -38,5 +41,7 @@ jobs:
           node --check electron/ipc/spotifyLikes.js
           node --check electron/preload.js
           node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs
+      - name: Preserve playing song through addon verification refresh
+        run: node --test scripts/addon-verification-playback.test.mjs
       - name: Compile desktop Discovery UI
         run: npx vite build
