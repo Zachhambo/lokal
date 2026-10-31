@@ -1984,6 +1984,19 @@ activeCategory === 'data' ? usersTried
       )}
 
       {api.isElectron && inCategory('integrations') && (
+      <Section title={t("YouTube Music Playlists")}>
+        <Row label={t("Auto-update YouTube Music playlists")} desc={t("Saved YouTube Music playlists and songs are kept locally. When enabled, refresh a cached list at most once every 24 hours on opening it. When off, only the first load or Update contacts YouTube Music.")}>
+          <button type="button"
+            onClick={() => set('youtube_playlist_auto_update', settings.youtube_playlist_auto_update === '1' ? '0' : '1')}
+            aria-pressed={settings.youtube_playlist_auto_update === '1'}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.youtube_playlist_auto_update === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {settings.youtube_playlist_auto_update === '1' ? t('On') : t('Off')}
+          </button>
+        </Row>
+      </Section>
+      )}
+
+      {api.isElectron && inCategory('integrations') && (
       <Section title={t("Spotify")}>
         <Row id="spotify-cookie-settings" stacked label={t("Spotify Cookie")} desc={"Your Spotify sign-in, for Liked Songs here and Spotify Canvas covers: open open.spotify.com in your browser and sign in, press F12, go to Application (Storage in Firefox) › Cookies › open.spotify.com, and copy the value of sp_dc. It lasts about a year.\n\nIt stays on this computer and is only sent to Spotify."}>
           <div className="flex flex-wrap items-center gap-2">
