@@ -24,8 +24,11 @@ export function createHttpAddonHealth({ cooldownMs = AUTOMATIC_HTTP_COOLDOWN_MS,
       if (!isHttpAddonSource(source)) return false
       const until = blocked.get(source.id) || 0
       if (until <= now()) { blocked.delete(source.id); return false }
-      return sources.some(other => other.id !== source.id &&
-        (!isHttpAddonSource(other) || (blocked.get(other.id) || 0) <= now()))
+      const eligible = sources.filter(other =>
+        !isHttpAddonSource(other) || (blocked.get(other.id) || 0) <= now())
+      if (eligible.length) return true
+      // If every source is cooling, retry only the highest-priority one.
+      return sources.find(other => isHttpAddonSource(other))?.id !== source.id
     },
     failed(source, error) {
       if (!isHttpAddonSource(source)) return
