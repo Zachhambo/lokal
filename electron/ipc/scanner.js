@@ -590,7 +590,18 @@ async function scanFolder(folderPath, {
           fs.existsSync(existingArtwork)
         const hasCurrentFolderArtwork = folderArtwork && existingArtwork === path.resolve(folderArtwork)
         const noArtworkToUpdate = !existingArtwork && !folderArtwork
-        if (hasCachedArtwork || hasCurrentFolderArtwork || noArtworkToUpdate) {
+        if (hasCurrentFolderArtwork) {
+          // Previously indexed SMB/WebDAV folders may still point directly at
+          // their mount path. Migrate those unchanged rows to app-owned art
+          // without re-reading/retagging the original audio file.
+          const durable = await getDurableFolderArtwork(folderArtwork)
+          if (durable) {
+            db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
+              .run(durable, filePath)
+          }
+          scanStatus.done++; emitProgress(); continue
+        }
+        if (hasCachedArtwork || noArtworkToUpdate) {
           scanStatus.done++; emitProgress(); continue
         }
       }
