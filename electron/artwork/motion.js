@@ -295,7 +295,6 @@ function run(ffmpeg, args, timeoutMs = 120000) {
 async function chooseVariant(masterUrl, {
   target = 768,
   highResolution = false,
-  hevcSupported = false,
 } = {}) {
   const text = await getText(masterUrl)
   const lines = text.split(/\r?\n/)
@@ -315,25 +314,20 @@ async function chooseVariant(masterUrl, {
   const area = variant => variant.width * variant.height
   const eligible = variants.filter(v => Math.min(v.width, v.height) >= target)
   if (highResolution) {
-    if (hevcSupported) {
-      const hevc2160 = eligible
-        .filter(v => v.codec === 'hevc' && Math.min(v.width, v.height) >= 2160)
-        .sort((a, b) => area(a) - area(b))
-      if (hevc2160.length) return hevc2160[0].uri
-    }
+    const hevc2160 = eligible
+      .filter(v => v.codec === 'hevc' && Math.min(v.width, v.height) >= 2160)
+      .sort((a, b) => area(a) - area(b))
+    if (hevc2160.length) return hevc2160[0].uri
     const h264 = eligible.filter(v => v.codec === 'h264')
     const bestH264 = h264.sort((a, b) => area(b) - area(a))[0]
     if (bestH264) return bestH264.uri
-    if (hevcSupported) {
-      const hevc = eligible.filter(v => v.codec === 'hevc').sort((a, b) => area(b) - area(a))[0]
-      if (hevc) return hevc.uri
-    }
+    const hevc = eligible.filter(v => v.codec === 'hevc').sort((a, b) => area(b) - area(a))[0]
+    if (hevc) return hevc.uri
   }
   const h264 = eligible.filter(v => v.codec === 'h264')
-  const preferred = h264.length ? h264 : (hevcSupported ? eligible.filter(v => v.codec === 'hevc') : [])
-  const chosen = preferred.sort((a, b) => area(a) - area(b))[0]
+  const chosen = (h264.length ? h264 : eligible.filter(v => v.codec === 'hevc')).sort((a, b) => area(a) - area(b))[0]
     || variants.filter(v => v.codec === 'h264').sort((a, b) => area(b) - area(a))[0]
-    || (hevcSupported ? variants.sort((a, b) => area(b) - area(a))[0] : null)
+    || variants.sort((a, b) => area(b) - area(a))[0]
   return chosen?.uri || masterUrl
 }
 
@@ -361,9 +355,9 @@ function trimCache(dir, keep) {
 const inFlight = new Map()
 
 /** The clip as an MP4 file in the cache (fetched/remuxed once). */
-async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false, hevcSupported = false }) {
+async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false }) {
   fs.mkdirSync(cacheDir, { recursive: true })
-  const cacheKey = `${found.url}|${highResolution ? 'high' : 'default'}|${hevcSupported ? 'hevc' : 'h264'}`
+  const cacheKey = `${found.url}|${highResolution ? 'high' : 'default'}`
   const dest = path.join(cacheDir, crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 20) + '.mp4')
   if (fs.existsSync(dest)) {
     try { const now = new Date(); fs.utimesSync(dest, now, now) } catch {}
@@ -374,7 +368,7 @@ async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false, hev
     const temp = `${dest}.part.mp4`
     try {
       if (found.kind === 'hls') {
-        const variant = await chooseVariant(found.url, { highResolution, hevcSupported })
+        const variant = await chooseVariant(found.url, { highResolution })
         await run(ffmpeg, ['-hide_banner', '-nostdin', '-y', '-i', variant, '-map', '0:v:0', '-c', 'copy', '-an', '-movflags', '+faststart', temp])
       } else {
         await download(found.url, temp)
@@ -454,8 +448,7 @@ async function motionCoverFor(db, track, { settings = {}, cacheDir, ffmpeg } = {
   }
   if (!found) return null
   const highResolution = settings.high_resolution_motion_covers === '1'
-  const hevcSupported = settings.motion_cover_hevc_supported === true
-  const file = await cachedClip(found, { cacheDir, ffmpeg, highResolution, hevcSupported })
+  const file = await cachedClip(found, { cacheDir, ffmpeg, highResolution })
   return file ? { file, source: found.source, tall: !!found.tall } : null
 }
 

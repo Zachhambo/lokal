@@ -15,17 +15,13 @@ const playlist = [
   '2160-avc.m3u8',
 ].join('\n')
 
-test('high-resolution moving covers prefer 2160p HEVC when the player supports it', async () => {
+test('high-resolution moving covers prefer 2160p HEVC without capability detection', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => ({ ok: true, text: async () => playlist })
   try {
     assert.equal(
-      await chooseVariant('https://example.test/master.m3u8', { highResolution: true, hevcSupported: true }),
+      await chooseVariant('https://example.test/master.m3u8', { highResolution: true }),
       'https://example.test/2160-hevc.m3u8',
-    )
-    assert.equal(
-      await chooseVariant('https://example.test/master.m3u8', { highResolution: true, hevcSupported: false }),
-      'https://example.test/2160-avc.m3u8',
     )
     assert.equal(
       await chooseVariant('https://example.test/master.m3u8'),
