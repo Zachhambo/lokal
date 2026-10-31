@@ -152,8 +152,28 @@ function registerNetworkLibraryHandlers(ipcMain) {
       if (!current.some(x => x.toLowerCase() === folder.toLowerCase())) {
         current.push(folder)
       }
+      // A network share mounted on a drive letter or POSIX path looks like a
+      // local folder. Record explicitly connected roots so the scanner caches
+      // only *their* covers, never every local album's full-resolution art.
+      const db = getDB()
+      const setting = db.prepare("SELECT value FROM settings WHERE key = 'network_music_folders'").get()?.value
+      let roots = []
+      try {
+        const saved = JSON.parse(setting || '[]')
+        if (Array.isArray(saved)) roots = saved.filter(x => typeof x === 'string')
+      } catch {}
+      if (!roots.some(x => path.resolve(x).toLowerCase() === path.resolve(folder).toLowerCase())) {
+        roots.push(folder)
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('network_music_folders', ?)").run(JSON.stringify(roots))
+      const restore = () => {
+        if (setting == null) db.prepare("DELETE FROM settings WHERE key = 'network_music_folders'").run()
+        else db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('network_music_folders', ?)").run(setting)
+      }
       progress(event, true)
-      const result = await run(current)
+      let result
+      try { result = await run(current) } catch (error) { restore(); throw error }
+      if (result?.error) restore()
       progress(event, false, result.status)
       return result
     } catch (error) {
