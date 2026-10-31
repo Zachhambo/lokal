@@ -106,7 +106,11 @@ function motionCacheDir() {
 async function motionForTrack(trackId, ffmpeg) {
   const track = trackRow(trackId)
   if (!track) return null
-  return motionCoverFor(getDB(), track, { settings: settingsMap(), cacheDir: motionCacheDir(), ffmpeg })
+  return motionCoverFor(getDB(), track, {
+    settings: settingsMap(),
+    cacheDir: motionCacheDir(),
+    ffmpeg,
+  })
 }
 
 /** Settings' Spotify "Save & Test", with the cookie as saved. */

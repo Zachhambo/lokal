@@ -243,7 +243,7 @@ Know what you're actually listening to:
 
 - **Full-screen player** in the style of Apple Music: the cover with its controls, which hide when you stop moving the mouse, or full-screen lyrics; switch with one click. **Double-click the cover to like** the song. The computer doesn't go to sleep while it's open.
 - **Side panel:** the song's details, lyrics and queue, with one row of buttons for full screen, lyrics, its music video and its canvas.
-- **Canvas covers:** looping video covers from Apple Music, Tidal, community lists or Spotify Canvas (*Spotify needs your own account cookie*).
+- **Canvas covers:** looping video covers from Apple Music, Tidal, community lists or Spotify Canvas (*Spotify needs your own account cookie*). Enable **High-resolution Moving Covers** in Settings to prefer 2160p where available; HEVC is used only when supported by your system.
 - **Colour backdrop** taken from the cover.
 - **Glass player bar:** the player floats over the pages, which scroll on underneath it, frosted. Switch it off (or the waveform next to the volume) in Settings → Appearance → Player Bar.
 - **Audio output picker** in the player bar, to send the music to another device (headphones, speakers, an interface).
