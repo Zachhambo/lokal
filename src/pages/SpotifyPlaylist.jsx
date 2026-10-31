@@ -9,28 +9,33 @@ import { showLoadingToast } from '../components/Toaster'
 
 /** A read-only view of the saved Spotify playlist, resolved using Lokal's
  * configured local and online playback sources, not Spotify audio streams. */
-export default function SpotifyPlaylist() {
+export default function SpotifyPlaylist({ provider = 'spotify' }) {
   const { id } = useParams()
   const [playlist, setPlaylist] = useState({ title: '', tracks: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
-  const valid = /^[A-Za-z0-9]{22}$/.test(id || '')
+  const youtube = provider === 'youtube'
+  const label = youtube ? 'YouTube Music' : 'Spotify'
+  const valid = youtube ? /^[\\w.-]{1,120}$/.test(id || '') : /^[A-Za-z0-9]{22}$/.test(id || '')
 
   useEffect(() => {
-    if (!valid) { setError('Invalid Spotify playlist.'); setLoading(false); return }
+    if (!valid) { setError(`Invalid ${label} playlist.`); setLoading(false); return }
     let active = true
     setPlaylist({ title: '', tracks: [] })
     setLoading(true)
     setError('')
     const load = async (force = false) => {
       try {
-        const result = await api.spotifyLibraryPlaylistTracks(`spotify:playlist:${id}`, force)
+        const result = youtube ? await api.youtubeLibraryPlaylistTracks(id, force)
+          : await api.spotifyLibraryPlaylistTracks(`spotify:playlist:${id}`, force)
         if (!active) return
         if (result?.tracks) setPlaylist({
-          title: result?.title || 'Spotify playlist',
+          title: result?.title || `${label} playlist`,
           tracks: result.tracks.map((row, i) => ({
-            ...row, id: row.spotifyUri || `spotify-row:${id}:${i}`,
+            ...row, id: row.spotifyUri || row.videoId || row.id || `${provider}-row:${id}:${i}`,
+            artist: row.artist || row.author || '',
+            artwork_url: row.artwork_url || row.thumbnail || '',
           })),
         })
         setError(result?.error || '')
@@ -43,12 +48,12 @@ export default function SpotifyPlaylist() {
     }
     void load(revision > 0)
     return () => { active = false }
-  }, [id, revision, valid])
+  }, [id, revision, valid, youtube, provider, label])
 
-  const context = { type: 'discovery', name: playlist.title || 'Spotify playlist' }
+  const context = { type: 'discovery', name: playlist.title || `${label} playlist` }
   const playAll = async () => {
     if (!playlist.tracks.length) return
-    const toast = showLoadingToast('Preparing Spotify playlist…')
+    const toast = showLoadingToast(`Preparing ${label} playlist…`)
     try {
       const started = await playRecommendationPool(playlist.tracks, {
         firstPlayable: true, context, returnAfterStart: true,
@@ -63,8 +68,8 @@ export default function SpotifyPlaylist() {
         <div className="flex min-w-0 items-center gap-3">
           <ListMusic size={28} className="shrink-0 text-accent" />
           <div className="min-w-0">
-            <p className="text-xs font-display uppercase tracking-widest text-muted">Spotify playlist</p>
-            <h1 className="truncate text-2xl font-semibold text-white">{playlist.title || 'Spotify playlist'}</h1>
+            <p className="text-xs font-display uppercase tracking-widest text-muted">{label} playlist</p>
+            <h1 className="truncate text-2xl font-semibold text-white">{playlist.title || `${label} playlist`}</h1>
             {!loading && !error && <p className="text-xs text-muted">{playlist.tracks.length} songs available in this view · Played through Lokal sources</p>}
           </div>
         </div>
@@ -78,7 +83,7 @@ export default function SpotifyPlaylist() {
           </button>
         </div>
       </div>
-      {loading ? <p className="py-10 text-center text-sm text-muted">Loading Spotify playlist…</p>
+      {loading ? <p className="py-10 text-center text-sm text-muted">Loading playlist…</p>
         : error ? <p className="py-10 text-center text-sm text-muted" role="alert">{error}</p>
         : playlist.tracks.length
           ? <TrackList tracks={playlist.tracks} resolveTracks={(rows, options) => resolveRecommendationTracks(rows, api, options)} context={context} reduceMotion />
