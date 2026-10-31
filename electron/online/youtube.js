@@ -381,7 +381,7 @@ function parseAccountPlaylists(root, limit = 100) {
   walkObjects(root, node => {
     const renderer = node.gridPlaylistRenderer || node.musicTwoRowItemRenderer || node.musicResponsiveListItemRenderer
     if (!renderer || playlists.length >= limit) return
-    const titleNavigation = renderer.title?.runs?.find(run => run.navigationEndpoint)?.navigationEndpoint
+    const titleNavigation = renderer.title?.runs?.find(run => run.navigationEndpoint)?.navigationEndpoint || columnRuns(renderer, 0).find(run => run.navigationEndpoint)?.navigationEndpoint
     const play = (renderer.thumbnailOverlay || renderer.overlay)?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint
     const navigations = [titleNavigation, renderer.navigationEndpoint, renderer.onTap, play].filter(Boolean)
     const browse = navigations.find(navigation => navigation.browseEndpoint?.browseId)?.browseEndpoint
