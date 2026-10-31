@@ -192,7 +192,7 @@ export async function searchHttpAddonWithinBudget(source, candidate, client, {
   for (const query of recommendationQueries(candidate)) {
     const remaining = deadline - now()
     if (remaining <= 0) throw new Error('HTTP addon lookup timed out')
-    const response = await timed(() => client.onlineSearch(query, source.id), remaining, 'HTTP addon lookup timed out')
+    const response = await timed(() => client.onlineSearch(query, source.id, { automatic: true }), remaining, 'HTTP addon lookup timed out')
     if (response?.error) return { match: null, error: response.error }
     const match = recommendationMatch(candidate, response?.results, { provider: source.id })
     if (match) return { match, error: '' }
@@ -221,14 +221,14 @@ export function playbackFallbackMessage({ candidate, source, nextSource, reason,
 
 // Search metadata alone cannot tell whether a full stream is available (in
 // particular, SoundCloud may only report its Go+ preview during resolution).
-export async function playbackAvailability(match, provider, client = api, timeoutMs = 35000, onError = () => {}, onProgress = () => {}, { packageAddon = /^a-/.test(provider) } = {}) {
+export async function playbackAvailability(match, provider, client = api, timeoutMs = 35000, onError = () => {}, onProgress = () => {}, { packageAddon = /^a-/.test(provider), automatic = false } = {}) {
   if (match.preview) return 'preview'
   if (typeof client.onlinePrepare !== 'function') return null
   const controller = new AbortController()
   let prepared
   let completed = false
   try {
-    prepared = await timed(() => client.onlinePrepare(provider, String(match.id), false, { signal: controller.signal, onProgress }), packageAddon && /^a-/.test(provider) ? Math.max(timeoutMs, 15 * 60 * 1000) : timeoutMs, 'Audio preparation timed out. Try again.')
+    prepared = await timed(() => client.onlinePrepare(provider, String(match.id), false, { signal: controller.signal, onProgress, automatic }), packageAddon && /^a-/.test(provider) ? Math.max(timeoutMs, 15 * 60 * 1000) : timeoutMs, 'Audio preparation timed out. Try again.')
     completed = true
   } catch (error) {
     onError(error?.message || error)
@@ -388,7 +388,7 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
               match, source.id, client, httpPrepareBudget,
               message => { detail = message },
               status => { if (isCurrent()) onPreparationProgress?.({ source, candidate, status }) },
-              { packageAddon: source.package === true },
+              { packageAddon: source.package === true, automatic: quickHttp },
             ) : null
             if (!isCurrent()) return null
             if (unavailable) {
