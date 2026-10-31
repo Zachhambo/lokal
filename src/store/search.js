@@ -17,12 +17,11 @@ const readCategory = () => {
   try { return normalizeResultCategory(localStorage.getItem(CATEGORY_KEY)) }
   catch { return 'songs' }
 }
-// Retired All-source selections migrate to Library; the category-type All
-// still remains. Explicit Online survives upgrades.
+// Restore All as a source scope; keep older Library and Online preferences.
 const readScope = () => {
   try {
     const saved = localStorage.getItem(SCOPE_KEY)
-    if (saved === 'library' || saved === 'online') return saved
+    if (saved === 'all' || saved === 'library' || saved === 'online') return saved
     return 'library'
   } catch { return 'library' }
 }
