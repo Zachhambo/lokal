@@ -613,12 +613,12 @@ async function scanFolder(folderPath, {
       // Prefer an app-owned copy of the folder cover: UNC/WebDAV paths may
       // disappear when the NAS sleeps. Preserve any existing readable artwork
       // when transient server failures prevent a new extraction.
-      const localFolderArtwork = await getDurableFolderArtwork(folderArtwork)
-      const extracted = await extractArtwork(
-        meta, trackId, localFolderArtwork || folderArtwork)
-      const artwork = extracted ||
-        (existing?.artwork_path && fs.existsSync(existing.artwork_path)
-          ? existing.artwork_path : null)
+      const localFolderArtwork = meta.common.picture?.length
+        ? null : await getDurableFolderArtwork(folderArtwork)
+      const previousArtwork = existing?.artwork_path && fs.existsSync(existing.artwork_path)
+        ? existing.artwork_path : null
+      const artwork = await extractArtwork(
+        meta, trackId, localFolderArtwork || previousArtwork || folderArtwork)
       const replaygain = c.replaygain_track_gain || null
       const audioQuality = quality.qualityFields(meta)
       audioQuality.atmos_verified = await quality.probeAtmosFile(filePath, { codec: audioQuality.codec })
