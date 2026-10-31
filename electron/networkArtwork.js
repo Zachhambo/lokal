@@ -6,6 +6,45 @@ const crypto = require('node:crypto')
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_FOLDER_COVER_BYTES = 12 * 1024 * 1024
+
+// List rows retain their shared 150px WebP thumbnail, while large surfaces
+// recover the untouched folder image beside it. Only our hashed cache names
+// are eligible; never derive a source path from renderer-controlled input.
+const FOLDER_THUMBNAIL = /^nas-folder-[a-f0-9]{24}\.webp$/i
+const FULL_COVER_EXTS = ['.jpg', '.png', '.webp', '.gif']
+function folderOriginalCandidates(thumbnailPath) {
+  if (!FOLDER_THUMBNAIL.test(path.basename(String(thumbnailPath || '')))) return []
+  const base = path.basename(thumbnailPath, '.webp')
+  return FULL_COVER_EXTS.map(ext => path.join(path.dirname(thumbnailPath), base + '.full' + ext))
+}
+const hasFolderOriginal = thumbnailPath =>
+  folderOriginalCandidates(thumbnailPath).some(file => require('node:fs').existsSync(file))
+
+function fullCoverExtension(bytes) {
+  if (bytes?.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return '.jpg'
+  if (bytes?.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return '.png'
+  if (bytes?.length >= 12 && bytes.toString('latin1', 0, 4) === 'RIFF' && bytes.toString('latin1', 8, 12) === 'WEBP') return '.webp'
+  if (bytes?.length >= 6 && bytes.toString('latin1', 0, 4) === 'GIF8') return '.gif'
+  return null
+}
+async function preserveOriginalFolderCover(artworkDir, base, bytes) {
+  const ext = fullCoverExtension(bytes)
+  if (!ext) return null
+  const destination = path.join(artworkDir, base + '.full' + ext)
+  try {
+    const existing = await fs.stat(destination)
+    if (existing.isFile() && existing.size === bytes.length) return destination
+  } catch {}
+  await fs.mkdir(artworkDir, { recursive: true })
+  const temp = destination + '.' + process.pid + '.' + crypto.randomBytes(4).toString('hex') + '.tmp'
+  try {
+    await fs.writeFile(temp, bytes)
+    await fs.rename(temp, destination)
+  } finally {
+    await fs.rm(temp, { force: true }).catch(() => {})
+  }
+  return destination
+}
 const MAX_OUTSTANDING_COVER_READS = 4
 const COVER_READ_CHUNK_BYTES = 64 * 1024
 let outstandingCoverReads = 0
@@ -128,7 +167,14 @@ async function cacheFolderArtwork(sourcePath, artworkDir, {
     ])
     clearTimeout(timer)
     if (!result) return null
-    return await writeCover(artworkDir, 'nas-folder-' + result.key, result.bytes)
+    const base = 'nas-folder-' + result.key
+    const thumbnail = await writeCover(artworkDir, base, result.bytes)
+    // Older installations may already have the thumbnail but not the source.
+    // Repair their full-resolution art the next time the folder is scanned,
+    // without changing what small library lists load.
+    try { await preserveOriginalFolderCover(artworkDir, base, result.bytes) }
+    catch { /* The thumbnail stays usable if the cache disk is read-only. */ }
+    return thumbnail
   } catch {
     return null
   } finally {
@@ -136,4 +182,4 @@ async function cacheFolderArtwork(sourcePath, artworkDir, {
   }
 }
 
-module.exports = { findFolderArtworkAsync, coverPriority, cacheFolderArtwork }
+module.exports = { findFolderArtworkAsync, coverPriority, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal }
