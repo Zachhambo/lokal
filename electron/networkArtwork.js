@@ -2,12 +2,16 @@
 
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const crypto = require('node:crypto')
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_FOLDER_COVER_BYTES = 12 * 1024 * 1024
 
 function coverPriority(name) {
-  const stem = path.parse(name).name.toLowerCase().replace(/[\s_-]+/g, '')
+  // Match mobile's cover.1.jpg / folder.2.png aliases as well as the
+  // usual cover.jpg names. Never select a random multi-image booklet.
+  const stem = path.parse(name).name.toLowerCase()
+    .replace(/\.[0-9]+$/, '').replace(/[\s_-]+/g, '')
   return ['cover', 'folder', 'front', 'albumart', 'album', 'art'].indexOf(stem)
 }
 
@@ -61,4 +65,33 @@ async function findFolderArtworkAsync(folder, {
   return null
 }
 
-module.exports = { findFolderArtworkAsync, coverPriority }
+
+/**
+ * Persist the cover of a mounted SMB/WebDAV folder into app-owned artwork
+ * storage. Renderer thumbnails should not depend on a UNC mount remaining
+ * reachable after the initial scan, and multiple tracks share one cache file.
+ * Fail closed to the old path: a transient offline share must not erase art.
+ */
+async function cacheFolderArtwork(sourcePath, artworkDir, {
+  stat = fs.stat,
+  readFile = fs.readFile,
+  writeCover = require('./artwork/thumb').writeCover,
+  timeoutMs = 8000,
+} = {}) {
+  if (!sourcePath) return null
+  const { withTimeout } = require('./ipc/networkLibrary')
+  try {
+    const info = await withTimeout(stat, timeoutMs)(sourcePath)
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_FOLDER_COVER_BYTES) return null
+    const key = crypto.createHash('sha256')
+      .update(String(sourcePath) + ':' + info.size + ':' + info.mtimeMs)
+      .digest('hex').slice(0, 24)
+    const bytes = await withTimeout(readFile, timeoutMs)(sourcePath)
+    if (!bytes?.length || bytes.length > MAX_FOLDER_COVER_BYTES) return null
+    return await writeCover(artworkDir, 'nas-folder-' + key, bytes)
+  } catch {
+    return null
+  }
+}
+
+module.exports = { findFolderArtworkAsync, coverPriority, cacheFolderArtwork }
