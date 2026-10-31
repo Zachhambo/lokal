@@ -20,20 +20,28 @@ export default function SpotifyPlaylist() {
   useEffect(() => {
     if (!valid) { setError('Invalid Spotify playlist.'); setLoading(false); return }
     let active = true
+    setPlaylist({ title: '', tracks: [] })
     setLoading(true)
     setError('')
-    // Force the IPC cache on explicit refresh only.
-    api.spotifyLibraryPlaylistTracks(`spotify:playlist:${id}`, revision > 0).then(result => {
-      if (!active) return
-      if (result?.error) { setError(result.error); setPlaylist({ title: '', tracks: [] }) }
-      else setPlaylist({
-        title: result?.title || 'Spotify playlist',
-        tracks: (result?.tracks || []).map((row, i) => ({
-          ...row, id: row.spotifyUri || `spotify-row:${id}:${i}`,
-        })),
-      })
-    }).catch(err => { if (active) setError(err.message || 'Could not load this playlist.') })
-      .finally(() => { if (active) setLoading(false) })
+    const load = async (force = false) => {
+      try {
+        const result = await api.spotifyLibraryPlaylistTracks(`spotify:playlist:${id}`, force)
+        if (!active) return
+        if (result?.tracks) setPlaylist({
+          title: result?.title || 'Spotify playlist',
+          tracks: result.tracks.map((row, i) => ({
+            ...row, id: row.spotifyUri || `spotify-row:${id}:${i}`,
+          })),
+        })
+        setError(result?.error || '')
+        // A cached view paints first. If the user enabled daily updates,
+        // quietly refresh outdated content after it is already available.
+        if (!force && result?.refreshDue) void load(true)
+      } catch (err) {
+        if (active) setError(err.message || 'Could not load this playlist.')
+      } finally { if (active) setLoading(false) }
+    }
+    void load(revision > 0)
     return () => { active = false }
   }, [id, revision, valid])
 
