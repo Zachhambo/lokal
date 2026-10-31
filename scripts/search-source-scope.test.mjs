@@ -4,11 +4,12 @@ import { readFileSync } from 'node:fs'
 import { SEARCH_SCOPES, normalizeSearchScope, searchesLibrary, searchesOnline, scopeDescription } from '../src/searchScope.mjs'
 import { SEARCH_RESULT_CATEGORIES, normalizeResultCategory, includesResultCategory, mergeSearchArtists, mergeSearchAlbums } from '../src/searchResultCategory.mjs'
 
-test('source scope is exclusive and defaults safely to Library', () => {
-  assert.deepEqual(SEARCH_SCOPES, ['library', 'online'])
+test('source scope supports combined All and defaults safely to Library', () => {
+  assert.deepEqual(SEARCH_SCOPES, ['all', 'library', 'online'])
   assert.equal(normalizeSearchScope(null), 'library')
   assert.equal(normalizeSearchScope('library'), 'library')
   assert.equal(normalizeSearchScope('online'), 'online')
+  assert.equal(normalizeSearchScope('all'), 'all')
   assert.equal(normalizeSearchScope('incorrect'), 'library')
 })
 
@@ -16,10 +17,12 @@ test('source scope selects which catalogues actually run', () => {
   assert.deepEqual(SEARCH_SCOPES.map(scope => [
     scope, searchesLibrary(scope), searchesOnline(scope),
   ]), [
+    ['all', true, true],
     ['library', true, false],
     ['online', false, true],
   ])
   assert.match(scopeDescription('online'), /online catalogues/i)
+  assert.match(scopeDescription('all'), /library and online/i)
 })
 
 test('desktop search applies scope to both querying and rendered result sections', () => {
@@ -45,6 +48,8 @@ test('desktop search applies scope to both querying and rendered result sections
   assert.doesNotMatch(header, /setOnline\(!online\)/)
   assert.match(store, /lokal-search-scope/)
   assert.match(store, /online: searchesOnline\(initialScope\)/)
+  assert.match(store, /saved === 'all'/)
+  assert.match(page, /value === 'all' \? 'All'/)
   assert.match(online, /showLibraryHint \? t\(' · not in your library'\) : ''/)
   assert.match(page, /showLibraryHint=\{scope !== 'online'\}/)
   assert.match(page, /setResultCategory\('songs'\)/) // Find on source resets subfilter
