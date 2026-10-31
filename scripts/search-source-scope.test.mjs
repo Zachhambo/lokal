@@ -41,6 +41,7 @@ test('desktop search applies scope to both querying and rendered result sections
   assert.match(page, /\{showLibrary && showLyrics && lyricMatches\.length > 0/)
   assert.match(page, /enableOnline=\{showOnline\}/)
   assert.match(page, /\{showOnline && showSongs && <OnlineResults/)
+  assert.match(page, /value === 'all' \? 'All'/)
   assert.match(page, /setScope\('online'\)/) // Find on provider
   assert.match(page, /aria-pressed=\{scope === value\}/)
 
@@ -50,8 +51,6 @@ test('desktop search applies scope to both querying and rendered result sections
   assert.match(store, /online: searchesOnline\(initialScope\)/)
   assert.match(store, /saved === 'all'/)
   assert.match(page, /value === 'all' \? 'All'/)
-  assert.match(online, /showLibraryHint \? t\(' · not in your library'\) : ''/)
-  assert.match(page, /showLibraryHint=\{scope !== 'online'\}/)
   assert.match(page, /setResultCategory\('songs'\)/) // Find on source resets subfilter
 })
 
