@@ -14,7 +14,7 @@ const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
 const { getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
-const { findFolderArtworkAsync, cacheFolderArtwork } = require('../networkArtwork')
+const { findFolderArtworkAsync, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal } = require('../networkArtwork')
 const { getDB, getStorageDir, importAppData, resetAppData } = require('./db')
 const { ipcMain } = require('electron')
 const { emitPluginHook } = require('./plugins')
@@ -602,6 +602,19 @@ async function scanFolder(folderPath, {
           scanStatus.done++; emitProgress(); continue
         }
         if (hasCachedArtwork || noArtworkToUpdate) {
+          // Previously scanned folder covers may have only their tiny shared
+          // WebP. Rebuild the missing full-resolution companion on refresh,
+          // without re-parsing or re-tagging unchanged audio files. The
+          // scanner already memoizes each folder read for all its tracks.
+          if (hasCachedArtwork && folderArtwork &&
+              folderOriginalCandidates(existingArtwork).length &&
+              !hasFolderOriginal(existingArtwork)) {
+            const durable = await getDurableFolderArtwork(folderArtwork)
+            if (durable && durable !== existing.artwork_path) {
+              db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
+                .run(durable, filePath)
+            }
+          }
           scanStatus.done++; emitProgress(); continue
         }
       }
