@@ -1,6 +1,7 @@
 import { api } from './api.js'
 import { DEFAULT_PLAYBACK_SOURCES, orderedPlaybackSources } from './playbackSources.js'
 import { isPlayable, providerLabel, streamRef } from './onlineTracks.js'
+import { AUTOMATIC_HTTP_BUDGET_MS, automaticHttpAddonHealth, isHttpAddonSource } from './onlineAddonHealth.mjs'
 
 export const recommendationKey = value => String(value || '').normalize('NFKD').replace(/(\p{Script=Latin})\p{M}+/gu, '$1').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim()
 export const songKey = track => `${recommendationKey(track?.artist)}\0${recommendationKey(track?.title)}`
@@ -180,6 +181,25 @@ export async function timed(work, ms = 15000, message = 'Provider lookup timed o
   } finally { clearTimeout(timer) }
 }
 
+/** Resolve the metadata queries for a single HTTP addon under one deadline.
+ * This is only used for automatic fallback; manual Search remains unrestricted.
+ * A provider result without a matching recording is a miss, not a failure.
+ */
+export async function searchHttpAddonWithinBudget(source, candidate, client, {
+  budgetMs = AUTOMATIC_HTTP_BUDGET_MS, now = Date.now,
+} = {}) {
+  const deadline = now() + budgetMs
+  for (const query of recommendationQueries(candidate)) {
+    const remaining = deadline - now()
+    if (remaining <= 0) throw new Error('HTTP addon lookup timed out')
+    const response = await timed(() => client.onlineSearch(query, source.id), remaining, 'HTTP addon lookup timed out')
+    if (response?.error) return { match: null, error: response.error }
+    const match = recommendationMatch(candidate, response?.results, { provider: source.id })
+    if (match) return { match, error: '' }
+  }
+  return { match: null, error: '' }
+}
+
 export async function playbackSources(client = api, timeoutMs = 15000) {
   const [settings, available] = await Promise.all([
     timed(() => client.getSettings(), timeoutMs).catch(() => ({})),
@@ -201,14 +221,14 @@ export function playbackFallbackMessage({ candidate, source, nextSource, reason,
 
 // Search metadata alone cannot tell whether a full stream is available (in
 // particular, SoundCloud may only report its Go+ preview during resolution).
-export async function playbackAvailability(match, provider, client = api, timeoutMs = 35000, onError = () => {}, onProgress = () => {}) {
+export async function playbackAvailability(match, provider, client = api, timeoutMs = 35000, onError = () => {}, onProgress = () => {}, { packageAddon = /^a-/.test(provider) } = {}) {
   if (match.preview) return 'preview'
   if (typeof client.onlinePrepare !== 'function') return null
   const controller = new AbortController()
   let prepared
   let completed = false
   try {
-    prepared = await timed(() => client.onlinePrepare(provider, String(match.id), false, { signal: controller.signal, onProgress }), /^a-/.test(provider) ? Math.max(timeoutMs, 15 * 60 * 1000) : timeoutMs, 'Audio preparation timed out. Try again.')
+    prepared = await timed(() => client.onlinePrepare(provider, String(match.id), false, { signal: controller.signal, onProgress }), packageAddon && /^a-/.test(provider) ? Math.max(timeoutMs, 15 * 60 * 1000) : timeoutMs, 'Audio preparation timed out. Try again.')
     completed = true
   } catch (error) {
     onError(error?.message || error)
@@ -293,7 +313,22 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
       // configured provider order. Only a real library file takes precedence.
       let row = rows.find(track => playableRecommendation(track) && !track.file_path.startsWith('ghost://') && songKey(track) === songKey(candidate) && matchingDuration(candidate, track))
       if (!row) {
+        // Warm at most three HTTP metadata lookups concurrently when a
+        // recommendation reaches those providers. Only actual playback
+        // follows saved priority; no audio is fetched speculatively.
+        const preparedHttp = new Map()
+        const warmHttp = index => {
+          for (const upcoming of sources.slice(index).filter(s => isHttpAddonSource(s)).slice(0, 3)) {
+            if (preparedHttp.has(upcoming.id) || automaticHttpAddonHealth.shouldSkip(upcoming, sources)) continue
+            preparedHttp.set(upcoming.id, searchHttpAddonWithinBudget(upcoming, candidate, client)
+              .catch(error => ({ match: null, error: String(error?.message || error) })))
+          }
+        }
         for (const [index, source] of sources.entries()) {
+          const quickHttp = isHttpAddonSource(source) && sources.length > 1 && !startFromProvider
+          if (quickHttp && automaticHttpAddonHealth.shouldSkip(source, sources)) continue
+          if (quickHttp) warmHttp(index)
+          const httpDeadline = quickHttp ? Date.now() + AUTOMATIC_HTTP_BUDGET_MS : null
           if (!isCurrent()) return null
           const failed = (reason, detail) => { if (isCurrent()) onProviderFailure?.({ candidate, source, nextSource: sources[index + 1], reason, ...(detail ? { detail } : {}) }) }
           let matchFound = false
@@ -302,7 +337,12 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
             if (isCurrent()) onProgress?.(`${direct ? 'Loading' : 'Searching'} ${source.label || providerLabel(source.id)} ${direct ? 'track' : 'for'} ${candidate.artist} — “${candidate.title}”…`)
             let match = direct ? { ...candidate, videoId, provider: 'yt', id: videoId } : null
             let searchError = ''
-            if (!direct) {
+            if (!direct && quickHttp) {
+              const result = await (preparedHttp.get(source.id) || searchHttpAddonWithinBudget(source, candidate, client))
+              match = result.match
+              searchError = result.error
+            }
+            if (!direct && !quickHttp) {
               const deadline = Date.now() + timeoutMs
               for (const query of recommendationQueries(candidate)) {
                 if (!isCurrent()) return null
@@ -334,6 +374,7 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
             if (searchError) {
               // A verification error from search does not prove this provider
               // has a match for the candidate. Keep looking without prompting.
+              if (quickHttp) automaticHttpAddonHealth.failed(source, searchError)
               failed('unavailable', searchError)
               continue
             }
@@ -341,14 +382,18 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
             if (!match) { failed('not-found'); continue }
             matchFound = true
             let detail
+            const httpPrepareBudget = quickHttp
+              ? Math.max(1, httpDeadline - Date.now()) : prepareTimeoutMs
             const unavailable = match.preview ? 'preview' : prepareStreams || source.id === 'sc' ? await playbackAvailability(
-              match, source.id, client, prepareTimeoutMs,
+              match, source.id, client, httpPrepareBudget,
               message => { detail = message },
               status => { if (isCurrent()) onPreparationProgress?.({ source, candidate, status }) },
+              { packageAddon: source.package === true },
             ) : null
             if (!isCurrent()) return null
             if (unavailable) {
               if (requiresAddonVerification(source.id, detail)) throw addonVerificationError(source.id, detail, candidate)
+              if (quickHttp) automaticHttpAddonHealth.failed(source, detail || unavailable)
               failed(unavailable, detail)
               continue
             }
@@ -357,11 +402,15 @@ export async function resolveRecommendationTracks(candidates, client = api, opti
             // saveOnlineTracks preserves order, including nulls, for all
             // providers (addon row IDs are hashed by the backend).
             row = Array.isArray(saved) && playableRecommendation(saved[0]) ? saved[0] : null
-            if (row) break
+            if (row) {
+              if (quickHttp) automaticHttpAddonHealth.succeeded(source)
+              break
+            }
             failed('unavailable')
           } catch (error) {
             if (matchFound && isAddonVerificationRequiredError(error)) throw error
             if (matchFound && requiresAddonVerification(source.id, error)) throw addonVerificationError(source.id, error, candidate)
+            if (quickHttp) automaticHttpAddonHealth.failed(source, error)
             failed('unavailable', error?.message)
           }
         }
