@@ -80,26 +80,37 @@ export default function Sidebar() {
   }
 
 
-  // Playlist metadata is retrieved in Electron; never expose the cookie or
-  // bearer token to the renderer. Refresh on an account-settings change.
+  // The main-process cache survives restarts. Auto-update is opt-in and
+  // at most daily; returning to the sidebar never fetches again by default.
   useEffect(() => {
     if (!api.isElectron) return
     let alive = true
+    let request = 0
     const load = async (force = false) => {
-      setSpotifyLoading(true)
+      const seq = ++request
+      if (force) setSpotifyLoading(true)
       try {
         const result = await api.spotifyLibraryPlaylists(force)
-        if (!alive) return
+        if (!alive || seq !== request) return
         setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
         setSpotifyError(result?.error || '')
+        // Populate from disk first, then perform one quiet due update.
+        if (!force && result?.refreshDue) void load(true)
       } catch (error) {
-        if (alive) { setSpotifyPlaylists([]); setSpotifyError(error.message || 'Could not load Spotify playlists.') }
-      } finally { if (alive) setSpotifyLoading(false) }
+        if (alive && seq === request) setSpotifyError(error.message || 'Could not load Spotify playlists.')
+      } finally {
+        if (alive && seq === request) setSpotifyLoading(false)
+      }
     }
-    load()
-    const refresh = () => load(true)
+    void load()
+    const refresh = () => { void load() } // settings edits are not forced resyncs
     window.addEventListener('lokal:settings-saved', refresh)
-    return () => { alive = false; window.removeEventListener('lokal:settings-saved', refresh) }
+    window.addEventListener('lokal:spotify-playlists-update', refresh)
+    return () => {
+      alive = false
+      window.removeEventListener('lokal:settings-saved', refresh)
+      window.removeEventListener('lokal:spotify-playlists-update', refresh)
+    }
   }, [])
 
   const refreshSpotifyPlaylists = async () => {
@@ -107,10 +118,14 @@ export default function Sidebar() {
     setSpotifyLoading(true)
     try {
       const result = await api.spotifyLibraryPlaylists(true)
-      setSpotifyPlaylists(Array.isArray(result?.playlists) ? result.playlists : [])
+      // Keep the cached list even when a manual update fails.
+      if (Array.isArray(result?.playlists)) setSpotifyPlaylists(result.playlists)
       setSpotifyError(result?.error || '')
-    } catch (error) { setSpotifyError(error.message || 'Could not load Spotify playlists.') }
-    finally { setSpotifyLoading(false) }
+    } catch (error) {
+      setSpotifyError(error.message || 'Could not refresh Spotify playlists.')
+    } finally {
+      setSpotifyLoading(false)
+    }
   }
 
   const loadPlaylists = () => {
