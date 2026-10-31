@@ -109,6 +109,12 @@ function registerSpotifyLikesHandlers(ipcMain) {
     try { return { playlists: await cached('libraryPlaylists', !!force, () => spotify.libraryPlaylists(settings().spotify_sp_dc)) } }
     catch (error) { return { playlists: [], error: error.message } }
   })
+  // Explicit user-library browsing allows longer playlists without
+  // increasing Home Discovery's 200-song mix limit.
+  ipcMain.handle('spotify:libraryPlaylistTracks', async (_, uri, force) => {
+    try { return await cached(`libraryPlaylist:${uri}`, !!force, () => spotify.playlistTracks(settings().spotify_sp_dc, String(uri || ''), { max: 1000 })) }
+    catch (error) { return { tracks: [], error: error.message } }
+  })
   ipcMain.handle('spotify:playlist', async (_, uri, force) => {
     try { return await cached(`playlist:${uri}`, !!force, () => spotify.playlistTracks(settings().spotify_sp_dc, String(uri || ''))) }
     catch (error) { return { tracks: [], error: error.message } }
