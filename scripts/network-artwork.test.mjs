@@ -7,7 +7,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 
 const require = createRequire(import.meta.url)
-const { findFolderArtworkAsync, coverPriority, cacheFolderArtwork } = require('../electron/networkArtwork')
+const { findFolderArtworkAsync, coverPriority, cacheFolderArtwork, folderOriginalCandidates, isNetworkArtworkPath, isCachedFolderArtwork } = require('../electron/networkArtwork')
 
 const file = name => ({ name, isFile: () => true })
 const stat = async () => ({ isFile: () => true, size: 64 * 1024 })
@@ -252,4 +252,43 @@ test('NAS artwork: timed-out reads retain global slots until they settle', async
     ...opts, open: async () => { opens++; throw new Error('offline') },
   }), null)
   assert.equal(opens, 5)
+})
+
+test('local folder covers stay original; UNC and explicitly connected mounts use durable cache', () => {
+  assert.equal(isNetworkArtworkPath('/music/Artist/Album/track.flac', [] , 'linux'), false)
+  assert.equal(isNetworkArtworkPath('C:\\Music\\Artist\\track.flac', [], 'win32'), false)
+  assert.equal(isNetworkArtworkPath('\\\\server\\share\\Album\\track.flac', [], 'win32'), true)
+  assert.equal(isNetworkArtworkPath('Z:\\Music\\Album\\track.flac', ['Z:\\Music'], 'win32'), true)
+  assert.equal(isNetworkArtworkPath('/mnt/nas/Album/track.flac', ['/mnt/nas'], 'linux'), true)
+  assert.equal(isNetworkArtworkPath('/mnt/nas-alias/track.flac', ['/mnt/nas'], 'linux'), false)
+  assert.equal(isNetworkArtworkPath('/music/Other/track.flac', ['/mnt/nas'], 'linux'), false)
+  assert.equal(isCachedFolderArtwork('/cache/nas-folder-1234567890abcdef12345678.webp'), true)
+  assert.equal(isCachedFolderArtwork('/cache/track.webp'), false)
+})
+
+test('NAS folder copy retains original JPG and PNG bytes alongside small list cache', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folder-original-'))
+  t.after(() => fs.rm(root, { recursive: true, force: true }))
+  const dir = path.join(root, 'artwork')
+  for (const [name, bytes] of [
+    ['cover.jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00])],
+    ['folder.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+  ]) {
+    const source = path.join(root, name)
+    await fs.writeFile(source, bytes)
+    const thumbnail = await cacheFolderArtwork(source, dir, {
+      writeCover: async (folder, base) => {
+        const target = path.join(folder, base + '.webp')
+        await fs.mkdir(folder, { recursive: true })
+        await fs.writeFile(target, Buffer.from('small thumbnail'))
+        return target
+      },
+    })
+    assert.ok(thumbnail.endsWith('.webp'))
+    const original = folderOriginalCandidates(thumbnail)
+      .find(candidate => candidate.endsWith('.full' + path.extname(name)))
+    assert.ok(original)
+    assert.deepEqual(await fs.readFile(original), bytes)
+    assert.equal((await fs.readFile(thumbnail)).toString(), 'small thumbnail')
+  }
 })
