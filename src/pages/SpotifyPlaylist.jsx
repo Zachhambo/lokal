@@ -16,6 +16,7 @@ export default function SpotifyPlaylist({ provider = 'spotify' }) {
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
   const forceNext = useRef(false)
+  const loadedKey = useRef('')
   const youtube = provider === 'youtube'
   const label = youtube ? 'YouTube Music' : 'Spotify'
   const valid = youtube ? /^[A-Za-z0-9_.-]{1,120}$/.test(id || '') : /^[A-Za-z0-9]{22}$/.test(id || '')
@@ -23,7 +24,11 @@ export default function SpotifyPlaylist({ provider = 'spotify' }) {
   useEffect(() => {
     if (!valid) { setError(`Invalid ${label} playlist.`); setLoading(false); return }
     let active = true
-    setPlaylist({ title: '', tracks: [] })
+    const key = `${provider}:${id}`
+    if (loadedKey.current !== key) {
+      setPlaylist({ title: '', tracks: [] })
+      loadedKey.current = key
+    }
     setLoading(true)
     setError('')
     const load = async (force = false) => {
@@ -86,8 +91,9 @@ export default function SpotifyPlaylist({ provider = 'spotify' }) {
           </button>
         </div>
       </div>
-      {loading ? <p className="py-10 text-center text-sm text-muted">Loading playlist…</p>
-        : error ? <p className="py-10 text-center text-sm text-muted" role="alert">{error}</p>
+      {error && playlist.tracks.length > 0 && <p className="text-xs text-muted" role="status">Update failed: {error}. Showing the saved playlist.</p>}
+      {loading && !playlist.tracks.length ? <p className="py-10 text-center text-sm text-muted">Loading playlist…</p>
+        : error && !playlist.tracks.length ? <p className="py-10 text-center text-sm text-muted" role="alert">{error}</p>
         : playlist.tracks.length
           ? <TrackList tracks={playlist.tracks} resolveTracks={(rows, options) => resolveRecommendationTracks(rows, api, options)} context={context} reduceMotion />
           : <p className="py-10 text-center text-sm text-muted">This playlist has no available songs.</p>}
