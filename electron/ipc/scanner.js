@@ -14,7 +14,7 @@ const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
 const { getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
-const { findFolderArtworkAsync, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal } = require('../networkArtwork')
+const { findFolderArtworkAsync, cacheFolderArtwork, folderOriginalCandidates, hasFolderOriginal, isNetworkArtworkPath, isCachedFolderArtwork } = require('../networkArtwork')
 const { getDB, getStorageDir, importAppData, resetAppData } = require('./db')
 const { ipcMain } = require('electron')
 const { emitPluginHook } = require('./plugins')
@@ -553,6 +553,16 @@ async function scanFolder(folderPath, {
     })))
   }
 
+  // Only network roots need durable folder-image copies. Local folders keep
+  // their existing full-resolution cover.jpg / folder.png path, even after the
+  // SMB/WebDAV support is enabled. Connected mounted shares are recorded by
+  // the network-library handler; UNC paths are detected independently.
+  let networkRoots = []
+  try {
+    const json = db.prepare("SELECT value FROM settings WHERE key = 'network_music_folders'").get()?.value
+    const saved = JSON.parse(json || '[]')
+    if (Array.isArray(saved)) networkRoots = saved.filter(value => typeof value === 'string')
+  } catch {}
   const BATCH = 20
   let batch = []
   const folderArtworkCache = new Map()
@@ -579,6 +589,7 @@ async function scanFolder(folderPath, {
       const trackId = 't-' + hashFile(filePath, stat)
       const existing = db.prepare('SELECT id, last_modified, artwork_path FROM tracks WHERE file_path = ?').get(filePath)
       const folderArtwork = await getFolderArtwork(filePath)
+      const networkArtwork = isNetworkArtworkPath(filePath, networkRoots)
       // A refresh re-reads unchanged files, but not ones whose artist the user
       // changed by hand (rename/merge/delete lock their links).
       const refreshThis = refreshArtistNames && !(existing && artistLinksLocked(db, existing.id))
@@ -591,24 +602,31 @@ async function scanFolder(folderPath, {
         const hasCurrentFolderArtwork = folderArtwork && existingArtwork === path.resolve(folderArtwork)
         const noArtworkToUpdate = !existingArtwork && !folderArtwork
         if (hasCurrentFolderArtwork) {
-          // Previously indexed SMB/WebDAV folders may still point directly at
-          // their mount path. Migrate those unchanged rows to app-owned art
-          // without re-reading/retagging the original audio file.
-          const durable = await getDurableFolderArtwork(folderArtwork)
-          if (durable) {
-            db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
-              .run(durable, filePath)
+          if (networkArtwork) {
+            // Previously indexed network folders may still point at a share
+            // that disappears after disconnect. Make a durable copy once.
+            const durable = await getDurableFolderArtwork(folderArtwork)
+            if (durable) {
+              db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
+                .run(durable, filePath)
+            }
           }
+          // Local folder art is already its full original: never downgrade it.
           scanStatus.done++; emitProgress(); continue
         }
         if (hasCachedArtwork || noArtworkToUpdate) {
-          // Previously scanned folder covers may have only their tiny shared
-          // WebP. Rebuild the missing full-resolution companion on refresh,
-          // without re-parsing or re-tagging unchanged audio files. The
-          // scanner already memoizes each folder read for all its tracks.
-          if (hasCachedArtwork && folderArtwork &&
+          // Upgrade already indexed local songs that were incorrectly routed
+          // through the NAS 150px thumbnail cache. This is a lightweight DB
+          // update; no audio file rescan or metadata rewrite is needed.
+          if (!networkArtwork && hasCachedArtwork && folderArtwork &&
+              isCachedFolderArtwork(existingArtwork)) {
+            db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
+              .run(folderArtwork, filePath)
+          } else if (networkArtwork && hasCachedArtwork && folderArtwork &&
               folderOriginalCandidates(existingArtwork).length &&
               !hasFolderOriginal(existingArtwork)) {
+            // Network thumbnails created before this fix have no full-size
+            // companion; repair it once on a reachable share.
             const durable = await getDurableFolderArtwork(folderArtwork)
             if (durable && durable !== existing.artwork_path) {
               db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
@@ -638,7 +656,9 @@ async function scanFolder(folderPath, {
       // disappear when the NAS sleeps. Preserve any existing readable artwork
       // when transient server failures prevent a new extraction.
       const localFolderArtwork = meta.common.picture?.length
-        ? null : await getDurableFolderArtwork(folderArtwork)
+        ? null : networkArtwork
+          ? await getDurableFolderArtwork(folderArtwork)
+          : folderArtwork
       const previousArtwork = existing?.artwork_path && fs.existsSync(existing.artwork_path)
         ? existing.artwork_path : null
       const artwork = await extractArtwork(
