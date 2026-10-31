@@ -93,6 +93,7 @@ import { continueFlow, flowNeedsMore } from './flow/session'
 import { buildRadio } from './radioActions'
 import { playbackSpeed, usePlaybackSpeed } from './playbackSpeed.mjs'
 import { useCastPlayback, takeResumePosition } from './cast/useCastPlayback'
+import { readSavedRoute, writeSavedRoute, readViewState, writeViewState, statePersistenceEnabled } from './statePersistence.mjs'
 
 async function addonStreamTrackHash(id) {
   try {
@@ -371,6 +372,74 @@ function AnimatedRoutes() {
       </Routes>
     </AnimatePresence>
   )
+}
+
+
+/** Only a pathname and a bounded scroll offset survive a full app restart. */
+function ViewStateRecorder() {
+  const location = useLocation()
+  useEffect(() => { writeSavedRoute(location.pathname) }, [location.pathname])
+  useEffect(() => {
+    if (!statePersistenceEnabled()) return
+    const main = document.querySelector('main.flex-1.overflow-y-auto')
+    if (!main) return
+    const path = location.pathname
+    const remembered = readViewState('navigation:scrollPath') === path
+      ? Number(readViewState('navigation:scrollTop')) || 0 : 0
+    let restoring = remembered > 0
+    let lastOffset = main.scrollTop
+    let saveTimer
+    let restoreTimer
+    let observer
+    const save = () => {
+      clearTimeout(saveTimer)
+      if (!statePersistenceEnabled()) return
+      writeViewState('navigation:scrollPath', path)
+      writeViewState('navigation:scrollTop', String(Math.round(lastOffset)))
+    }
+    const onScroll = () => {
+      if (restoring) return
+      lastOffset = main.scrollTop
+      clearTimeout(saveTimer)
+      saveTimer = setTimeout(save, 250)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('beforeunload', save)
+    if (restoring) {
+      const tryRestore = () => {
+        const available = Math.max(0, main.scrollHeight - main.clientHeight)
+        if (available < remembered) return
+        main.scrollTop = remembered
+        lastOffset = main.scrollTop
+        restoring = false
+        observer?.disconnect()
+        clearTimeout(restoreTimer)
+      }
+      // The page loads asynchronously; only try to restore when its size
+      // permits it, never hold artwork or fetched page data in this module.
+      if (typeof ResizeObserver !== 'undefined') {
+        observer = new ResizeObserver(tryRestore)
+        observer.observe(main)
+        if (main.firstElementChild) observer.observe(main.firstElementChild)
+      }
+      restoreTimer = setTimeout(() => {
+        main.scrollTop = Math.min(remembered, Math.max(0, main.scrollHeight - main.clientHeight))
+        lastOffset = main.scrollTop
+        restoring = false
+        observer?.disconnect()
+      }, 1800)
+      tryRestore()
+    }
+    return () => {
+      main.removeEventListener('scroll', onScroll)
+      window.removeEventListener('beforeunload', save)
+      observer?.disconnect()
+      clearTimeout(restoreTimer)
+      if (!restoring) save()
+      else clearTimeout(saveTimer)
+    }
+  }, [location.pathname])
+  return null
 }
 
 /** The app shell: header, sidebar, pages, side panels, player and overlays. */
@@ -3585,7 +3654,8 @@ export default function App() {
   }
 
   return (
-    <Router>
+    <Router initialEntries={[readSavedRoute()]}>
+  <ViewStateRecorder />
   <NativeHistoryNavigation />
   <KeyboardShortcuts />
   <TvController />
