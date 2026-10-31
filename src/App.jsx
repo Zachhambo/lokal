@@ -444,6 +444,9 @@ function ViewStateRecorder() {
 
 /** The app shell: header, sidebar, pages, side panels, player and overlays. */
 export default function App() {
+  // MemoryRouter reads initialEntries only at mount; don't parse localStorage
+  // again for every playback-related App render.
+  const [initialViewPath] = useState(readSavedRoute)
   useEffect(() => api.onLibraryChanged?.(() => {
     window.dispatchEvent(new Event('lokal:refresh'))
   }), [])
@@ -3654,7 +3657,7 @@ export default function App() {
   }
 
   return (
-    <Router initialEntries={[readSavedRoute()]}>
+    <Router initialEntries={[initialViewPath]}>
   <ViewStateRecorder />
   <NativeHistoryNavigation />
   <KeyboardShortcuts />
