@@ -17,7 +17,7 @@ export default function SpotifyPlaylist({ provider = 'spotify' }) {
   const [revision, setRevision] = useState(0)
   const youtube = provider === 'youtube'
   const label = youtube ? 'YouTube Music' : 'Spotify'
-  const valid = youtube ? /^[\\w.-]{1,120}$/.test(id || '') : /^[A-Za-z0-9]{22}$/.test(id || '')
+  const valid = youtube ? /^[A-Za-z0-9_.-]{1,120}$/.test(id || '') : /^[A-Za-z0-9]{22}$/.test(id || '')
 
   useEffect(() => {
     if (!valid) { setError(`Invalid ${label} playlist.`); setLoading(false); return }
