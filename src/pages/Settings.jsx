@@ -2459,6 +2459,13 @@ activeCategory === 'data' ? usersTried
                 ))}
               </div>
             </Row>
+            <Row label={t("High-resolution Moving Covers")} desc={t("Prefer Apple Music's 2160p stream when available, otherwise use the highest available resolution. HEVC is used only when this app can play it.")}>
+              <button type="button" aria-pressed={settings.high_resolution_motion_covers === '1'}
+                onClick={() => set('high_resolution_motion_covers', settings.high_resolution_motion_covers === '1' ? '0' : '1')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.high_resolution_motion_covers === '1' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+                {settings.high_resolution_motion_covers === '1' ? t('On') : t('Off')}
+              </button>
+            </Row>
             {chosen.includes('spotify') && (
               <>
                 <div className="space-y-2 rounded-lg border border-border/70 bg-card/40 px-3 py-3">
@@ -3481,4 +3488,3 @@ function SpotifyLikesRow({ hasCookie, userId }) {
     </Row>
   )
 }
-

@@ -544,7 +544,16 @@ export const api = {
   // Home → Releases → Followed artists: those followed on Spotify or in the Apple Music library (desktop app).
   linkedFollowedArtists: (service) => isE() && el().linkedFollowedArtists ? el().linkedFollowedArtists(service) : Promise.resolve({ error: 'Linking accounts needs the desktop app.' }),
   motionCover: (trackId) => isE()
-    ? el().motionCover(trackId).then(r => (r?.file ? { ...r, src: `file://${r.file.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/').replace(/%3A/g, ':')}` } : null))
+    ? el().motionCover(trackId, (() => {
+      try {
+        const video = document.createElement('video')
+        return [
+          'hvc1.1.6.L93.B0', 'hvc1.2.4.L153.B0', 'hev1.1.6.L93.B0', 'hev1.2.4.L153.B0',
+          'hvc1.2.20000000.H150.B0', 'hev1.2.20000000.H150.B0',
+        ]
+          .some(codec => ['maybe', 'probably'].includes(video.canPlayType(`video/mp4; codecs="${codec}"`)))
+      } catch { return false }
+    })()).then(r => (r?.file ? { ...r, src: `file://${r.file.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/').replace(/%3A/g, ':')}` } : null))
     : apiFetch(`/artwork-fx/motion/${encodeURIComponent(trackId)}`).then(r => (r?.src ? r : null)),
   // The official music video of a track (desktop only): { videoId, src?, segments, ... } or null.
   musicVideo: (trackId) => isE() && el().musicVideo

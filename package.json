@@ -19,6 +19,7 @@
     "test:home-greeting": "node --test scripts/home-greeting.test.mjs",
     "test:search-scope": "node --test scripts/search-source-scope.test.mjs",
     "test:home-cover-flow": "node --test scripts/cover-flow.test.mjs scripts/home-cover-choice.test.mjs",
+    "test:motion-covers": "node --test scripts/motion-cover-resolution.test.mjs",
     "test:artwork-download": "node --test scripts/artwork-download.test.mjs",
     "test:artist-roles": "node --test scripts/artist-roles.test.mjs",
     "test:gapless": "node --test scripts/gapless-playback.test.mjs",

@@ -103,10 +103,14 @@ function motionCacheDir() {
   return require('../cache').cacheDir('motion')
 }
 
-async function motionForTrack(trackId, ffmpeg) {
+async function motionForTrack(trackId, ffmpeg, hevcSupported = false) {
   const track = trackRow(trackId)
   if (!track) return null
-  return motionCoverFor(getDB(), track, { settings: settingsMap(), cacheDir: motionCacheDir(), ffmpeg })
+  return motionCoverFor(getDB(), track, {
+    settings: { ...settingsMap(), motion_cover_hevc_supported: hevcSupported === true },
+    cacheDir: motionCacheDir(),
+    ffmpeg,
+  })
 }
 
 /** Settings' Spotify "Save & Test", with the cookie as saved. */
@@ -119,7 +123,7 @@ function registerArtworkFxHandlers(ipcMain) {
   const { findFfmpeg } = require('./tools')
   ipcMain.handle('artwork:mesh', (_, trackId) => meshForTrack(trackId).catch(() => null))
   ipcMain.handle('artwork:meshFromUrl', (_, url) => meshFromRemoteURL(httpsImageURL(url)).catch(() => null))
-  ipcMain.handle('artwork:motion', (_, trackId) => motionForTrack(trackId, findFfmpeg()).catch(() => null))
+  ipcMain.handle('artwork:motion', (_, trackId, hevcSupported) => motionForTrack(trackId, findFfmpeg(), hevcSupported).catch(() => null))
   ipcMain.handle('artwork:spotifyCheck', () => spotifyCheck())
 }
 

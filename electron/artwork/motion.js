@@ -291,8 +291,12 @@ function run(ffmpeg, args, timeoutMs = 120000) {
   })
 }
 
-/** An HLS master playlist's H.264 variant closest to (at least) `target` pixels. */
-async function chooseVariant(masterUrl, target = 768) {
+/** Choose an HLS variant, optionally preferring a high-resolution HEVC stream. */
+async function chooseVariant(masterUrl, {
+  target = 768,
+  highResolution = false,
+  hevcSupported = false,
+} = {}) {
   const text = await getText(masterUrl)
   const lines = text.split(/\r?\n/)
   const variants = []
@@ -303,12 +307,34 @@ async function chooseVariant(masterUrl, target = 768) {
     const uri = lines.slice(i + 1).find(l => l && !l.startsWith('#'))
     const codecs = (attrs.match(/CODECS="([^"]+)"/) || [])[1] || ''
     const res = (attrs.match(/RESOLUTION=(\d+)x(\d+)/) || []).slice(1).map(Number)
-    if (!uri || !/avc1/.test(codecs)) continue // Chromium plays H.264, not HEVC
-    variants.push({ uri: new URL(uri, masterUrl).href, width: res[0] || 0, height: res[1] || 0 })
+    if (!uri || !/(?:avc1|hvc1|hev1)/i.test(codecs)) continue
+    const codec = /(?:hvc1|hev1)/i.test(codecs) ? 'hevc' : 'h264'
+    variants.push({ uri: new URL(uri, masterUrl).href, width: res[0] || 0, height: res[1] || 0, codec })
   }
   if (!variants.length) return masterUrl
-  const big = variants.filter(v => Math.min(v.width, v.height) >= target).sort((a, b) => a.width * a.height - b.width * b.height)
-  return (big[0] || variants.sort((a, b) => b.width * b.height - a.width * a.height)[0]).uri
+  const area = variant => variant.width * variant.height
+  const eligible = variants.filter(v => Math.min(v.width, v.height) >= target)
+  if (highResolution) {
+    if (hevcSupported) {
+      const hevc2160 = eligible
+        .filter(v => v.codec === 'hevc' && Math.min(v.width, v.height) >= 2160)
+        .sort((a, b) => area(a) - area(b))
+      if (hevc2160.length) return hevc2160[0].uri
+    }
+    const h264 = eligible.filter(v => v.codec === 'h264')
+    const bestH264 = h264.sort((a, b) => area(b) - area(a))[0]
+    if (bestH264) return bestH264.uri
+    if (hevcSupported) {
+      const hevc = eligible.filter(v => v.codec === 'hevc').sort((a, b) => area(b) - area(a))[0]
+      if (hevc) return hevc.uri
+    }
+  }
+  const h264 = eligible.filter(v => v.codec === 'h264')
+  const preferred = h264.length ? h264 : (hevcSupported ? eligible.filter(v => v.codec === 'hevc') : [])
+  const chosen = preferred.sort((a, b) => area(a) - area(b))[0]
+    || variants.filter(v => v.codec === 'h264').sort((a, b) => area(b) - area(a))[0]
+    || (hevcSupported ? variants.sort((a, b) => area(b) - area(a))[0] : null)
+  return chosen?.uri || masterUrl
 }
 
 async function download(url, dest, timeoutMs = 60000) {
@@ -335,9 +361,10 @@ function trimCache(dir, keep) {
 const inFlight = new Map()
 
 /** The clip as an MP4 file in the cache (fetched/remuxed once). */
-async function cachedClip(found, { cacheDir, ffmpeg }) {
+async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false, hevcSupported = false }) {
   fs.mkdirSync(cacheDir, { recursive: true })
-  const dest = path.join(cacheDir, crypto.createHash('sha1').update(found.url).digest('hex').slice(0, 20) + '.mp4')
+  const cacheKey = `${found.url}|${highResolution ? 'high' : 'default'}|${hevcSupported ? 'hevc' : 'h264'}`
+  const dest = path.join(cacheDir, crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 20) + '.mp4')
   if (fs.existsSync(dest)) {
     try { const now = new Date(); fs.utimesSync(dest, now, now) } catch {}
     return dest
@@ -347,7 +374,7 @@ async function cachedClip(found, { cacheDir, ffmpeg }) {
     const temp = `${dest}.part.mp4`
     try {
       if (found.kind === 'hls') {
-        const variant = await chooseVariant(found.url)
+        const variant = await chooseVariant(found.url, { highResolution, hevcSupported })
         await run(ffmpeg, ['-hide_banner', '-nostdin', '-y', '-i', variant, '-map', '0:v:0', '-c', 'copy', '-an', '-movflags', '+faststart', temp])
       } else {
         await download(found.url, temp)
@@ -426,7 +453,9 @@ async function motionCoverFor(db, track, { settings = {}, cacheDir, ffmpeg } = {
     if (found || !unsure) db.prepare('INSERT OR REPLACE INTO motion_covers (key, data, fetched_at) VALUES (?, ?, ?)').run(key, found ? JSON.stringify(found) : null, Date.now())
   }
   if (!found) return null
-  const file = await cachedClip(found, { cacheDir, ffmpeg })
+  const highResolution = settings.high_resolution_motion_covers === '1'
+  const hevcSupported = settings.motion_cover_hevc_supported === true
+  const file = await cachedClip(found, { cacheDir, ffmpeg, highResolution, hevcSupported })
   return file ? { file, source: found.source, tall: !!found.tall } : null
 }
 

@@ -244,7 +244,7 @@ contextBridge.exposeInMainWorld('electron', {
   cacheAnalysisRun: () => invoke('cacheAnalysis:run'),
   cacheAnalysisClean: (mode) => invoke('cacheAnalysis:clean', mode),
   onCacheAnalysisProgress: (fn) => on('cacheAnalysis:progress', fn),
-  motionCover: (trackId) => invoke('artwork:motion', trackId),
+  motionCover: (trackId, hevcSupported) => invoke('artwork:motion', trackId, hevcSupported),
   wallpaperWorkshopStatus: () => invoke('wallpaper:workshopStatus'),
   wallpaperWorkshopGet: () => invoke('wallpaper:workshopGet'),
   wallpaperWorkshopChoose: () => invoke('wallpaper:workshopChoose'),
