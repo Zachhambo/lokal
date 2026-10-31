@@ -348,7 +348,7 @@ function trackOf(t, provider) {
 }
 
 /** Tracks from an addon's /search. */
-async function search(db, key, query, { fetchImpl, limit = 20 } = {}) {
+async function search(db, key, query, { fetchImpl, limit = 20, timeoutMs = TIMEOUT_MS.search } = {}) {
   const addon = findByKey(db, key)
   if (!addon || addon.enabled === false) throw new Error('This addon is not installed or is turned off.')
   const q = String(query || '').trim()
@@ -356,7 +356,7 @@ async function search(db, key, query, { fetchImpl, limit = 20 } = {}) {
   const cacheKey = `${key}\n${q.toLowerCase()}`
   const cached = searchCache.get(cacheKey)
   if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.results.slice(0, limit)
-  const json = await getJson(endpoint(addon, '/search', { q }), { timeoutMs: TIMEOUT_MS.search, fetchImpl })
+  const json = await getJson(endpoint(addon, '/search', { q }), { timeoutMs, fetchImpl })
   const provider = providerFor(key)
   const results = (Array.isArray(json.tracks) ? json.tracks : [])
     .filter(t => t && t.id != null && t.title)
@@ -461,14 +461,14 @@ function streamFormat(json, url) {
 }
 
 /** The audio URL for an addon track (from its /stream), cached until it expires. */
-async function resolveStream(db, key, id, { fetchImpl, force = false } = {}) {
+async function resolveStream(db, key, id, { fetchImpl, force = false, timeoutMs = TIMEOUT_MS.stream } = {}) {
   const addon = findByKey(db, key)
   if (!addon || addon.enabled === false) throw new Error('This addon is not installed or is turned off.')
   const cacheKey = `${key}\n${id}`
   const cached = streamCache.get(cacheKey)
   if (!force && cached && cached.expiresAt > Date.now()) return cached
   if (!force && resolving.has(cacheKey)) return resolving.get(cacheKey)
-  const job = getJson(endpoint(addon, `/stream/${encodeURIComponent(id)}`), { timeoutMs: TIMEOUT_MS.stream, fetchImpl })
+  const job = getJson(endpoint(addon, `/stream/${encodeURIComponent(id)}`), { timeoutMs, fetchImpl })
     .then(json => {
       let url
       try { url = checkUrl(json.url).toString() } catch { throw new Error('The addon gave no playable link for this track.') }

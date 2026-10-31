@@ -406,11 +406,13 @@ export const api = {
   searchYTArtist: (artist, page = 1) => isE() ? el().searchYTArtist(artist, page) : apiFetch(`/download/artist-search?q=${encodeURIComponent(artist)}&page=${page}`),
   downloadYT: (url, o) => isE() ? el().downloadYT(url, o) : apiFetch('/download', { method:'POST', body:{url,...o} }),
   // Online results (YouTube Music 'yt', SoundCloud 'sc'), streamed with the user's yt-dlp.
-  onlineSearch: (q, provider = 'yt') => isE() ? el().onlineSearch(q, provider) : apiFetch(`/online/search?${new URLSearchParams({ q, provider })}`),
+  onlineSearch: (q, provider = 'yt', options = {}) => isE()
+    ? el().onlineSearch(q, provider, { automatic: options.automatic === true })
+    : apiFetch(`/online/search?${new URLSearchParams({ q, provider })}`),
   globalCatalogueSearch: (q, options = {}) => isE() ? el().globalCatalogueSearch(q, options) : apiFetch(`/online/global?${new URLSearchParams({ q, ...options })}`),
   onlineSave: (items) => isE() ? el().onlineSave(items) : apiFetch('/online/save', { method:'POST', body:{ items } }),
   onlinePrepare: async (provider, id, force = false, options = {}) => {
-    const started = await (isE() ? el().onlinePrepare(provider, id, force) : apiFetch(`/online/prepare/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${force ? '?force=1' : ''}`, { method:'POST' }))
+    const started = await (isE() ? el().onlinePrepare(provider, id, force, { automatic: options.automatic === true }) : apiFetch(`/online/prepare/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${force ? '?force=1' : ''}`, { method:'POST' }))
     if (!started?.pending) return started
     const operation = cancel => api.addonsPackages({ action: 'operation', id: started.operationId, cancel })
     const abort = () => { operation(true).catch(() => {}) }
