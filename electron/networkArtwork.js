@@ -27,7 +27,12 @@ const hasFolderOriginal = thumbnailPath =>
 function isNetworkArtworkPath(filePath, configuredRoots = [], platform = process.platform) {
   if (typeof filePath !== 'string' || !filePath) return false
   const paths = platform === 'win32' ? path.win32 : path.posix
-  if (platform === 'win32' && /^(?:\\\\|\/\/)/.test(filePath)) return true
+  if (platform === 'win32') {
+    // Windows extended local paths (\\?\C:\...) are not NAS shares.
+    if (/^\\\\\?\\UNC\\/i.test(filePath)) return true
+    if (/^\\\\[?.]\\/.test(filePath)) return false
+    if (/^(?:\\\\|\/\/)/.test(filePath)) return true
+  }
   const candidate = paths.resolve(filePath)
   return configuredRoots.some(root => {
     if (typeof root !== 'string' || !root) return false
