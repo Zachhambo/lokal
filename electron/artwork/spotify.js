@@ -530,6 +530,63 @@ async function followedArtists(rawCookie, { fetchPage, limit = 2000, pageSize = 
   return names
 }
 
+/**
+ * All playlists saved in the signed-in Spotify library, including playlists
+ * inside folders. Unlike Home mixes, these are the user's actual playlists.
+ * Only playlist metadata crosses IPC; the cookie and bearer stay in Electron.
+ *
+ * fetchPage(url, token) is an injectable request for parser/pagination tests.
+ */
+async function libraryPlaylists(rawCookie, { fetchPage, limit = 2000, pageSize = 50 } = {}) {
+  if (!fetchPage && !cookieValue(rawCookie)) throw new Error('Add your Spotify cookie (sp_dc) in Settings → Integrations → Spotify first.')
+  const t = fetchPage ? { accessToken: 'test' } : await getTokens(rawCookie)
+  if (!t?.accessToken) throw new Error('Spotify did not accept the cookie. Copy a fresh sp_dc value.')
+  const get = fetchPage || (async url => {
+    const headers = { Authorization: `Bearer ${t.accessToken}`, Accept: 'application/json', 'App-Platform': 'WebPlayer', 'User-Agent': UA }
+    if (t.clientToken && t.clientExp > Date.now()) headers['client-token'] = t.clientToken
+    const response = await request(url, { headers })
+    if (response.status === 401) tokens = null
+    if (response.status === 401) throw new Error('Spotify session expired. Update your cookie in Settings → Integrations → Spotify.')
+    if (response.status === 429) throw new TransientError('Spotify is limiting requests. Try again later.')
+    if (!response.ok) throw new TransientError(`Spotify answered HTTP ${response.status}.`)
+    return response.json()
+  })
+  const playlists = new Map()
+  const size = Math.min(50, Math.max(1, Number(pageSize) || 50))
+  const max = Math.min(5000, Math.max(size, Number(limit) || 2000))
+  for (let offset = 0; offset < max; offset += size) {
+    const variables = {
+      filters: ['Playlists'], order: null, textFilter: '',
+      features: ['LIKED_SONGS', 'YOUR_EPISODES_V2', 'PRERELEASES', 'EVENTS'],
+      limit: size, offset, flatten: true, expandedFolders: [],
+      folderUri: null, includeFoldersWhenFlattening: false,
+    }
+    const extensions = { persistedQuery: { version: 1, sha256Hash: hashFor('libraryV3') } }
+    const url = `https://api-partner.spotify.com/pathfinder/v1/query?operationName=libraryV3&variables=${encodeURIComponent(JSON.stringify(variables))}&extensions=${encodeURIComponent(JSON.stringify(extensions))}`
+    const json = await get(url, t.accessToken)
+    const library = json?.data?.me?.libraryV3
+    if (!library || !Array.isArray(library.items)) throw new TransientError(`Spotify: ${json?.errors?.[0]?.message || "your playlists couldn't be read"}`)
+    const items = library.items
+    for (const entry of items) {
+      const wrapper = entry?.item
+      if (!/Playlist/i.test(wrapper?.__typename || '')) continue // exclude folders
+      const data = wrapper?.data
+      const uri = wrapper?._uri || data?.uri || ''
+      if (!/^spotify:playlist:[A-Za-z0-9]{22}$/.test(uri) || !data?.name) continue
+      playlists.set(uri, {
+        id: uri.slice('spotify:playlist:'.length),
+        name: String(data.name),
+        owner: String(data.ownerV2?.data?.name || ''),
+        thumbnail: biggestImage(data.images?.items?.[0]?.sources),
+        total: Number(data.content?.totalCount) || 0,
+      })
+    }
+    const total = Number(library.totalCount)
+    if (!items.length || items.length < size || (Number.isFinite(total) && offset + size >= total)) return [...playlists.values()]
+  }
+  throw new TransientError('Spotify playlist library is larger than the supported limit; results were not truncated silently.')
+}
+
 // ---------------------------------------------------------------- liked songs
 
 const LIKES_PAGE = 50
@@ -837,4 +894,4 @@ async function searchCataloguePathfinder(token, term, offset, limit, fetchImpl =
   }
 }
 
-module.exports = { madeForYou, playlistTracks, recentlyPlayed, homeMixes, playlistEntry, fromSpotify, checkSpotify, findSpotifyTrackId, parseCanvases, cookieValue, followedArtists, likedSince, likeOnSpotify, likedEntry, catalogueSearch, TransientError }
+module.exports = { madeForYou, playlistTracks, recentlyPlayed, homeMixes, playlistEntry, fromSpotify, checkSpotify, findSpotifyTrackId, parseCanvases, cookieValue, followedArtists, libraryPlaylists, likedSince, likeOnSpotify, likedEntry, catalogueSearch, TransientError }

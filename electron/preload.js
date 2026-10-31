@@ -195,6 +195,8 @@ contextBridge.exposeInMainWorld('electron', {
   onYoutubeSignInStatus: fn => on('online:signInStatus', (_, status) => fn(status)),
   youtubeDisconnect: () => invoke('online:disconnect'),
   youtubeAccountPlaylist: (playlistId) => invoke('online:accountPlaylist', playlistId),
+  youtubeLibraryPlaylists: (force) => invoke('online:libraryPlaylists', force),
+  youtubeLibraryPlaylistTracks: (id, force) => invoke('online:libraryPlaylistTracks', id, force),
   youtubeRadio: (videoId) => invoke('online:radio', videoId),
   youtubeSetLiked: (videoId, liked) => invoke('online:setAccountLiked', videoId, liked),
   onlineDownloadUrl: (provider, id) => invoke('online:downloadUrl', provider, id),
@@ -261,6 +263,8 @@ contextBridge.exposeInMainWorld('electron', {
   spotifyLikesPush: (track) => invoke('spotifyLikes:push', track),
   // Discovery's Spotify source: Made For You mixes (electron/ipc/spotifyLikes.js)
   spotifyMadeForYou: (force) => invoke('spotify:madeForYou', force),
+  spotifyLibraryPlaylists: (force) => invoke('spotify:libraryPlaylists', force),
+  spotifyLibraryPlaylistTracks: (uri, force) => invoke('spotify:libraryPlaylistTracks', uri, force),
   spotifyPlaylist: (uri, force) => invoke('spotify:playlist', uri, force),
   spotifyRecentlyPlayed: (force) => invoke('spotify:recentlyPlayed', force),
   // AutoMix: a song's analysis (electron/automix)

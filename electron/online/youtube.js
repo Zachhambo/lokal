@@ -379,9 +379,9 @@ function parseAccountPlaylists(root, limit = 100) {
   const playlists = []
   const seen = new Set()
   walkObjects(root, node => {
-    const renderer = node.gridPlaylistRenderer || node.musicTwoRowItemRenderer
+    const renderer = node.gridPlaylistRenderer || node.musicTwoRowItemRenderer || node.musicResponsiveListItemRenderer
     if (!renderer || playlists.length >= limit) return
-    const titleNavigation = renderer.title?.runs?.find(run => run.navigationEndpoint)?.navigationEndpoint
+    const titleNavigation = renderer.title?.runs?.find(run => run.navigationEndpoint)?.navigationEndpoint || columnRuns(renderer, 0).find(run => run.navigationEndpoint)?.navigationEndpoint
     const play = (renderer.thumbnailOverlay || renderer.overlay)?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint
     const navigations = [titleNavigation, renderer.navigationEndpoint, renderer.onTap, play].filter(Boolean)
     const browse = navigations.find(navigation => navigation.browseEndpoint?.browseId)?.browseEndpoint
@@ -393,13 +393,13 @@ function parseAccountPlaylists(root, limit = 100) {
     const rawId = renderer.playlistId || browse?.browseId || navigations.map(navigation => navigation.watchPlaylistEndpoint?.playlistId || navigation.watchEndpoint?.playlistId).find(Boolean) || ''
     const id = String(rawId).replace(/^VL/, '')
     if (!id || /^(UC|MPRE|FE)/.test(id) || seen.has(id)) return
-    const title = textOf(renderer.title)
+    const title = textOf(renderer.title) || columnRuns(renderer, 0).map(run => run.text || '').join('')
     if (!title) return
     seen.add(id)
     playlists.push({
       id,
       title,
-      author: textOf(renderer.shortBylineText || renderer.subtitle),
+      author: textOf(renderer.shortBylineText || renderer.subtitle) || columnRuns(renderer, 1).map(run => run.text || '').join(''),
       trackCount: textOf(renderer.videoCountText || renderer.secondLine),
       thumbnail: thumbnailsOf(renderer.thumbnailRenderer || renderer.thumbnail),
       url: `https://music.youtube.com/playlist?list=${encodeURIComponent(id)}`,
@@ -485,15 +485,15 @@ function continuationTokens(root, types) {
   return [...tokens]
 }
 
-async function browsePages(browseId, first, cookies, fetchImpl, config, { params, types, stop = () => false } = {}) {
+async function browsePages(browseId, first, cookies, fetchImpl, config, { params, types, stop = () => false, timeoutMs = 10000, maxPages = 20 } = {}) {
   const pages = [first]
   const seen = new Set()
   const pending = continuationTokens(first, types)
-  const deadline = Date.now() + 10000
+  const deadline = Date.now() + timeoutMs
   while (pending.length && !stop(pages)) {
     const continuation = pending.shift()
     if (seen.has(continuation)) continue
-    if (seen.size >= 20 || Date.now() >= deadline) return { pages, error: 'YouTube Music mix loading did not finish. Refresh to retry.' }
+    if (seen.size >= maxPages || Date.now() >= deadline) return { pages, error: 'YouTube Music mix loading did not finish. Refresh to retry.' }
     seen.add(continuation)
     try {
       const page = await accountBrowse(browseId, cookies, fetchImpl, config, { params, continuation, timeoutMs: Math.min(5000, deadline - Date.now()) })
@@ -622,6 +622,26 @@ async function fetchAccountData({ cookies, fetchImpl = fetch, limit = 100, force
     if (accountCache.size > 4) accountCache.delete(accountCache.keys().next().value)
   }
   return data
+}
+
+/** The signed-in listener's saved playlists, not the Discovery Home mixes. */
+async function fetchLibraryPlaylists({ cookies, fetchImpl = fetch, limit = 2000 } = {}) {
+  const header = String(cookies || '')
+  if (!accountHeaders(header)) throw new Error('Sign in to YouTube Music in Integrations.')
+  const config = await musicContext(header, fetchImpl)
+  const root = await accountBrowse('FEmusic_liked_playlists', header, fetchImpl, config)
+  const pages = await browsePages('FEmusic_liked_playlists', root, header, fetchImpl, config, {
+    types: ['gridRenderer', 'gridContinuation', 'musicShelfRenderer',
+      'musicShelfContinuation', 'sectionListRenderer', 'sectionListContinuation',
+      'appendContinuationItemsAction', 'reloadContinuationItemsCommand'],
+    timeoutMs: 60000, maxPages: 100,
+  })
+  if (pages.error) throw new Error(pages.error.replace('mix loading', 'playlist loading'))
+  const playlists = new Map()
+  for (const page of pages.pages) for (const item of parseAccountPlaylists(page, limit)) {
+    if (!/^RD/.test(item.id)) playlists.set(item.id, item)
+  }
+  return [...playlists.values()].slice(0, limit)
 }
 
 /** YouTube Music's own song radio, rather than searching for the word "radio". */
@@ -1217,7 +1237,7 @@ function videoIdFromUrl(url) {
 
 module.exports = {
   searchSongs, innertubeSearch, spellCheck, parseSearch, parseItem, parseDuration,
-  fetchAccountData, fetchAccountPlaylist, fetchMusicPlaylistInfo, fetchMusicPlaylist, parseMusicPlaylistMetadata, youtubeMusicPlaylistId, setAccountLiked, fetchCatalogue, parseArtistPage,
+  fetchAccountData, fetchLibraryPlaylists, fetchAccountPlaylist, fetchMusicPlaylistInfo, fetchMusicPlaylist, parseMusicPlaylistMetadata, youtubeMusicPlaylistId, setAccountLiked, fetchCatalogue, parseArtistPage,
   fetchRadio, parseAccountTracks, parseAccountMixes, parseAccountHomeCategories, youtubeHomeCategory, clearAccountCache, accountHeaders, normalizeAccountCookies, parseMusicConfig, isLoggedOutResponse,
   resolveStream, fetchStream, streamError, videoIdFromUrl, fastFailure,
 }

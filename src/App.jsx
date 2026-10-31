@@ -44,6 +44,7 @@ import Library from './pages/Library'
 import Search from './pages/Search'
 import Artist from './pages/Artist'
 import Playlist from './pages/Playlist'
+import SpotifyPlaylist from './pages/SpotifyPlaylist'
 import Settings from './pages/Settings'
 import Profile from './pages/Profile'
 import Recap from './pages/Recap'
@@ -357,6 +358,8 @@ function AnimatedRoutes() {
         <Route path="/artist/:id" element={<PageTransition><Artist /></PageTransition>} />
         <Route path="/online/album" element={<PageTransition><OnlineAlbum /></PageTransition>} />
         <Route path="/playlist/:id" element={<PageTransition gated><Playlist /></PageTransition>} />
+        <Route path="/spotify/playlist/:id" element={<PageTransition gated><SpotifyPlaylist /></PageTransition>} />
+        <Route path="/youtube/playlist/:id" element={<PageTransition gated><SpotifyPlaylist provider="youtube" /></PageTransition>} />
         {/* The Downloader lives in Search now; what asked for it (a Soulseek search) is passed on. */}
         <Route path="/downloader" element={<Navigate to="/search" replace state={location.state} />} />
         <Route path="/profile" element={<PageTransition><Profile /></PageTransition>} />

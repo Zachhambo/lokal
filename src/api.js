@@ -242,6 +242,8 @@ export const api = {
   spotifyLikesAck: (progress) => isE() && el()?.spotifyLikesAck ? el().spotifyLikesAck(progress) : Promise.resolve(null),
   // Discovery's Spotify source: Made For You mixes and their songs (desktop).
   spotifyMadeForYou: (force = false) => isE() && el()?.spotifyMadeForYou ? el().spotifyMadeForYou(force) : Promise.resolve({ mixes: [], error: 'Spotify discovery works in the desktop app.' }),
+  spotifyLibraryPlaylists: (force = false) => isE() && el()?.spotifyLibraryPlaylists ? el().spotifyLibraryPlaylists(force) : Promise.resolve({ playlists: [], error: 'Spotify playlists are available in the desktop app.' }),
+  spotifyLibraryPlaylistTracks: (uri, force = false) => isE() && el()?.spotifyLibraryPlaylistTracks ? el().spotifyLibraryPlaylistTracks(uri, force) : Promise.resolve({ tracks: [], error: 'Spotify playlists are available in the desktop app.' }),
   spotifyPlaylist: (uri, force = false) => isE() && el()?.spotifyPlaylist ? el().spotifyPlaylist(uri, force) : Promise.resolve({ tracks: [], error: 'Spotify discovery works in the desktop app.' }),
   spotifyRecentlyPlayed: (force = false) => isE() && el()?.spotifyRecentlyPlayed ? el().spotifyRecentlyPlayed(force) : Promise.resolve({ tracks: [] }),
   // AutoMix: a song's analysis (desktop; electron/automix), null when it can't be.
@@ -457,6 +459,8 @@ export const api = {
     }
     return result
   },
+  youtubeLibraryPlaylists: (force = false) => isE() ? el().youtubeLibraryPlaylists(force) : Promise.resolve({ playlists: [], error: 'Desktop-only YouTube Music account.' }),
+  youtubeLibraryPlaylistTracks: (id, force = false) => isE() ? el().youtubeLibraryPlaylistTracks(id, force) : Promise.resolve({ tracks: [], error: 'Desktop-only YouTube Music account.' }),
   youtubeAccountPlaylist: (playlistId) => isE() ? el().youtubeAccountPlaylist(playlistId) : apiFetch(`/online/account-playlist/${encodeURIComponent(playlistId)}`),
   youtubeRadio: (videoId) => isE() ? el().youtubeRadio(videoId) : apiFetch(`/online/radio/${encodeURIComponent(videoId)}`),
   youtubeSetLiked: (videoId, liked) => isE() ? el().youtubeSetLiked(videoId, liked) : apiFetch('/online/account-liked', { method: 'POST', body: { videoId, liked } }),
