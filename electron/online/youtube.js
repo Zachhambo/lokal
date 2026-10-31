@@ -485,15 +485,15 @@ function continuationTokens(root, types) {
   return [...tokens]
 }
 
-async function browsePages(browseId, first, cookies, fetchImpl, config, { params, types, stop = () => false } = {}) {
+async function browsePages(browseId, first, cookies, fetchImpl, config, { params, types, stop = () => false, timeoutMs = 10000, maxPages = 20 } = {}) {
   const pages = [first]
   const seen = new Set()
   const pending = continuationTokens(first, types)
-  const deadline = Date.now() + 10000
+  const deadline = Date.now() + timeoutMs
   while (pending.length && !stop(pages)) {
     const continuation = pending.shift()
     if (seen.has(continuation)) continue
-    if (seen.size >= 20 || Date.now() >= deadline) return { pages, error: 'YouTube Music mix loading did not finish. Refresh to retry.' }
+    if (seen.size >= maxPages || Date.now() >= deadline) return { pages, error: 'YouTube Music mix loading did not finish. Refresh to retry.' }
     seen.add(continuation)
     try {
       const page = await accountBrowse(browseId, cookies, fetchImpl, config, { params, continuation, timeoutMs: Math.min(5000, deadline - Date.now()) })
@@ -634,6 +634,7 @@ async function fetchLibraryPlaylists({ cookies, fetchImpl = fetch, limit = 2000 
     types: ['gridRenderer', 'gridContinuation', 'musicShelfRenderer',
       'musicShelfContinuation', 'sectionListRenderer', 'sectionListContinuation',
       'appendContinuationItemsAction', 'reloadContinuationItemsCommand'],
+    timeoutMs: 60000, maxPages: 100,
   })
   if (pages.error) throw new Error(pages.error.replace('mix loading', 'playlist loading'))
   const playlists = new Map()
