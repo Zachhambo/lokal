@@ -6,6 +6,9 @@ const crypto = require('node:crypto')
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
 const MAX_FOLDER_COVER_BYTES = 12 * 1024 * 1024
+const MAX_OUTSTANDING_COVER_READS = 4
+const COVER_READ_CHUNK_BYTES = 64 * 1024
+let outstandingCoverReads = 0
 
 function coverPriority(name) {
   // Match mobile's cover.1.jpg / folder.2.png aliases as well as the
@@ -73,24 +76,63 @@ async function findFolderArtworkAsync(folder, {
  * Fail closed to the old path: a transient offline share must not erase art.
  */
 async function cacheFolderArtwork(sourcePath, artworkDir, {
-  stat = fs.stat,
-  readFile = fs.readFile,
+  open = fs.open,
   writeCover = require('./artwork/thumb').writeCover,
   timeoutMs = 8000,
 } = {}) {
-  if (!sourcePath) return null
-  const { withTimeout } = require('./ipc/networkLibrary')
+  if (!sourcePath || outstandingCoverReads >= MAX_OUTSTANDING_COVER_READS) return null
+  const controller = new AbortController()
+  let timer
+  outstandingCoverReads++
+  // FileHandle reads cannot interrupt an in-flight OS request. Stop issuing
+  // further reads after a timeout and retain the slot until cleanup finishes.
+  const read = (async () => {
+    let handle
+    try {
+      handle = await open(sourcePath, 'r')
+      controller.signal.throwIfAborted()
+      const info = await handle.stat()
+      controller.signal.throwIfAborted()
+      if (!info.isFile() || info.size <= 0 || info.size > MAX_FOLDER_COVER_BYTES) return null
+
+      // One extra byte detects growth while never allocating beyond the limit.
+      const buffer = Buffer.allocUnsafe(info.size + 1)
+      let length = 0
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, length,
+          Math.min(COVER_READ_CHUNK_BYTES, buffer.length - length), null)
+        controller.signal.throwIfAborted()
+        if (!bytesRead) break
+        length += bytesRead
+      }
+      if (length !== info.size || length > MAX_FOLDER_COVER_BYTES) return null
+      const after = await handle.stat()
+      controller.signal.throwIfAborted()
+      if (!after.isFile() || after.size !== info.size ||
+          after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs) return null
+      const key = crypto.createHash('sha256')
+        .update(String(sourcePath) + ':' + info.size + ':' + info.mtimeMs)
+        .digest('hex').slice(0, 24)
+      return { key, bytes: buffer.subarray(0, length) }
+    } finally {
+      if (handle) await handle.close()
+    }
+  })().finally(() => { outstandingCoverReads-- })
+
   try {
-    const info = await withTimeout(stat, timeoutMs)(sourcePath)
-    if (!info.isFile() || info.size <= 0 || info.size > MAX_FOLDER_COVER_BYTES) return null
-    const key = crypto.createHash('sha256')
-      .update(String(sourcePath) + ':' + info.size + ':' + info.mtimeMs)
-      .digest('hex').slice(0, 24)
-    const bytes = await withTimeout(readFile, timeoutMs)(sourcePath)
-    if (!bytes?.length || bytes.length > MAX_FOLDER_COVER_BYTES) return null
-    return await writeCover(artworkDir, 'nas-folder-' + key, bytes)
+    const result = await Promise.race([
+      read,
+      new Promise(resolve => {
+        timer = setTimeout(() => { controller.abort(); resolve(null) }, timeoutMs)
+      }),
+    ])
+    clearTimeout(timer)
+    if (!result) return null
+    return await writeCover(artworkDir, 'nas-folder-' + result.key, result.bytes)
   } catch {
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
