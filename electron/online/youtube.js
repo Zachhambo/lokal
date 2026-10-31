@@ -379,7 +379,7 @@ function parseAccountPlaylists(root, limit = 100) {
   const playlists = []
   const seen = new Set()
   walkObjects(root, node => {
-    const renderer = node.gridPlaylistRenderer || node.musicTwoRowItemRenderer
+    const renderer = node.gridPlaylistRenderer || node.musicTwoRowItemRenderer || node.musicResponsiveListItemRenderer
     if (!renderer || playlists.length >= limit) return
     const titleNavigation = renderer.title?.runs?.find(run => run.navigationEndpoint)?.navigationEndpoint
     const play = (renderer.thumbnailOverlay || renderer.overlay)?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint
@@ -393,13 +393,13 @@ function parseAccountPlaylists(root, limit = 100) {
     const rawId = renderer.playlistId || browse?.browseId || navigations.map(navigation => navigation.watchPlaylistEndpoint?.playlistId || navigation.watchEndpoint?.playlistId).find(Boolean) || ''
     const id = String(rawId).replace(/^VL/, '')
     if (!id || /^(UC|MPRE|FE)/.test(id) || seen.has(id)) return
-    const title = textOf(renderer.title)
+    const title = textOf(renderer.title) || columnRuns(renderer, 0).map(run => run.text || '').join('')
     if (!title) return
     seen.add(id)
     playlists.push({
       id,
       title,
-      author: textOf(renderer.shortBylineText || renderer.subtitle),
+      author: textOf(renderer.shortBylineText || renderer.subtitle) || columnRuns(renderer, 1).map(run => run.text || '').join(''),
       trackCount: textOf(renderer.videoCountText || renderer.secondLine),
       thumbnail: thumbnailsOf(renderer.thumbnailRenderer || renderer.thumbnail),
       url: `https://music.youtube.com/playlist?list=${encodeURIComponent(id)}`,
