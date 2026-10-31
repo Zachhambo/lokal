@@ -14,7 +14,7 @@ const addedDate = require('../addedDate')
 const artistSplit = require('../artistSplit')
 const { getArtistNamePreference, artistNamePreferenceNeedsRescan, rememberArtistNamePreferenceAfterScan } = require('../artistMetadataPreference')
 const { getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders } = require('../libraryFolder')
-const { findFolderArtworkAsync } = require('../networkArtwork')
+const { findFolderArtworkAsync, cacheFolderArtwork } = require('../networkArtwork')
 const { getDB, getStorageDir, importAppData, resetAppData } = require('./db')
 const { ipcMain } = require('electron')
 const { emitPluginHook } = require('./plugins')
@@ -556,12 +556,21 @@ async function scanFolder(folderPath, {
   const BATCH = 20
   let batch = []
   const folderArtworkCache = new Map()
+  const durableFolderArtworkCache = new Map()
   const getFolderArtwork = (filePath) => {
     const folderPath = path.dirname(filePath)
     if (!folderArtworkCache.has(folderPath)) {
       folderArtworkCache.set(folderPath, findFolderArtworkAsync(folderPath))
     }
     return folderArtworkCache.get(folderPath)
+  }
+  const getDurableFolderArtwork = (sourcePath) => {
+    if (!sourcePath) return null
+    if (!durableFolderArtworkCache.has(sourcePath)) {
+      durableFolderArtworkCache.set(sourcePath, cacheFolderArtwork(
+        sourcePath, path.join(getStorageDir(), 'artwork')))
+    }
+    return durableFolderArtworkCache.get(sourcePath)
   }
 
   for (const filePath of files) {
@@ -581,7 +590,18 @@ async function scanFolder(folderPath, {
           fs.existsSync(existingArtwork)
         const hasCurrentFolderArtwork = folderArtwork && existingArtwork === path.resolve(folderArtwork)
         const noArtworkToUpdate = !existingArtwork && !folderArtwork
-        if (hasCachedArtwork || hasCurrentFolderArtwork || noArtworkToUpdate) {
+        if (hasCurrentFolderArtwork) {
+          // Previously indexed SMB/WebDAV folders may still point directly at
+          // their mount path. Migrate those unchanged rows to app-owned art
+          // without re-reading/retagging the original audio file.
+          const durable = await getDurableFolderArtwork(folderArtwork)
+          if (durable) {
+            db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
+              .run(durable, filePath)
+          }
+          scanStatus.done++; emitProgress(); continue
+        }
+        if (hasCachedArtwork || noArtworkToUpdate) {
           scanStatus.done++; emitProgress(); continue
         }
       }
@@ -601,7 +621,15 @@ async function scanFolder(folderPath, {
       const minDuration = getMinDuration()
       if (duration < minDuration) { console.log(`[scanFolder] Skipped: ${filePath} - Too short (${duration}s)`); scanStatus.skipped++; scanStatus.done++; emitProgress(); continue }
       if (getSkipDrumKit() && isDrumKit(title, c.album, c.genre?.[0])) { console.log(`[scanFolder] Skipped: ${filePath} - Drumkit pattern detected`); scanStatus.skipped++; scanStatus.done++; emitProgress(); continue }
-      const artwork = await extractArtwork(meta, trackId, folderArtwork)
+      // Prefer an app-owned copy of the folder cover: UNC/WebDAV paths may
+      // disappear when the NAS sleeps. Preserve any existing readable artwork
+      // when transient server failures prevent a new extraction.
+      const localFolderArtwork = meta.common.picture?.length
+        ? null : await getDurableFolderArtwork(folderArtwork)
+      const previousArtwork = existing?.artwork_path && fs.existsSync(existing.artwork_path)
+        ? existing.artwork_path : null
+      const artwork = await extractArtwork(
+        meta, trackId, localFolderArtwork || previousArtwork || folderArtwork)
       const replaygain = c.replaygain_track_gain || null
       const audioQuality = quality.qualityFields(meta)
       audioQuality.atmos_verified = await quality.probeAtmosFile(filePath, { codec: audioQuality.codec })
