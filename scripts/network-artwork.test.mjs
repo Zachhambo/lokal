@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { findFolderArtworkAsync, coverPriority } = require('../electron/networkArtwork')
+const { findFolderArtworkAsync, coverPriority, cacheFolderArtwork } = require('../electron/networkArtwork')
 
 const file = name => ({ name, isFile: () => true })
 const stat = async () => ({ isFile: () => true, size: 64 * 1024 })
@@ -90,4 +90,44 @@ test('NAS artwork: a timed-out stat never causes another candidate to stall', as
   assert.equal(result, null)
   assert.deepEqual(checked, ['cover.jpg'])
   assert.ok(Date.now() - started < 500, 'all candidates share a bounded deadline')
+})
+
+test('NAS artwork: numbered folder covers are recognized', async () => {
+  const album = path.resolve('/mnt/nas/Album')
+  const chosen = await findFolderArtworkAsync(album, {
+    readdir: async () => [file('poster.jpg'), file('cover.1.JPG')],
+    stat,
+  })
+  assert.equal(chosen, path.join(album, 'cover.1.JPG'))
+})
+
+test('NAS artwork: a mounted cover is converted to durable app artwork', async () => {
+  const album = path.resolve('/mnt/nas/Album/cover.jpg')
+  const writes = []
+  const opts = {
+    stat: async () => ({ isFile: () => true, size: 4, mtimeMs: 1234 }),
+    readFile: async () => Buffer.from('cover'),
+    writeCover: async (dir, base, bytes) => {
+      writes.push({ dir, base, bytes: Buffer.from(bytes).toString() })
+      return path.join(dir, base + '.webp')
+    },
+  }
+  const first = await cacheFolderArtwork(album, '/app/artwork', opts)
+  const second = await cacheFolderArtwork(album, '/app/artwork', opts)
+  assert.equal(first, second)
+  assert.equal(writes[0].dir, '/app/artwork')
+  assert.equal(writes[0].bytes, 'cover')
+  assert.match(writes[0].base, /^nas-folder-[a-f0-9]{24}$/)
+})
+
+test('NAS artwork: failed or oversized cover reads cannot corrupt indexed art', async () => {
+  const album = path.resolve('/mnt/nas/Album/cover.jpg')
+  assert.equal(await cacheFolderArtwork(album, '/app/artwork', {
+    stat: async () => ({ isFile: () => true, size: 15 * 1024 * 1024 }),
+    readFile: async () => { throw new Error('must not be read') },
+  }), null)
+  assert.equal(await cacheFolderArtwork(album, '/app/artwork', {
+    stat: async () => ({ isFile: () => true, size: 4 }),
+    readFile: async () => { throw new Error('NAS offline') },
+  }), null)
 })
