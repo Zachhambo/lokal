@@ -4,6 +4,12 @@ on:
   pull_request:
     paths:
       - 'electron/online/youtube.js'
+      - 'electron/online/addons.js'
+      - 'electron/online/sources.js'
+      - 'electron/ipc/online.js'
+      - 'electron/preload.js'
+      - 'src/api.js'
+      - 'scripts/http-addon-network-timeout.test.mjs'
       - 'electron/artwork/spotify.js'
       - 'electron/ipc/spotifyLikes.js'
       - 'electron/preload.js'
@@ -39,10 +45,14 @@ jobs:
       - name: Verify YouTube, Spotify and Discovery shelf regressions
         run: |
           node --check electron/online/youtube.js
+          node --check electron/online/addons.js
+          node --check electron/online/sources.js
+          node --check electron/ipc/online.js
+          node --check src/api.js
           node --check electron/artwork/spotify.js
           node --check electron/ipc/spotifyLikes.js
           node --check electron/preload.js
-          node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs scripts/http-addon-auto-fallback.test.mjs
+          node --test scripts/discovery-shelf-customization.test.mjs scripts/youtube-account.test.mjs scripts/youtube-mixes.test.mjs scripts/spotify-discovery.test.mjs scripts/recommendations.test.mjs scripts/http-addon-auto-fallback.test.mjs scripts/http-addon-network-timeout.test.mjs
       - name: Preserve playing song through addon verification refresh
         run: node --test scripts/addon-verification-playback.test.mjs
       - name: Compile desktop Discovery UI
