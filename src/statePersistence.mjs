@@ -14,6 +14,32 @@ const VIEW_KEYS = new Set([
   'sidebar:rightWidth', 'navigation:scrollPath', 'navigation:scrollTop',
 ])
 
+// Reject corrupted/obsolete saved enum values, especially sort expressions
+// that eventually reach the track-query API.
+const ENUM_VALUES = {
+  'library:sort': ['added_at DESC', 'title ASC', 'artist ASC', 'play_count DESC', 'duration DESC'],
+  'library:source': ['all', 'local', 'mobile', 'yt', 'sc', 'addon', 'soulseek', 'web', 'errors'],
+  'library:view': ['list', 'grid'],
+  'library:mode': ['simple', 'advanced'],
+  'library:quality': ['', 'hires', 'lossless', 'high', 'low', 'suspect'],
+  'artists:sort': ['name', 'tracks'],
+  'artists:followed': ['0', '1'],
+  'artists:mainOnly': ['0', '1'],
+  'artists:density': ['spaced', 'compact', 'list'],
+  'sidebar:collapsed': ['0', '1'],
+}
+function validViewValue(key, value) {
+  if (typeof value !== 'string' || value.length > 512) return false
+  if (ENUM_VALUES[key] && !ENUM_VALUES[key].includes(value)) return false
+  if (key === 'library:format' && value !== '' && !/^(?:16|24|32)-(?:44100|48000|88200|96000|176400|192000)$/.test(value)) return false
+  if (key === 'navigation:scrollTop' && (!Number.isFinite(Number(value)) ||
+      Number(value) < 0 || Number(value) > 10000000)) return false
+  if (key === 'navigation:scrollPath' && !allowedSavedRoute(value)) return false
+  if ((key === 'sidebar:leftWidth' || key === 'sidebar:rightWidth') &&
+      (!Number.isFinite(Number(value)) || Number(value) < 100 || Number(value) > 1000)) return false
+  return true
+}
+
 const STATIC_ROUTES = new Set([
   '/', '/library', '/albums', '/artists', '/genres', '/stations',
   '/videos', '/search', '/profile', '/quality', '/radio', '/recap',
@@ -58,16 +84,12 @@ export function setStatePersistenceEnabled(enabled, storage = globalThis.localSt
 export function readViewState(key, storage = globalThis.localStorage) {
   if (!statePersistenceEnabled(storage) || !VIEW_KEYS.has(key)) return undefined
   const value = readRecord(storage)?.values?.[key]
-  return typeof value === 'string' && value.length <= 512 ? value : undefined
+  return validViewValue(key, value) ? value : undefined
 }
 
 export function writeViewState(key, value, storage = globalThis.localStorage) {
   if (!statePersistenceEnabled(storage) || !VIEW_KEYS.has(key) ||
-      typeof value !== 'string' || value.length > 512) return
-  // Scroll values are validated separately from arbitrary view preferences.
-  if (key === 'navigation:scrollTop' && (!Number.isFinite(Number(value)) ||
-      Number(value) < 0 || Number(value) > 10000000)) return
-  if (key === 'navigation:scrollPath' && !allowedSavedRoute(value)) return
+      !validViewValue(key, value)) return
   try {
     const previous = readRecord(storage) || { version: VERSION, values: {} }
     if (previous.values[key] === value) return
@@ -88,6 +110,7 @@ export function writeSavedRoute(route, storage = globalThis.localStorage) {
   try {
     const previous = readRecord(storage) || { version: VERSION, values: {} }
     if (previous.route === route) return
-    storage?.setItem(STATE_KEY, JSON.stringify({ ...previous, route }))
+    const next = JSON.stringify({ ...previous, route })
+    if (next.length <= MAX_RECORD_SIZE) storage?.setItem(STATE_KEY, next)
   } catch {}
 }
