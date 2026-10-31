@@ -105,6 +105,10 @@ function registerSpotifyLikesHandlers(ipcMain) {
     try { return { mixes: await cached('home', !!force, () => spotify.madeForYou(settings().spotify_sp_dc)) } }
     catch (error) { return { mixes: [], error: error.message } }
   })
+  ipcMain.handle('spotify:libraryPlaylists', async (_, force) => {
+    try { return { playlists: await cached('libraryPlaylists', !!force, () => spotify.libraryPlaylists(settings().spotify_sp_dc)) } }
+    catch (error) { return { playlists: [], error: error.message } }
+  })
   ipcMain.handle('spotify:playlist', async (_, uri, force) => {
     try { return await cached(`playlist:${uri}`, !!force, () => spotify.playlistTracks(settings().spotify_sp_dc, String(uri || ''))) }
     catch (error) { return { tracks: [], error: error.message } }
