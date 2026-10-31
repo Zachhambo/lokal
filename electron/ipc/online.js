@@ -181,6 +181,57 @@ function registerOnlineHandlers(ipcMain) {
   })
   ipcMain.handle('online:account', (_, force = false) => accountRequest(auth => youtube.fetchAccountData({ ...auth, force: !!force })).catch(e => ({ error: e.message, authenticated: false })))
   ipcMain.handle('online:accountPlaylist', (_, playlistId) => accountRequest(({ cookies, fetchImpl }) => youtube.fetchAccountPlaylist(playlistId, cookies, fetchImpl)).catch(e => ({ error: e.message })))
+  const { createSpotifyPlaylistCache } = require('./spotifyPlaylistCache')
+  const youtubePlaylistDisk = createSpotifyPlaylistCache(require('path').join(
+    require('electron').app.getPath('userData'), 'youtube-playlists-v1.json'))
+  const youtubePlaylistPending = new Map()
+  const youtubeLibraryResource = async (key, force, loader, empty) => {
+    try {
+      return await accountRequest(async ({ cookies, fetchImpl }) => {
+        const cookie = youtube.normalizeAccountCookies(cookies || '')
+        if (!youtube.accountHeaders(cookie)) return { ...empty, accountId: '', error: 'Sign in to YouTube Music in Integrations.' }
+        const accountId = crypto.createHash('sha256').update(cookie).digest('hex')
+        const hit = youtubePlaylistDisk.read(cookie, key)
+        const autoUpdate = settings().youtube_playlist_auto_update === '1'
+        if (hit && !force) return { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate, refreshDue: youtubePlaylistDisk.due(cookie, key, autoUpdate) }
+        const requestKey = `${accountId}:${key}`
+        if (youtubePlaylistPending.has(requestKey)) return youtubePlaylistPending.get(requestKey)
+        const task = (async () => {
+          try {
+            const value = await loader({ cookies, fetchImpl })
+            if (value?.error) throw new Error(value.error)
+            const current = await accountSession.credentials()
+            if (youtube.normalizeAccountCookies(current.cookies || '') !== cookie)
+              return { ...empty, accountId: '', error: 'YouTube Music account changed.' }
+            youtubePlaylistDisk.save(cookie, key, value)
+            return { ...value, accountId, lastUpdated: Date.now(), autoUpdate, refreshDue: false }
+          } catch (error) {
+            youtubePlaylistDisk.failed(cookie, key)
+            return hit
+              ? { ...hit.value, accountId, lastUpdated: hit.at, autoUpdate, error: error.message, refreshDue: false }
+              : { ...empty, accountId, error: error.message }
+          }
+        })().finally(() => youtubePlaylistPending.delete(requestKey))
+        youtubePlaylistPending.set(requestKey, task)
+        return task
+      })
+    } catch (error) { return { ...empty, accountId: '', error: error.message } }
+  }
+  ipcMain.handle('online:libraryPlaylists', (_, force) => youtubeLibraryResource(
+    'libraryPlaylists', !!force,
+    auth => youtube.fetchLibraryPlaylists(auth).then(playlists => ({ playlists })),
+    { playlists: [] },
+  ))
+  ipcMain.handle('online:libraryPlaylistTracks', (_, id, force) => {
+    if (!/^[\\w.-]{1,120}$/.test(String(id || '')) || String(id).startsWith('RD'))
+      return { tracks: [], error: 'Invalid YouTube Music playlist id.' }
+    return youtubeLibraryResource(
+      `libraryPlaylist:${id}`, !!force,
+      ({ cookies, fetchImpl }) => youtube.fetchMusicPlaylist(id, cookies, fetchImpl, { limit: 1000, timeoutMs: 60000 }),
+      { tracks: [] },
+    )
+  })
+
   ipcMain.handle('online:radio', (_, videoId) => accountRequest(auth => youtube.fetchRadio(videoId, auth)).catch(() => []))
   ipcMain.handle('online:setAccountLiked', (_, videoId, liked) => accountRequest(({ cookies, fetchImpl }) => youtube.setAccountLiked(videoId, liked, cookies, fetchImpl)).catch(e => ({ error: e.message })))
   // Direct audio link of an addon track, for "Save to library" (the downloader fetches it).
