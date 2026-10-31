@@ -70,6 +70,7 @@ import ReleaseRefreshBanner from './components/ReleaseRefreshBanner'
 import { PageReadyContext, PageShownContext, PAGE_READY_TIMEOUT_MS } from './pageCache'
 import { audioSrcFor, isAddonProvider, providerLabel, streamRef } from './onlineTracks'
 import { beginAtmosOutputRelease, awaitAtmosOutputRelease } from './audio/atmosHandoff.mjs'
+import { addonPlaybackOutputKey } from './audio/addonPlaybackOutputKey.mjs'
 import { playbackLog } from './playbackLog'
 import TvController from './tv/TvController'
 
@@ -784,6 +785,9 @@ export default function App() {
       showToast(error?.message || 'Could not start the configured native audio output.')
     })
   }, [currentTrack, isPlaying, castActive, addonPlaybackPrefs])
+  // Verification broadcasts refresh all addon metadata. Only an actual
+  // output-policy change for the playing addon may reload its audio element.
+  const activeAddonOutputKey = addonPlaybackOutputKey(streamRef(currentTrack)?.provider, addonPlaybackPrefs)
   const replayGainMode = usePlayerStore(s => s.replayGainMode)
   const volumeRef = useRef(volume)
   const [audioOutputReady, setAudioOutputReady] = useState(0)
@@ -3046,7 +3050,7 @@ export default function App() {
     }
     start()
     return () => { cancelled = true; el.dataset.fallbackPending = ''; el.dataset.lokalTrackPending = '' }
-  }, [currentTrack?.id, currentTrack?.file_path, currentTrack?.atmosNative, addonPlaybackPrefs, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
+  }, [currentTrack?.id, currentTrack?.file_path, currentTrack?.atmosNative, activeAddonOutputKey, playbackRetryNonce, castActive, cancelCrossfade, beginLastfmPlayback, recoverOnlinePlayback, setIsBuffering, applyReplayGainToElement])
 
   useEffect(() => {
     if (!api.isElectron) return
