@@ -1,0 +1,110 @@
+name: Sync Upstream and Build Windows Update
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sync-upstream-4k-fork-new
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync upstream changes
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      version: ${{ steps.sync.outputs.version }}
+    steps:
+      - name: Checkout fork branch
+        uses: actions/checkout@v5
+        with:
+          ref: 4k-fork-new
+          fetch-depth: 0
+
+      - name: Merge upstream and bump patch version
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/lokal-music/lokal.git
+          git fetch --no-tags origin \
+            refs/heads/4k-fork-new:refs/remotes/origin/4k-fork-new
+          git fetch --no-tags upstream \
+            refs/heads/main:refs/remotes/upstream/main
+          git merge --ff-only origin/4k-fork-new
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Upstream main has no new commits."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge-base HEAD upstream/main >/dev/null; then
+            echo "::error::The fork and upstream have no common history; refusing to merge unrelated histories."
+            exit 1
+          fi
+
+          echo "Merging upstream main into 4k-fork-new."
+          git merge --no-edit upstream/main
+
+          CURRENT=$(node -p "require('./package.json').version")
+          if ! [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a stable x.y.z package version after sync, got $CURRENT."
+            exit 1
+          fi
+          NEW=$(node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number)
+            console.log(`${major}.${minor}.${patch + 1}`)
+          ' "$CURRENT")
+
+          CURRENT="$CURRENT" NEW="$NEW" node -e '
+            const fs = require("fs")
+            const current = process.env.CURRENT
+            const next = process.env.NEW
+            const escaped = current.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+            for (const [file, replacements] of [["package.json", 1], ["package-lock.json", 2]]) {
+              const source = fs.readFileSync(file, "utf8")
+              const pattern = new RegExp(`"version": "${escaped}"`, "g")
+              let count = 0
+              const updated = source.replace(pattern, match => {
+                if (count++ < replacements) return `"version": "${next}"`
+                return match
+              })
+              if (count < replacements) throw new Error(`${file}: expected ${replacements} version entries for ${current}; found ${count}`)
+              fs.writeFileSync(file, updated)
+            }
+          '
+          sed -i -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW-blue/" README.md
+
+          git add package.json package-lock.json README.md
+          git commit -m "Version $NEW after upstream sync"
+          git push origin HEAD:refs/heads/4k-fork-new
+
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Trigger Windows update build
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch Windows update build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.sync.outputs.version }}
+        run: |
+          gh workflow run windows-update.yml \
+            --repo "$REPOSITORY" \
+            --ref 4k-fork-new \
+            --field ref=4k-fork-new
+          echo "Triggered Windows update build for v$VERSION."
