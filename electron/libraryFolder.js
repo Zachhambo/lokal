@@ -4,8 +4,91 @@ const fs = require('fs-extra')
 
 const AUDIO_EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac', '.opus', '.wma', '.alac', '.ape'])
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
+// Persist successful unfiltered listings so reopening a music folder skips its
+// recursive track existence checks until the daily refresh is due.
+const FOLDER_VIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const MAX_FOLDER_VIEW_CACHE_ENTRY_BYTES = 128 * 1024 * 1024
+const MAX_FOLDER_VIEW_CACHE_ENTRIES = 128
+const MAX_FOLDER_VIEW_CACHE_BYTES = 256 * 1024 * 1024
 
 const artworkFingerprintCache = new Map()
+
+function folderViewCacheFile(cacheDir, rootPath, relativePath) {
+  const key = process.platform === 'win32'
+    ? path.resolve(rootPath).toLowerCase() + '\0' + relativePath.toLowerCase()
+    : path.resolve(rootPath) + '\0' + relativePath
+  const digest = crypto.createHash('sha256').update(key).digest('hex')
+  return path.join(cacheDir, `folder-view-${digest}.json`)
+}
+
+function readFolderViewCache(cacheFile, rootName, rootPath, rootPaths, relativePath) {
+  if (!cacheFile) return null
+  try {
+    const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+    const age = Date.now() - cached.savedAt
+    if (cached.version !== 1 || !Number.isFinite(age) || age < 0 ||
+        age >= FOLDER_VIEW_CACHE_TTL_MS || !cached.view || typeof cached.view !== 'object') {
+      return null
+    }
+    return {
+      ...cached.view,
+      rootName,
+      rootPath,
+      rootPaths,
+      relativePath,
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('[library-folders] Could not read folder cache:', error?.message || error)
+    }
+    return null
+  }
+}
+
+function pruneFolderViewCache(cacheDir) {
+  const entries = fs.readdirSync(cacheDir)
+    .filter(name => /^folder-view-[a-f0-9]{64}\.json$/i.test(name))
+    .map(name => {
+      const filePath = path.join(cacheDir, name)
+      const stat = fs.statSync(filePath)
+      return { filePath, size: stat.size, modifiedAt: stat.mtimeMs }
+    })
+    .sort((left, right) => left.modifiedAt - right.modifiedAt)
+  let totalBytes = entries.reduce((total, entry) => total + entry.size, 0)
+  while (entries.length > MAX_FOLDER_VIEW_CACHE_ENTRIES || totalBytes > MAX_FOLDER_VIEW_CACHE_BYTES) {
+    const oldest = entries.shift()
+    if (!oldest) break
+    fs.removeSync(oldest.filePath)
+    totalBytes -= oldest.size
+  }
+}
+
+function writeFolderViewCache(cacheFile, view) {
+  if (!cacheFile) return
+  let temporaryFile
+  try {
+    const contents = JSON.stringify({ version: 1, savedAt: Date.now(), view })
+    const byteLength = Buffer.byteLength(contents, 'utf8')
+    if (byteLength > MAX_FOLDER_VIEW_CACHE_ENTRY_BYTES) {
+      console.warn('[library-folders] Skipping oversized folder cache entry:', byteLength, 'bytes')
+      return
+    }
+    fs.ensureDirSync(path.dirname(cacheFile))
+    temporaryFile = `${cacheFile}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`
+    fs.writeFileSync(temporaryFile, contents)
+    fs.renameSync(temporaryFile, cacheFile)
+    try {
+      pruneFolderViewCache(path.dirname(cacheFile))
+    } catch (error) {
+      console.warn('[library-folders] Could not prune folder cache:', error?.message || error)
+    }
+  } catch (error) {
+    console.warn('[library-folders] Could not write folder cache:', error?.message || error)
+    if (temporaryFile) {
+      try { fs.removeSync(temporaryFile) } catch {}
+    }
+  }
+}
 
 function artworkFingerprint(filePath) {
   try {
@@ -324,7 +407,7 @@ function escapeLike(value) {
   return String(value).replace(/[\\%_]/g, character => '\\' + character)
 }
 
-function getLibraryFolders(db, relativePath = '', search = '', rootOverride = '') {
+function getLibraryFolders(db, relativePath = '', search = '', rootOverride = '', options = {}) {
   const plural = db.prepare("SELECT value FROM settings WHERE key = 'music_folders'").get()?.value
   let configuredRoots = []
   try { configuredRoots = Array.isArray(JSON.parse(plural || 'null')) ? JSON.parse(plural) : [] } catch {}
@@ -359,6 +442,14 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
     const realTarget = fs.realpathSync(targetPath)
     if (isOutside(realRoot, realTarget) || !fs.statSync(realTarget).isDirectory()) {
       return empty('Folder is not available inside the selected music folder', true)
+    }
+    const query = typeof search === 'string' ? search.trim() : ''
+    const cacheFile = !query && options.cacheDir
+      ? folderViewCacheFile(options.cacheDir, rootPath, normalizedRelative)
+      : null
+    if (cacheFile && !options.forceRefresh) {
+      const cachedView = readFolderViewCache(cacheFile, rootName, rootPath, allowedRoots, normalizedRelative)
+      if (cachedView) return cachedView
     }
     entries = fs.readdirSync(targetPath, { withFileTypes: true })
   } catch {
@@ -505,7 +596,7 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
     } catch {}
   }
 
-  return {
+  const view = {
     available: true,
     rootName,
     rootPath,
@@ -519,6 +610,10 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
     deepTracks,
     search: query,
   }
+  if (!query && options.cacheDir) {
+    writeFolderViewCache(folderViewCacheFile(options.cacheDir, rootPath, normalizedRelative), view)
+  }
+  return view
 }
 
 module.exports = { findFolderArtwork, getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders, configuredMusicRoots }

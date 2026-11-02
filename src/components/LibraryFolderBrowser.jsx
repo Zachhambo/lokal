@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, ArrowRight, ChevronRight, Folder, Music, Search, Pencil, Trash2, Check, X } from 'lucide-react'
 import { api } from '../api'
 import { isSuspect, tierOf } from '../quality'
@@ -61,6 +61,7 @@ export default function LibraryFolderBrowser({
   const [folderActionIsError, setFolderActionIsError] = useState(false)
   const folderMenu = useContextMenu()
   const requestRef = useRef(0)
+  const forceFolderRefreshRef = useRef(false)
 
   useEffect(() => {
     setSelectedFolderPaths([])
@@ -152,7 +153,10 @@ export default function LibraryFolderBrowser({
   }, [folderPath])
 
   useEffect(() => {
-    const refresh = () => setRefreshKey(value => value + 1)
+    const refresh = () => {
+      forceFolderRefreshRef.current = true
+      setRefreshKey(value => value + 1)
+    }
     window.addEventListener('lokal:refresh', refresh)
     return () => window.removeEventListener('lokal:refresh', refresh)
   }, [])
@@ -165,7 +169,9 @@ export default function LibraryFolderBrowser({
     onDataChange?.(null)
 
     const timer = setTimeout(() => {
-      Promise.resolve(api.getLibraryFolders(folderPath, searchQuery.trim(), rootPath)).then(result => {
+      const forceRefresh = !searchQuery.trim() && forceFolderRefreshRef.current
+      if (forceRefresh) forceFolderRefreshRef.current = false
+      Promise.resolve(api.getLibraryFolders(folderPath, searchQuery.trim(), rootPath, forceRefresh)).then(result => {
         if (!active || requestId !== requestRef.current) return
         if (result?.notFound && folderPath) {
           setData(null)
@@ -472,14 +478,20 @@ export default function LibraryFolderBrowser({
         </div>
       )}
 
-      {isCurrentPath && data?.available && !displayedError && (
-        <motion.div
-          key={data.relativePath || 'library-root'}
-          initial={{ opacity: 0, y: 5 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.16 }}
-          className="space-y-5"
-        >
+      <AnimatePresence mode="wait">
+        {isCurrentPath && data?.available && !displayedError && (
+          <motion.div
+            key={data.relativePath || 'library-root'}
+            initial={coverFlow
+              ? { opacity: 0, filter: 'blur(10px)', scale: 0.985 }
+              : { opacity: 0, y: 5 }}
+            animate={coverFlow
+              ? { opacity: 1, filter: 'blur(0px)', scale: 1 }
+              : { opacity: 1, y: 0 }}
+            exit={coverFlow ? { opacity: 0, filter: 'blur(10px)', scale: 0.985 } : undefined}
+            transition={{ duration: coverFlow ? 0.28 : 0.16, ease: 'easeOut' }}
+            className="space-y-5"
+          >
           {api.isElectron && selectedFolderPaths.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2">
               <span className="mr-auto text-xs text-white">{t('{n} folders selected', { n: selectedFolderPaths.length })}</span>
@@ -686,8 +698,9 @@ export default function LibraryFolderBrowser({
               <p className="text-sm">{t("This folder is empty.")}</p>
             </div>
           )}
-        </motion.div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       {renameTargets && (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/65 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !folderActionBusy) setRenameTargets(null) }}>
           <form onSubmit={saveFolderRenames} className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="rename-folders-title">

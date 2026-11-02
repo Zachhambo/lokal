@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url)
 const { findFolderArtwork, getLibraryFolders } = require('../electron/libraryFolder.js')
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folders-'))
 const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folders-second-'))
+let cacheDir
 
 function likeMatches(value, pattern) {
   const regexSpecials = '.^$*+?()[]{}|\\'
@@ -146,6 +147,42 @@ try {
   assert.equal(artistView.folders[0].firstTrackYear, 1997, 'folder metadata includes the first song year when it has a cover image')
   assert.equal(artistView.folders[0].artwork_tracks.length, 2, 'track covers remain available as fallback artwork')
 
+  cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folder-cache-'))
+  const cachedArtistView = getLibraryFolders(db, 'Artist', '', '', { cacheDir })
+  const laterAlbum = path.join(root, 'Artist', 'Album 2')
+  const laterTrackPath = path.join(laterAlbum, '01-later.flac')
+  fs.mkdirSync(laterAlbum)
+  fs.writeFileSync(laterTrackPath, 'audio')
+  indexedTracks.push({
+    id: 'later-track',
+    title: 'Later Track',
+    artist: 'Artist',
+    album: 'Album 2',
+    file_path: laterTrackPath,
+  })
+  assert.equal(getLibraryFolders(db, 'Artist', '', '', { cacheDir }).folders.length, cachedArtistView.folders.length,
+    'folder listings stay cached between refreshes')
+  const refreshedArtistView = getLibraryFolders(db, 'Artist', '', '', { cacheDir, forceRefresh: true })
+  assert.equal(refreshedArtistView.folders.length, cachedArtistView.folders.length + 1,
+    'an explicit refresh rebuilds and replaces the cached listing')
+  const cachedFile = path.join(cacheDir, fs.readdirSync(cacheDir)[0])
+  const cacheRecord = JSON.parse(fs.readFileSync(cachedFile, 'utf8'))
+  cacheRecord.savedAt -= 24 * 60 * 60 * 1000
+  fs.writeFileSync(cachedFile, JSON.stringify(cacheRecord))
+  const expiredAlbum = path.join(root, 'Artist', 'Album 3')
+  const expiredTrackPath = path.join(expiredAlbum, '01-expired.flac')
+  fs.mkdirSync(expiredAlbum)
+  fs.writeFileSync(expiredTrackPath, 'audio')
+  indexedTracks.push({
+    id: 'expired-track',
+    title: 'Expired Track',
+    artist: 'Artist',
+    album: 'Album 3',
+    file_path: expiredTrackPath,
+  })
+  assert.equal(getLibraryFolders(db, 'Artist', '', '', { cacheDir }).folders.length, refreshedArtistView.folders.length + 1,
+    'folder listings are rebuilt after the daily cache expires')
+
   const emojiView = getLibraryFolders(db, '🎧Artist')
   assert.equal(emojiView.totalTracks, 1001)
   assert.equal(emojiView.allTracks.length, 1001, 'Unicode folder Play All returns every descendant')
@@ -172,6 +209,7 @@ try {
 
   console.log('Library folder view tests passed')
 } finally {
+  if (cacheDir) fs.rmSync(cacheDir, { recursive: true, force: true })
   fs.rmSync(root, { recursive: true, force: true })
   fs.rmSync(secondRoot, { recursive: true, force: true })
 }

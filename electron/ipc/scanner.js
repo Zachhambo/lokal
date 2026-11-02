@@ -1329,7 +1329,11 @@ function registerScannerHandlers(ipcMain) {
       return { bytes: stat.isFile() ? stat.size : null }
     } catch { return { bytes: null } }
   })
-  ipcMain.handle('scanner:getLibraryFolders', (_, relativePath, search, rootPath) => getLibraryFolders(getDB(), relativePath, search, rootPath))
+  ipcMain.handle('scanner:getLibraryFolders', (_, relativePath, search, rootPath, forceRefresh) =>
+    getLibraryFolders(getDB(), relativePath, search, rootPath, {
+      cacheDir: path.join(getStorageDir(), 'library-folder-cache'),
+      forceRefresh: forceRefresh === true,
+    }))
 
   ipcMain.handle('scanner:renameLibraryFolders', (e, changes, rootPath) => {
     try {

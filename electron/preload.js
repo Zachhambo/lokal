@@ -72,7 +72,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   getTracks: (o) => invoke('scanner:getTracks', o),
   getTrackFileSize: (id) => invoke('scanner:getTrackFileSize', id),
-  getLibraryFolders: (p, s, root) => invoke('scanner:getLibraryFolders', p, s, root),
+  getLibraryFolders: (p, s, root, forceRefresh) => invoke('scanner:getLibraryFolders', p, s, root, forceRefresh),
   renameLibraryFolders: (changes, root) => invoke('scanner:renameLibraryFolders', changes, root),
   deleteLibraryFolders: (paths, root) => invoke('scanner:deleteLibraryFolders', paths, root),
   onLibraryChanged: (fn) => on('library:changed', (_, data) => fn(data)),
