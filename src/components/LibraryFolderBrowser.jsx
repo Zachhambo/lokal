@@ -354,15 +354,15 @@ export default function LibraryFolderBrowser({
 
   const folderPicks = useMemo(() => visibleFolders.map(folder => {
     const trackCount = folder.trackCount
-    const description = trackCount != null
+    const trackDescription = trackCount != null
       ? `${trackCount} ${trackCount === 1 ? t('track') : t('tracks')}`
       : t('Folder')
     const year = String(folder.firstTrackYear || '')
-    const title = folder.artwork_path && /^\d{4}$/.test(year)
-      ? `${folder.name} (${year})`
-      : folder.name
+    const description = folder.artwork_path && /^\d{4}$/.test(year)
+      ? `${trackDescription} · ${year}`
+      : trackDescription
     return {
-      track: { ...folder, id: folder.path, title, artist: description },
+      track: { ...folder, id: folder.path, title: folder.name, artist: description },
       item: folder,
       selected: selectedFolderPaths.includes(folder.path),
       ariaLabel: t('Open folder') + ': ' + folder.name,
