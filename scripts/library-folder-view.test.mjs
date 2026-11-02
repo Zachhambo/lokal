@@ -60,7 +60,7 @@ try {
   fs.unlinkSync(path.join(album, 'poster.png'))
 
   const indexedTracks = [
-    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', file_path: path.join(album, '01-track.flac'), artwork_path: trackCoverA },
+    { id: 'track-1', title: 'Track One', artist: 'Artist', album: 'Album', year: 1997, file_path: path.join(album, '01-track.flac'), artwork_path: trackCoverA },
     { id: 'track-percent', title: 'Literal 100% Track', artist: 'Artist', album: 'Album', file_path: path.join(album, '02-percent.flac'), artwork_path: trackCoverB },
     { id: 'track-underscore', title: 'Name_with_underscore', artist: 'Artist', album: 'Album', file_path: path.join(album, '03-underscore.flac'), artwork_path: trackCoverA },
     // This row is stale: it must not count or appear in a playable queue.
@@ -143,6 +143,7 @@ try {
   assert.equal(artistView.folders[0].name, 'Album')
   assert.equal(artistView.folders[0].trackCount, 3)
   assert.equal(artistView.folders[0].artwork_path, path.join(album, 'a.png'), 'an image inside a folder is used as its cover');
+  assert.equal(artistView.folders[0].firstTrackYear, 1997, 'folder metadata includes the first song year when it has a cover image')
   assert.equal(artistView.folders[0].artwork_tracks.length, 2, 'track covers remain available as fallback artwork')
 
   const emojiView = getLibraryFolders(db, '🎧Artist')

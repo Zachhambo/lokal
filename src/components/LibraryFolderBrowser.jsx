@@ -6,6 +6,8 @@ import { isSuspect, tierOf } from '../quality'
 import { fetchAllErrorTrackIds, getFolderPlaybackTracks } from '../libraryHelpers'
 import TrackList from './TrackList'
 import FadeImg from './FadeImg'
+import CoverFlow from './CoverFlow'
+import { useAppearanceFlag } from '../appearanceFlags'
 import { useTranslation } from '../i18n'
 import ContextMenu, { useContextMenu } from './ContextMenu'
 
@@ -44,6 +46,7 @@ export default function LibraryFolderBrowser({
   filters = {},
 }) {
   const { t } = useTranslation()
+  const coverFlow = useAppearanceFlag('home_cover_flow')
   const [data, setData] = useState(null)
   const [folderColumnSort, setFolderColumnSort] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -343,6 +346,23 @@ export default function LibraryFolderBrowser({
     return data.folders.filter(f => f.name.toLowerCase().includes(term))
   }, [data?.folders, term])
 
+  const folderPicks = useMemo(() => visibleFolders.map(folder => {
+    const trackCount = folder.trackCount
+    const description = trackCount != null
+      ? `${trackCount} ${trackCount === 1 ? t('track') : t('tracks')}`
+      : t('Folder')
+    const year = String(folder.firstTrackYear || '')
+    const title = folder.artwork_path && /^\d{4}$/.test(year)
+      ? `${folder.name} (${year})`
+      : folder.name
+    return {
+      track: { ...folder, id: folder.path, title, artist: description },
+      item: folder,
+      selected: selectedFolderPaths.includes(folder.path),
+      ariaLabel: t('Open folder') + ': ' + folder.name,
+    }
+  }), [visibleFolders, selectedFolderPaths, t])
+
   const visibleTracks = useMemo(() => {
     if (!data?.tracks?.length) return []
     return sortTracks(data.tracks.filter(track => (
@@ -472,7 +492,31 @@ export default function LibraryFolderBrowser({
           {folderActionMessage && (
             <p role={folderActionIsError ? 'alert' : 'status'} className={`text-xs ${folderActionIsError ? 'text-red-400' : 'text-emerald-400'}`}>{folderActionMessage}</p>
           )}
-          {visibleFolders.length > 0 && view === 'grid' && (
+          {coverFlow && folderPicks.length > 0 && (
+            <CoverFlow
+              picks={folderPicks}
+              onSelect={(index, event) => handleFolderClick(event, folderPicks[index].item)}
+              onContextMenu={openFolderMenu}
+              selectionOnly
+              selectActionLabel={t('Open folder')}
+              flowLabel={t('Folders')}
+              sizeMultiplier={2}
+              detailsSizeMultiplier={2}
+              coverTopMultiplier={0.04}
+              stageHeightMultiplier={1.05}
+              wheelOneStep
+              renderArtwork={pick => (
+                <div className="relative h-full w-full">
+                  <FolderArtwork folder={pick.item} artSrc={artSrc} />
+                  {!pick.item.artwork_path && !(pick.item.artwork_tracks || []).length && (
+                    <Folder size={42} strokeWidth={1.5} className="absolute inset-0 m-auto text-muted" />
+                  )}
+                  {pick.selected && <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-accent text-base shadow"><Check size={14} /></span>}
+                </div>
+              )}
+            />
+          )}
+          {!coverFlow && visibleFolders.length > 0 && view === 'grid' && (
             <div className="grid grid-cols-2 @sm:grid-cols-3 @md:grid-cols-4 @lg:grid-cols-5 gap-3">
               {visibleFolders.map(folder => {
                 const selected = selectedFolderPaths.includes(folder.path)
@@ -505,8 +549,7 @@ export default function LibraryFolderBrowser({
               })}
             </div>
           )}
-
-          {visibleFolders.length > 0 && view === 'list' && (
+          {!coverFlow && visibleFolders.length > 0 && view === 'list' && (
             <div className="overflow-hidden rounded-xl border border-border bg-card/40 divide-y divide-border">
               {visibleFolders.map(folder => {
                 const selected = selectedFolderPaths.includes(folder.path)

@@ -89,7 +89,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "lokal-music",
+      "owner": "Zachhambo",
       "repo": "lokal"
     },
     "directories": {

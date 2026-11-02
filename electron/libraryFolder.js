@@ -370,6 +370,7 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
   const descendantTrackPaths = getExistingTrackPaths(db, targetPath)
   if (normalizedRelative && descendantTrackPaths.length === 0) return empty('Folder has no tracks', true)
   const folderTrackCounts = new Map()
+  const firstTrackPathsByChild = new Map()
   for (const filePath of descendantTrackPaths) {
     const relativeTrackPath = path.relative(targetPath, filePath)
     const separator = relativeTrackPath.indexOf(path.sep)
@@ -377,6 +378,25 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
     const childName = relativeTrackPath.slice(0, separator)
     const childKey = process.platform === 'win32' ? childName.toLowerCase() : childName
     folderTrackCounts.set(childKey, (folderTrackCounts.get(childKey) || 0) + 1)
+    if (!firstTrackPathsByChild.has(childKey)) firstTrackPathsByChild.set(childKey, filePath)
+  }
+
+  const firstTrackYearByChild = new Map()
+  const firstTrackPaths = [...firstTrackPathsByChild.values()]
+  for (let i = 0; i < firstTrackPaths.length; i += 500) {
+    const batch = firstTrackPaths.slice(i, i + 500)
+    const placeholders = batch.map(() => '?').join(',')
+    const rows = db.prepare(
+      "SELECT file_path, year FROM tracks WHERE file_path IN (" + placeholders + ") AND file_path NOT LIKE 'ghost://%'"
+    ).all(...batch)
+    for (const row of rows) {
+      const relativeTrackPath = path.relative(targetPath, row.file_path)
+      const separator = relativeTrackPath.indexOf(path.sep)
+      if (separator <= 0) continue
+      const childName = relativeTrackPath.slice(0, separator)
+      const childKey = process.platform === 'win32' ? childName.toLowerCase() : childName
+      firstTrackYearByChild.set(childKey, row.year)
+    }
   }
 
   // If a child folder has no explicit cover/folder image, use distinct
@@ -423,6 +443,7 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
         name: entry.name,
         path: childRelative,
         trackCount: folderTrackCounts.get(childKey) || 0,
+        firstTrackYear: firstTrackYearByChild.get(childKey) || null,
         artwork_path: artworkPath,
         artwork_tracks: artworkTracks,
       }
@@ -501,4 +522,3 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
 }
 
 module.exports = { findFolderArtwork, getLibraryFolders, resolveLibraryFolderTarget, getTrackRowsUnderFolder, renameLibraryFolders }
-
