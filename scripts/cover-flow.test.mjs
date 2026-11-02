@@ -327,6 +327,12 @@ test('fast-flip window avoids repeated React and image work without a reflection
   assert.deepEqual(flowVisibleRange(8, 24), {start: 1, end: 16})
 })
 
+test('custom artwork renderers skip unused Cover Flow artwork preloading', () => {
+  const customArtworkGuard = flow.indexOf('if (renderArtwork) return undefined')
+  const preloadArtwork = flow.indexOf('const batches = picks.map')
+  assert.ok(customArtworkGuard >= 0 && preloadArtwork > customArtworkGuard, 'custom artwork skips built-in cover preloading')
+})
+
 test('reflection implementation and its Home-specific paint layering are completely removed', () => {
   assert.ok(!/reflecti(on|ve)|WebkitBoxReflect|box-reflect/i.test(flow) && !flow.includes('scaleY(-1)'), 'no reflection code remains')
   assert.ok(!flow.includes('overflow-y-visible'), 'artwork remains inside the stage')

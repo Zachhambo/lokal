@@ -1,7 +1,7 @@
 const { mergeDuplicates, mergeAllDuplicates } = require('../../electron/ipc/mergeDuplicates')
 const router = require('express').Router()
 const { removeTrackFiles, forgetDownloads } = require('../../electron/ipc/trackFiles')
-const { getDB } = require('../../electron/ipc/db')
+const { getDB, getStorageDir } = require('../../electron/ipc/db')
 const { resolveArtistId } = require('../../electron/artistId')
 const { getLibraryFolders } = require('../../electron/libraryFolder')
 const { recordListeningEvent } = require('../../electron/ipc/recaps')
@@ -450,7 +450,16 @@ router.get('/folder-artwork', (req, res) => {
 
 router.get('/library-folders', (req, res) => {
   try {
-    res.json(getLibraryFolders(getDB(), typeof req.query.path === 'string' ? req.query.path : '', typeof req.query.search === 'string' ? req.query.search : '', typeof req.query.root === 'string' ? req.query.root : ''))
+    res.json(getLibraryFolders(
+      getDB(),
+      typeof req.query.path === 'string' ? req.query.path : '',
+      typeof req.query.search === 'string' ? req.query.search : '',
+      typeof req.query.root === 'string' ? req.query.root : '',
+      {
+        cacheDir: path.join(getStorageDir(), 'library-folder-cache'),
+        forceRefresh: req.query.refresh === '1',
+      },
+    ))
   } catch (error) {
     console.error('[library-folders] Could not read library folder:', error.message)
     res.status(500).json({ available: false, error: 'Could not read the selected music folder', folders: [], tracks: [] })

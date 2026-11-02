@@ -189,9 +189,9 @@ export const api = {
   artworkRepairStatus: () => isE() ? el().artworkRepairStatus() : Promise.resolve({ running: false }),
   cancelArtworkRepair: () => isE() ? el().cancelArtworkRepair() : Promise.resolve({ running: false }),
   onArtworkRepairProgress: (fn) => isE() ? el().onArtworkRepairProgress(fn) : () => {},
-  getLibraryFolders: (relativePath = '', search = '', root = '') => isE()
-    ? el().getLibraryFolders(relativePath, search, root)
-    : apiFetch('/tracks/library-folders?path=' + encodeURIComponent(relativePath) + (search ? '&search=' + encodeURIComponent(search) : '') + (root ? '&root=' + encodeURIComponent(root) : '')),
+  getLibraryFolders: (relativePath = '', search = '', root = '', forceRefresh = false) => isE()
+    ? el().getLibraryFolders(relativePath, search, root, forceRefresh)
+    : apiFetch('/tracks/library-folders?path=' + encodeURIComponent(relativePath) + (search ? '&search=' + encodeURIComponent(search) : '') + (root ? '&root=' + encodeURIComponent(root) : '') + (forceRefresh ? '&refresh=1' : '')),
   renameLibraryFolders: (changes, root = '') => isE()
     ? el().renameLibraryFolders(changes, root)
     : Promise.resolve({ error: 'Folder management is only available in the desktop app' }),

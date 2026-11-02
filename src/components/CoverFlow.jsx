@@ -186,6 +186,7 @@ export default function CoverFlow({
   // budget, not an unbounded train of idle callbacks that competes with the
   // visible artwork loads during a fast Cover Flow fling.
   useEffect(() => {
+    if (renderArtwork) return undefined
     let cancelled = false
     let timer = null
     let idle = null
@@ -206,7 +207,7 @@ export default function CoverFlow({
       if (idle !== null) window.cancelIdleCallback?.(idle)
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [picks])
+  }, [picks, renderArtwork])
 
   const handleSelect = useCallback((index, event) => handlers.current?.select(index, event), [])
   const handlePlay = useCallback(index => handlers.current?.play(index), [])
