@@ -92,8 +92,8 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "lokal-music",
-      "repo": "Desktop"
+      "owner": "Zachhambo",
+      "repo": "lokal"
     },
     "directories": {
       "output": "release"

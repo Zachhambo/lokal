@@ -83,6 +83,7 @@ function FlowArtwork({ track }) {
 const FlowCover = React.memo(function FlowCover({
   pick, index, position, flip, flipTarget, backVisible,
   size, reduced, spreadValue, onSelect, onPlay, onContextMenu,
+  selectionOnly, selectActionLabel, renderArtwork, coverTopMultiplier = 0.18,
 }) {
   const geometry = useTransform([position, spreadValue], ([p, spread]) =>
     flowCoverGeometry(index - p, size, reduced, spread))
@@ -101,16 +102,19 @@ const FlowCover = React.memo(function FlowCover({
   const artwork = trackArtURL(pick.track)
 
   return <motion.div data-cover-flow-item={index} style={{
-    position: 'absolute', left: '50%', top: size * 0.18, width: size, height: size,
+    position: 'absolute', left: '50%',
+    ...(selectionOnly ? { top: size * coverTopMultiplier } : { top: size * 0.18 }),
+    width: size, height: size,
     marginLeft: -size / 2, transform, opacity, zIndex, transformOrigin: origin,
     transformStyle: 'preserve-3d', willChange: reduced ? 'auto' : 'transform',
   }}>
-    <button type="button" onClick={e => { e.stopPropagation(); onSelect(index) }}
+    <button type="button" onClick={e => { e.stopPropagation(); onSelect(index, e) }}
       onContextMenu={e => onContextMenu?.(e, pick.track)}
-      aria-label={'Play ' + pick.track.title + ' by ' + pick.track.artist}
-      className="absolute inset-0 overflow-hidden rounded-md bg-card outline-none shadow-[0_18px_40px_rgba(0,0,0,0.45)] focus-visible:ring-2 focus-visible:ring-accent"
+      aria-label={pick.ariaLabel || ('Play ' + pick.track.title + ' by ' + pick.track.artist)}
+      aria-pressed={selectionOnly ? !!pick.selected : undefined}
+      className={`absolute inset-0 overflow-hidden rounded-md bg-card outline-none shadow-[0_18px_40px_rgba(0,0,0,0.45)] focus-visible:ring-2 focus-visible:ring-accent ${pick.selected ? 'ring-2 ring-accent' : ''}`}
       style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
-      {artwork ? <FlowArtwork track={pick.track} /> :
+      {renderArtwork ? renderArtwork(pick) : artwork ? <FlowArtwork track={pick.track} /> :
         <span className="flex h-full w-full items-center justify-center text-5xl text-muted">♪</span>}
     </button>
     <div aria-hidden={!backVisible} inert={!backVisible}
@@ -118,17 +122,24 @@ const FlowCover = React.memo(function FlowCover({
       style={{ transform: 'rotateY(180deg)', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
       <p className="truncate text-sm font-semibold text-white">{pick.track.title}</p>
       <p className="mt-1 truncate text-xs text-muted">{pick.track.artist}</p>
-      <p className="mt-2 truncate text-xs text-muted">{pick.mix.name}</p>
-      <p className="mt-3 flex-1 border-t border-border pt-2 text-xs text-white/75">
-        <span className="mr-2 text-muted">1.</span>{pick.track.title}
-      </p>
-      <button type="button" onClick={e => { e.stopPropagation(); onPlay(index) }}
-        className="self-start rounded-xl bg-accent px-4 py-1.5 text-xs font-semibold text-base">PLAY</button>
+      {!selectionOnly && <>
+        <p className="mt-2 truncate text-xs text-muted">{pick.mix.name}</p>
+        <p className="mt-3 flex-1 border-t border-border pt-2 text-xs text-white/75">
+          <span className="mr-2 text-muted">1.</span>{pick.track.title}
+        </p>
+      </>}
+      <button type="button" onClick={e => { e.stopPropagation(); onSelect(index, e) }}
+        className="self-start rounded-xl bg-accent px-4 py-1.5 text-xs font-semibold text-base">{selectionOnly ? selectActionLabel : 'PLAY'}</button>
     </div>
   </motion.div>
 })
 
-export default function CoverFlow({ picks, onPlay, onContextMenu }) {
+export default function CoverFlow({
+  picks, onPlay, onSelect, onContextMenu, selectionOnly = false,
+  selectActionLabel = 'OPEN', renderArtwork, flowLabel = 'Cover Flow',
+  sizeMultiplier = 1, detailsSizeMultiplier = 1, wheelOneStep = false,
+  coverTopMultiplier = 0.18, stageHeightMultiplier = 1.36,
+}) {
   // Home presentation is chosen explicitly in Lokal Appearance settings.
   // The OS reduced-motion preference never silently disables 3D Cover Flow.
   const reduced = usePerformanceMode()
@@ -150,7 +161,8 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
   const wheelSnapping = useRef(false)
   const wheelHandler = useRef(null)
   const suppressClick = useRef(false)
-  const [size, setSize] = useState(MAX_SIZE)
+  const maxSize = MAX_SIZE * sizeMultiplier
+  const [size, setSize] = useState(maxSize)
   const [stageWidth, setStageWidth] = useState(0)
   const spread = flowResponsiveSpread(stageWidth, size, count, reduced)
   // Width changes (including animated sidebar collapse) update existing
@@ -196,7 +208,7 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     }
   }, [picks])
 
-  const handleSelect = useCallback(index => handlers.current?.select(index), [])
+  const handleSelect = useCallback((index, event) => handlers.current?.select(index, event), [])
   const handlePlay = useCallback(index => handlers.current?.play(index), [])
   const handleMenu = useCallback((event, track) => handlers.current?.menu?.(event, track), [])
 
@@ -279,10 +291,16 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     const host = stage?.parentElement
     if (!stage || !host) return undefined
     const page = stage.closest('main')
+    const playerBar = document.querySelector('[data-player-bar]')
     const measure = () => {
       const width = stage.clientWidth
       if (width > 0) setStageWidth(old => Math.abs(old - width) < 1 ? old : width)
-      const next = Math.min(MAX_SIZE, width * 0.52)
+      const baseSize = Math.min(MAX_SIZE, width * 0.52)
+      const stageTop = stage.getBoundingClientRect().top
+      const bottomEdge = playerBar?.getBoundingClientRect().top ?? page?.getBoundingClientRect().bottom ?? window.innerHeight
+      const labelHeight = selectionOnly ? (17 + 14) * detailsSizeMultiplier * 1.15 + 2 : 0
+      const verticalSize = Math.max(120, (bottomEdge - stageTop - labelHeight - (selectionOnly ? 4 : 12)) / stageHeightMultiplier)
+      const next = Math.min(maxSize, baseSize * sizeMultiplier, verticalSize)
       setSize(old => Math.abs(old - next) < 0.5 ? old : next)
       if (!page) return
       const area = page.getBoundingClientRect()
@@ -293,9 +311,15 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     }
     measure()
     const observer = new ResizeObserver(measure)
-    for (const target of [stage, host, page]) if (target) observer.observe(target)
-    return () => observer.disconnect()
-  }, [])
+    for (const target of [stage, host, page, playerBar]) if (target) observer.observe(target)
+    window.addEventListener('resize', measure)
+    page?.addEventListener('scroll', measure, { passive: true })
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+      page?.removeEventListener('scroll', measure)
+    }
+  }, [maxSize, sizeMultiplier, selectionOnly, detailsSizeMultiplier, stageHeightMultiplier])
 
   const down = e => {
     if (e.button !== 0) return
@@ -382,7 +406,11 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
       motion.current?.stop()
     }
     wheelSnapping.current = false
-    wheelGoal.current = flowWheelTarget(position.get(), wheelGoal.current, delta, pixelsPerCover, count)
+    if (wheelOneStep && (e.deltaMode !== 0 || Math.abs(delta) >= 40)) {
+      wheelGoal.current = flowWheelTarget(position.get(), wheelGoal.current, Math.sign(delta) * pixelsPerCover, pixelsPerCover, count)
+    } else {
+      wheelGoal.current = flowWheelTarget(position.get(), wheelGoal.current, delta, pixelsPerCover, count)
+    }
     if (wheelFrame.current === null) wheelFrame.current = requestAnimationFrame(followWheel)
     clearTimeout(wheelTimer.current)
     wheelTimer.current = setTimeout(() => {
@@ -401,18 +429,19 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
     stage.addEventListener('wheel', handleWheel, { passive: false })
     return () => stage.removeEventListener('wheel', handleWheel)
   }, [count])
-  const select = index => {
+  const select = (index, event) => {
     if (suppressClick.current) { suppressClick.current = false; return }
     rotateBack(false)
     if (index !== activeIndex) settle(index)
-    onPlay(index) // Mobile's onSelect starts playback on the first click.
+    if (onSelect) onSelect(index, event)
+    else onPlay(index) // Mobile's onSelect starts playback on the first click.
   }
   handlers.current = { select, play: onPlay, menu: onContextMenu }
   if (!count) return null
 
-  return <div className="space-y-3">
+  return <div className={selectionOnly ? 'space-y-1' : 'space-y-3'}>
     <div ref={stageRef} tabIndex={0} role="group" aria-roledescription="cover flow"
-      aria-label={'Cover Flow. ' + current.track.title + ' by ' + current.track.artist}
+      aria-label={flowLabel + '. ' + current.track.title + ' by ' + current.track.artist}
       aria-valuetext={(activeIndex + 1) + ' of ' + count}
       onKeyDown={e => {
         if (e.key === 'ArrowRight') { e.preventDefault(); step(1) }
@@ -433,19 +462,29 @@ export default function CoverFlow({ picks, onPlay, onContextMenu }) {
       // The stage must show the same theme background (or custom wallpaper) as
       // Home; an opaque fill makes a full-width black band on other themes.
       className="relative isolate cursor-grab select-none overflow-hidden bg-transparent outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-accent/40"
-      style={{ height: size * 1.36, marginLeft: -bleed.left, marginRight: -bleed.right, touchAction: 'pan-y' }}>
+      style={{
+        ...(selectionOnly ? { height: size * stageHeightMultiplier } : { height: size * 1.36 }),
+        marginLeft: -bleed.left, marginRight: -bleed.right, touchAction: 'pan-y',
+      }}>
       {picks.slice(visible.start, visible.end).map((pick, offset) => {
         const index = visible.start + offset
         return <FlowCover key={pick.track.id}
           pick={pick} index={index} position={position} flip={flip}
           flipTarget={index === flipIndex} backVisible={flipped && index === flipIndex}
-                    size={size} reduced={reduced} spreadValue={spreadValue}
-          onSelect={handleSelect} onPlay={handlePlay} onContextMenu={handleMenu} />
+          size={size} reduced={reduced} spreadValue={spreadValue}
+          coverTopMultiplier={coverTopMultiplier}
+          onSelect={handleSelect} onPlay={handlePlay} onContextMenu={handleMenu}
+          selectionOnly={selectionOnly} selectActionLabel={selectActionLabel}
+          renderArtwork={renderArtwork} />
       })}
     </div>
-    <div className="mx-auto max-w-lg text-center" aria-live="polite">
-      <p className="truncate text-[17px] font-semibold text-white">{current.track.title}</p>
-      <p className="mt-0.5 truncate text-sm text-muted">{current.track.artist}</p>
-    </div>
+    {selectionOnly && <div className="mx-auto max-w-lg text-center" aria-live="polite">
+      <p className="truncate font-semibold leading-tight text-white" style={{ fontSize: 17 * detailsSizeMultiplier }}>{current.track.title}</p>
+      <p className="mt-0.5 truncate leading-tight text-muted" style={{ fontSize: 14 * detailsSizeMultiplier }}>{current.track.artist}</p>
+    </div>}
+    {!selectionOnly && <div className="mx-auto max-w-lg text-center" aria-live="polite">
+      <p className="truncate font-semibold text-white" style={{ fontSize: 17 * detailsSizeMultiplier }}>{current.track.title}</p>
+      <p className="mt-0.5 truncate text-muted" style={{ fontSize: 14 * detailsSizeMultiplier }}>{current.track.artist}</p>
+    </div>}
   </div>
 }
