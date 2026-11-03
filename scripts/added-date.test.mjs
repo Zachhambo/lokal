@@ -107,6 +107,33 @@ test("files without the tag get the library's date; the scan doesn't see them as
   }
 })
 
+test('disabling date tags leaves scanned and downloaded music files unchanged', async t => {
+  const dir = tempDir()
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const scanFile = path.join(dir, 'scan.mp3')
+  const downloadFile = path.join(dir, 'download.mp3')
+  mp3(scanFile)
+  mp3(downloadFile)
+  const originalScanFile = fs.readFileSync(scanFile)
+  const originalDownloadFile = fs.readFileSync(downloadFile)
+  const db = new DatabaseSync(':memory:')
+  t.after(() => db.close())
+  db.exec(`
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+    INSERT INTO settings VALUES ('write_added_date_tag', '0');
+    CREATE TABLE tracks (file_path TEXT, added_at INTEGER, codec TEXT);
+  `)
+  db.prepare('INSERT INTO tracks VALUES (?, ?, ?)').run(scanFile, 1760875200, null)
+
+  assert.deepEqual(await stampAddedDates(db, [scanFile]), { written: 0, failed: 0 })
+  assert.equal(stampNewFile(db, downloadFile), false)
+  assert.equal(await readAddedDate(scanFile), null)
+  assert.equal(await readAddedDate(downloadFile), null)
+  assert.deepEqual(fs.readFileSync(scanFile), originalScanFile)
+  assert.deepEqual(fs.readFileSync(downloadFile), originalDownloadFile)
+  assert.equal(db.prepare('SELECT added_at FROM tracks WHERE file_path = ?').get(scanFile).added_at, 1760875200)
+})
+
 test("a new song gets now, whatever date its file came with", async () => {
   const dir = tempDir()
   try {
