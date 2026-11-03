@@ -279,6 +279,7 @@ export default function Settings() {
     }
   }, [])
   const [scanning, setScanning] = useState(false)
+  const [rescanError, setRescanError] = useState('')
   const [showVisualizerMenu, setShowVisualizerMenu] = useState(false)
   const [milkDropPresetNames, setMilkDropPresetNames] = useState([])
   const [milkDropPresetsLoading, setMilkDropPresetsLoading] = useState(false)
@@ -785,15 +786,33 @@ export default function Settings() {
   )
 
   const rescan = async () => {
+    setRescanError('')
     let roots = []
     try {
       const parsed = JSON.parse(settings.music_folders || 'null')
       if (Array.isArray(parsed)) roots = parsed.filter(folder => typeof folder === 'string' && folder.trim())
     } catch {}
     if (!roots.length && settings.music_folder) roots = [settings.music_folder]
-    if (!roots.length) return
+    if (!roots.length) {
+      setRescanError(t('Choose at least one existing music folder'))
+      return
+    }
     setScanning(true)
-    try { await api.scanFolders(roots) } finally { setScanning(false) }
+    try {
+      const result = await api.scanFolders(roots)
+      if (result?.error) {
+        setRescanError(result.error === 'Choose at least one existing music folder'
+          ? t(result.error)
+          : t('Could not rescan the music library'))
+        return
+      }
+      window.dispatchEvent(new Event('lokal:refresh'))
+    } catch (error) {
+      console.error('Library rescan failed:', error)
+      setRescanError(t('Could not rescan the music library'))
+    } finally {
+      setScanning(false)
+    }
   }
 
   const checkDuplicates = async () => {
@@ -1396,6 +1415,13 @@ activeCategory === 'data' ? usersTried
 
       {inCategory('library') && (
       <Section title={t("Maintenance")}>
+        {api.isElectron && <Row label={t("Write Date Added to Music Files")} desc={t("Write Lokal's date-added tag into new music files. Turn this off while first importing an existing library to avoid modifying those files. Lokal will still track dates in its database.")}>
+          <button
+            onClick={() => set('write_added_date_tag', settings.write_added_date_tag === '0' ? '1' : '0')}
+            className={`px-4 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider border transition-colors ${settings.write_added_date_tag !== '0' ? 'bg-accent/20 border-accent/50 text-accent' : 'border-border text-muted hover:text-white'}`}>
+            {settings.write_added_date_tag !== '0' ? t('On') : t('Off')}
+          </button>
+        </Row>}
          <Row label={t("Repair Missing Downloads")} desc={`${missingRepairText} ${t('Known original sources are redownloaded and attached to the existing library entries; files that need manual matching are left untouched.')}`}>
            <button
              onClick={repairMissingLibraryFiles}
@@ -1417,10 +1443,13 @@ activeCategory === 'data' ? usersTried
         </Row>
         )}
         <Row label={t("Rescan Library")}>
-          <button onClick={rescan} disabled={scanning || (!settings.music_folder && !settings.music_folders)}
-            className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg text-sm text-white hover:border-accent/30 disabled:opacity-40 transition-colors">
-            <RefreshCw size={13} className={scanning ? 'animate-spin' : ''} />{scanning ? t('Scanning…') : t('Rescan')}
-          </button>
+          <div className="space-y-1">
+            <button onClick={rescan} disabled={scanning || (!settings.music_folder && !settings.music_folders)}
+              className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg text-sm text-white hover:border-accent/30 disabled:opacity-40 transition-colors">
+              <RefreshCw size={13} className={scanning ? 'animate-spin' : ''} />{scanning ? t('Scanning…') : t('Rescan')}
+            </button>
+            {!!rescanError && <p role="alert" className="text-xs text-red-400">{rescanError}</p>}
+          </div>
         </Row>
         <Row label={t("Find Duplicates")} desc={t("Exact: the same title and artist. Similar: likely copies with close names and lengths, to check after the exact ones.")}>
           <div className="flex items-center gap-2">
