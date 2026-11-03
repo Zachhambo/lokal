@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, ChevronRight, Folder, Music, Search, Pencil, Tra
 import { api } from '../api'
 import { isSuspect, tierOf } from '../quality'
 import { fetchAllErrorTrackIds, getFolderPlaybackTracks } from '../libraryHelpers'
-import TrackList from './TrackList'
+import TrackList, { TrackColumnPickerControl } from './TrackList'
 import FadeImg from './FadeImg'
 import CoverFlow from './CoverFlow'
 import { useAppearanceFlag } from '../appearanceFlags'
@@ -424,47 +424,50 @@ export default function LibraryFolderBrowser({
   return (
     <div className="space-y-4">
       {isCurrentPath && data?.available && !data.error && (
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted" aria-label="Library folder path">
-          <div className="mr-1 flex items-center gap-1">
-            {canGoBack && (
-              <button
-                type="button"
-                onClick={goBack}
-                aria-label={t("Go back")}
-                title={t("Go back")}
-                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-elevated transition-colors hover:text-white"
-              >
-                <ArrowLeft size={13} />
-              </button>
-            )}
-            {canGoForward && (
-              <button
-                type="button"
-                onClick={goForward}
-                aria-label={t("Go forward")}
-                title={t("Go forward")}
-                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-elevated transition-colors hover:text-white"
-              >
-                <ArrowRight size={13} />
-              </button>
-            )}
-          </div>
-          <button type="button" onClick={() => navigateToFolder('')} className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1 transition-colors hover:text-white">
-            <Folder size={13} className="flex-shrink-0" />
-            <span className="max-w-36 truncate">{data.rootName}</span>
-          </button>
-          {segments.map((segment, index) => {
-            const target = segments.slice(0, index + 1).join('/')
-            return (
-              <React.Fragment key={target}>
-                <ChevronRight size={12} className="flex-shrink-0 opacity-50" />
-                <button type="button" onClick={() => navigateToFolder(target)} className="max-w-40 truncate rounded-md px-1 py-1 text-white transition-colors hover:text-accent" title={segment}>
-                  {segment}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-xs text-muted" aria-label="Library folder path">
+            <div className="mr-1 flex items-center gap-1">
+              {canGoBack && (
+                <button
+                  type="button"
+                  onClick={goBack}
+                  aria-label={t("Go back")}
+                  title={t("Go back")}
+                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-elevated transition-colors hover:text-white"
+                >
+                  <ArrowLeft size={13} />
                 </button>
-              </React.Fragment>
-            )
-          })}
-          <span className="sr-only">{currentFolder}</span>
+              )}
+              {canGoForward && (
+                <button
+                  type="button"
+                  onClick={goForward}
+                  aria-label={t("Go forward")}
+                  title={t("Go forward")}
+                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-elevated transition-colors hover:text-white"
+                >
+                  <ArrowRight size={13} />
+                </button>
+              )}
+            </div>
+            <button type="button" onClick={() => navigateToFolder('')} className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1 transition-colors hover:text-white">
+              <Folder size={13} className="flex-shrink-0" />
+              <span className="max-w-36 truncate">{data.rootName}</span>
+            </button>
+            {segments.map((segment, index) => {
+              const target = segments.slice(0, index + 1).join('/')
+              return (
+                <React.Fragment key={target}>
+                  <ChevronRight size={12} className="flex-shrink-0 opacity-50" />
+                  <button type="button" onClick={() => navigateToFolder(target)} className="max-w-40 truncate rounded-md px-1 py-1 text-white transition-colors hover:text-accent" title={segment}>
+                    {segment}
+                  </button>
+                </React.Fragment>
+              )
+            })}
+            <span className="sr-only">{currentFolder}</span>
+          </div>
+          <TrackColumnPickerControl showQuality playlist />
         </div>
       )}
 
@@ -592,7 +595,7 @@ export default function LibraryFolderBrowser({
           )}
 
           {visibleTracks.length > 0 && view === 'list' && (
-            <TrackList tracks={visibleTracks} showQuality reduceMotion context={{ type: 'library-folder' }} sort={folderColumnSort} onSortChange={setFolderColumnSort} />
+            <TrackList tracks={visibleTracks} showQuality reduceMotion context={{ type: 'library-folder' }} sort={folderColumnSort} onSortChange={setFolderColumnSort} hideColumnPicker />
           )}
 
           {visibleTracks.length > 0 && view === 'grid' && (
@@ -635,6 +638,7 @@ export default function LibraryFolderBrowser({
                 reduceMotion
                 context={{ type: 'library-folder' }}
                 extraColumns={[{ key: 'subfolderPath', label: t('Music folder'), width: 10, render: track => track.subfolderPath || '' }]}
+                hideColumnPicker
               />
             </div>
           )}
