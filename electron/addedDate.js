@@ -10,8 +10,9 @@
 // sorting and for the New tab's queries:
 //   - a file read with the tag: added_at becomes the tag's date
 //   - a new song read without it (the scan, the folder watcher, a single
-//     file added): added_at is now, and that is written into the file
-//     (stampAddedDates). A song already in the library is left as it is.
+//     file added): added_at is now, and that is written into the file when
+//     the write_added_date_tag setting is on. A song already in the library
+//     is left as it is.
 //   - a download or a file dropped onto a folder is added now: it gets now,
 //     whatever tag it came with (someone else's library)
 //   - a better copy replacing a song's file (lossless) isn't a new song: the
@@ -26,6 +27,13 @@ const IDS = new Set([`TXXX:${TAG}`, TAG, `----:com.apple.iTunes:${TAG}`])
 const EARLIEST = Date.UTC(1990, 0, 1) / 1000
 
 const tagText = (value) => (typeof value === 'string' ? value : value && typeof value.text === 'string' ? value.text : '')
+
+function shouldWriteAddedDate(db) {
+  if (!db) return true
+  const hasSettings = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get()
+  if (!hasSettings) return true
+  return db.prepare("SELECT value FROM settings WHERE key = 'write_added_date_tag'").get()?.value !== '0'
+}
 
 /** The tag's text for a date (seconds since 1970). */
 function toTag(seconds) {
@@ -105,6 +113,7 @@ function writeAddedDate(filePath, seconds) {
  */
 function stampNewFile(db, filePath, seconds = Math.floor(Date.now() / 1000), { log = console } = {}) {
   // AC-4 downloads retain their original MP4 atoms; date added stays in SQLite.
+  if (!shouldWriteAddedDate(db)) return false
   if (/\.ac4\.(?:m4a|mp4)$/i.test(filePath)) return false
   try {
     writeAddedDate(filePath, seconds)
@@ -129,6 +138,7 @@ function applyToRow(db, trackId, seconds) {
  * whole file), so it lets the app breathe between files.
  */
 async function stampAddedDates(db, filePaths, { log = console } = {}) {
+  if (!shouldWriteAddedDate(db)) return { written: 0, failed: 0 }
   const rowOf = db.prepare("SELECT * FROM tracks WHERE file_path = ? AND file_path NOT LIKE 'ghost://%'")
   const { noteFileWritten } = require('./fileStamp')
   let written = 0
