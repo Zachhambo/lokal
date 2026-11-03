@@ -124,7 +124,24 @@ function TrackAlbumLink({ track, navigate, className = '', fallback = '—', inl
   )
 }
 
-export default function TrackList({ tracks = [], showQuality = false, onRemove = null, showPlayNext = true, showAddToQueue = true, playlistId = null, onReorder = null, onQuickAdd = null, reduceMotion = false, context = null, highlightTrackId = null, highlightRequestKey = null, extraColumns = [], resolveTracks = null, sort = null, onSortChange = null, trackNumbers = null, toolbarStart = null }) {
+export function TrackColumnPickerControl({ showQuality = false, playlist = false }) {
+  const { user } = useAppStore()
+  const profile = String(user?.id || 'guest')
+  const savedColumns = useTrackColumnsStore(state => state.profiles[profile])
+  const setColumn = useTrackColumnsStore(state => state.setColumn)
+  const resetColumns = useTrackColumnsStore(state => state.resetColumns)
+  const columns = trackColumnPreferences(savedColumns, showQuality, playlist)
+  return (
+    <TrackColumnPicker
+      columns={columns}
+      playlist={playlist}
+      onChange={(key, value) => setColumn(profile, key, value)}
+      onReset={() => resetColumns(profile)}
+    />
+  )
+}
+
+export default function TrackList({ tracks = [], showQuality = false, onRemove = null, showPlayNext = true, showAddToQueue = true, playlistId = null, onReorder = null, onQuickAdd = null, reduceMotion = false, context = null, highlightTrackId = null, highlightRequestKey = null, extraColumns = [], resolveTracks = null, sort = null, onSortChange = null, trackNumbers = null, toolbarStart = null, hideColumnPicker = false }) {
   const { t } = useTranslation()
   const keepCommaArtists = useKeepCommaArtists()
   const resolvedPlaybackRef = useRef(0)
@@ -143,8 +160,6 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   const { user, openAddToPlaylist, openAddMultipleToPlaylist } = useAppStore()
   const profile = String(user?.id || 'guest')
   const savedColumns = useTrackColumnsStore(state => state.profiles[profile])
-  const setColumn = useTrackColumnsStore(state => state.setColumn)
-  const resetColumns = useTrackColumnsStore(state => state.resetColumns)
   const columns = trackColumnPreferences(savedColumns, showQuality, !!playlistId || !!onSortChange)
   const fullResolutionTags = useFullResolutionTags()
   const listRef = useRef(null)
@@ -861,11 +876,12 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
         ]}
       />
 
-      <div className="mb-1 flex items-center justify-between gap-3 px-2">
-        {toolbarStart || <span />}
-        <TrackColumnPicker columns={columns} playlist={!!playlistId}
-          onChange={(key, value) => setColumn(profile, key, value)} onReset={() => resetColumns(profile)} />
-      </div>
+      {(!hideColumnPicker || toolbarStart) && (
+        <div className="mb-1 flex items-center justify-between gap-3 px-2">
+          {toolbarStart || <span />}
+          {!hideColumnPicker && <TrackColumnPickerControl showQuality={showQuality} playlist={!!playlistId || !!onSortChange} />}
+        </div>
+      )}
       <div data-track-header className="grid grid-cols-[var(--tl-columns)] items-center gap-2 px-4 py-1.5 text-xs text-muted uppercase tracking-widest border-b border-border font-display mb-0.5">
         {layout.grip && <span />}
         {layout.selection && <div className="flex items-center justify-center">

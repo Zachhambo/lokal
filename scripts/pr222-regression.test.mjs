@@ -40,19 +40,24 @@ test('RightSidebar resets track view and auto-selects available lyrics unless vi
   assert.match(source, /setInfoCardView\(view => sideCardViewAfterTrackChange\(view, has\)\)/)
 })
 
-test('Library search is on the right of the track-count row in both modes', () => {
+test('Library uses the permanent folder browser without header sections or a mode toggle', () => {
   const source = readFileSync(new URL('../src/pages/Library.jsx', import.meta.url), 'utf8')
-  const scanBanner = source.indexOf('<ScanBanner />')
-  const statusRow = source.indexOf('className="flex w-full flex-wrap items-center justify-between gap-3"', scanBanner)
-  const trackCount = source.indexOf("t('loaded tracks')", statusRow)
-  const search = source.indexOf(`aria-label={libraryMode === 'simple' ? t("Search tracks")`, statusRow)
-  const playbackRow = source.indexOf('className="flex w-full flex-wrap items-center gap-2"', statusRow)
-  assert.ok(scanBanner >= 0 && statusRow > scanBanner && trackCount > statusRow && search > trackCount && playbackRow > search)
-  const addFolder = source.indexOf("t('Add music folder')", statusRow)
-  assert.ok(scanBanner >= 0 && statusRow > scanBanner && trackCount > statusRow && addFolder > trackCount && search > addFolder && playbackRow > search)
-  assert.match(source.slice(statusRow, playbackRow), /className="ml-auto flex min-w-0 items-center gap-2/)
-  assert.ok(source.slice(statusRow, playbackRow).indexOf("t('Add music folder')") < source.slice(statusRow, playbackRow).indexOf('<Search size={14}'))
-  assert.doesNotMatch(source.slice(0, statusRow), /onClick=\{addMusicFolder\}/)
+  const playbackRow = source.indexOf('className="flex w-full flex-wrap items-center gap-2"')
+  const search = source.indexOf('aria-label={t("Search folders and tracks")}', playbackRow)
+  const addFolder = source.indexOf("t('Add music folder')", playbackRow)
+  const browser = source.indexOf('<LibraryFolderBrowser', playbackRow)
+  assert.ok(playbackRow >= 0 && search > playbackRow && addFolder > search && browser > addFolder)
+  assert.match(source.slice(playbackRow, browser), /ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2/)
+  assert.match(source.slice(playbackRow, browser), /Play next[\s\S]*Shuffle[\s\S]*Search folders and tracks[\s\S]*Add music folder/)
+  assert.doesNotMatch(source, /folderData\.(?:totalTracks|matchCount)[\s\S]{0,160}folderData\.(?:relativePath|rootName)/)
+  assert.doesNotMatch(source, /<ScanBanner\s*\/>/)
+  assert.doesNotMatch(source, /id="library-root-select"/)
+  assert.doesNotMatch(source, /libraryMode|setLibraryMode|t\(['"]Advanced['"]\)|t\(['"]Simple['"]\)/)
+  assert.match(source, /<LibraryFolderBrowser/)
+  const folderBrowser = readFileSync(new URL('../src/components/LibraryFolderBrowser.jsx', import.meta.url), 'utf8')
+  assert.match(folderBrowser, /justify-between gap-2">\s*<div[^>]*aria-label="Library folder path"[\s\S]*?<TrackColumnPickerControl showQuality playlist \/>/)
+  assert.equal((folderBrowser.match(/hideColumnPicker/g) || []).length, 2)
+  assert.equal((source.match(/aria-label=\{t\("Search folders and tracks"\)\}/g) || []).length, 1)
 })
 
 test('Errors lookup pages beyond the IPC 5,000-row maximum', async () => {
@@ -150,4 +155,3 @@ test('reports missing FFmpeg only when an unsupported codec needs it', () => {
   assert.equal(playbackCopyFailure(wma, '/usr/local/bin/ffmpeg', 'linux'), null)
   assert.equal(playbackCopyFailure({ codec: 'AAC', lossless: false, unplayable: false }, null, 'linux'), null)
 })
-
