@@ -70,26 +70,28 @@ jobs:
           node scripts/check-build-natives.cjs
 
       - name: Build Windows NSIS updater
-        run: npm run build -- --win nsis --x64 --publish never
+        run: npm run build -- --win nsis --x64 --publish never '-c.nsis.artifactName=${productName}-Setup-${version}.${ext}'
 
       - name: Verify Windows updater files
         shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          shopt -s nullglob
-          installers=(release/*.exe)
-          blockmaps=(release/*.blockmap)
-          [ ${#installers[@]} -gt 0 ] || { echo "::error::No Windows installer was built."; exit 1; }
-          [ ${#blockmaps[@]} -gt 0 ] || { echo "::error::No Windows update blockmap was built."; exit 1; }
+          installer="release/Lokal-Setup-${VERSION}.exe"
+          blockmap="${installer}.blockmap"
+          [ -f "$installer" ] || { echo "::error::Expected Windows installer $installer was not built."; exit 1; }
+          [ -f "$blockmap" ] || { echo "::error::Expected Windows update blockmap $blockmap was not built."; exit 1; }
           [ -f release/latest.yml ] || { echo "::error::latest.yml is missing."; exit 1; }
-          ls -l "${installers[@]}" "${blockmaps[@]}" release/latest.yml
+          grep -Fq "Lokal-Setup-${VERSION}.exe" release/latest.yml || { echo "::error::latest.yml does not point to the expected installer."; exit 1; }
+          ls -l "$installer" "$blockmap" release/latest.yml
 
       - name: Keep Windows updater files as a workflow artifact
         uses: actions/upload-artifact@v6
         with:
           name: windows-update-${{ steps.version.outputs.version }}
           path: |
-            release/*.exe
-            release/*.blockmap
+            release/Lokal-Setup-${{ steps.version.outputs.version }}.exe
+            release/Lokal-Setup-${{ steps.version.outputs.version }}.exe.blockmap
             release/latest.yml
           if-no-files-found: error
 
@@ -99,6 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           TARGET_SHA: ${{ steps.version.outputs.sha }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
@@ -107,8 +110,8 @@ jobs:
               --target "$TARGET_SHA"
           fi
           gh release upload "$TAG" \
-            release/*.exe \
-            release/*.blockmap \
+            "release/Lokal-Setup-${VERSION}.exe" \
+            "release/Lokal-Setup-${VERSION}.exe.blockmap" \
             release/latest.yml \
             --clobber
           gh release edit "$TAG" --draft=false
