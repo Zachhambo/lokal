@@ -26,7 +26,7 @@ function readFolderViewCache(cacheFile, rootName, rootPath, rootPaths, relativeP
   try {
     const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
     const age = Date.now() - cached.savedAt
-    if (cached.version !== 1 || !Number.isFinite(age) || age < 0 ||
+    if (cached.version !== 2 || !Number.isFinite(age) || age < 0 ||
         age >= FOLDER_VIEW_CACHE_TTL_MS || !cached.view || typeof cached.view !== 'object') {
       return null
     }
@@ -67,7 +67,7 @@ function writeFolderViewCache(cacheFile, view) {
   if (!cacheFile) return
   let temporaryFile
   try {
-    const contents = JSON.stringify({ version: 1, savedAt: Date.now(), view })
+    const contents = JSON.stringify({ version: 2, savedAt: Date.now(), view })
     const byteLength = Buffer.byteLength(contents, 'utf8')
     if (byteLength > MAX_FOLDER_VIEW_CACHE_ENTRY_BYTES) {
       console.warn('[library-folders] Skipping oversized folder cache entry:', byteLength, 'bytes')
@@ -461,6 +461,7 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
   const descendantTrackPaths = getExistingTrackPaths(db, targetPath)
   if (normalizedRelative && descendantTrackPaths.length === 0) return empty('Folder has no tracks', true)
   const folderTrackCounts = new Map()
+  const directTrackCounts = new Map()
   const firstTrackPathsByChild = new Map()
   for (const filePath of descendantTrackPaths) {
     const relativeTrackPath = path.relative(targetPath, filePath)
@@ -469,6 +470,9 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
     const childName = relativeTrackPath.slice(0, separator)
     const childKey = process.platform === 'win32' ? childName.toLowerCase() : childName
     folderTrackCounts.set(childKey, (folderTrackCounts.get(childKey) || 0) + 1)
+    if (!relativeTrackPath.slice(separator + 1).includes(path.sep)) {
+      directTrackCounts.set(childKey, (directTrackCounts.get(childKey) || 0) + 1)
+    }
     if (!firstTrackPathsByChild.has(childKey)) firstTrackPathsByChild.set(childKey, filePath)
   }
 
@@ -534,6 +538,7 @@ function getLibraryFolders(db, relativePath = '', search = '', rootOverride = ''
         name: entry.name,
         path: childRelative,
         trackCount: folderTrackCounts.get(childKey) || 0,
+        directTrackCount: directTrackCounts.get(childKey) || 0,
         firstTrackYear: firstTrackYearByChild.get(childKey) || null,
         artwork_path: artworkPath,
         artwork_tracks: artworkTracks,

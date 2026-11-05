@@ -122,10 +122,12 @@ try {
   assert.equal(rootView.totalTracks, 1004, 'root count excludes stale database paths')
   assert.equal(rootView.allTracks.length, 1004, 'Play All includes every descendant, with no 1,000-track cap')
   assert.equal(rootView.folders.find(folder => folder.name === 'Artist').trackCount, 3, 'child folder count is recursive and excludes stale files')
+  assert.equal(rootView.folders.find(folder => folder.name === 'Artist').directTrackCount, 0, 'parent folders do not count tracks in child folders as direct tracks')
   const artistFolder = rootView.folders.find(folder => folder.name === 'Artist')
   assert.equal(artistFolder.artwork_tracks.length, 2, 'a folder without a direct image exposes distinct album covers for a collage')
   assert.deepEqual(new Set(artistFolder.artwork_tracks.map(track => track.artwork_path)), new Set([trackCoverA, trackCoverB]))
   assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').trackCount, 1001, 'emoji-leading folder names are included in the recursive count')
+  assert.equal(rootView.folders.find(folder => folder.name === '🎧Artist').directTrackCount, 0, 'parent folders do not count nested album tracks as direct tracks')
 
   const secondRootView = getLibraryFolders(db, '', '', secondRoot)
   assert.equal(secondRootView.available, true, 'a configured secondary music root can be browsed')
@@ -143,12 +145,14 @@ try {
   assert.equal(artistView.allTracks.length, 3, 'parent subfolder Play All includes all valid descendants')
   assert.equal(artistView.folders[0].name, 'Album')
   assert.equal(artistView.folders[0].trackCount, 3)
+  assert.equal(artistView.folders[0].directTrackCount, 3, 'album folder exposes its own direct tracks')
   assert.equal(artistView.folders[0].artwork_path, path.join(album, 'a.png'), 'an image inside a folder is used as its cover');
   assert.equal(artistView.folders[0].firstTrackYear, 1997, 'folder metadata includes the first song year when it has a cover image')
   assert.equal(artistView.folders[0].artwork_tracks.length, 2, 'track covers remain available as fallback artwork')
 
   cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-library-folder-cache-'))
   const cachedArtistView = getLibraryFolders(db, 'Artist', '', '', { cacheDir })
+  assert.equal(cachedArtistView.folders[0].directTrackCount, 3, 'cached folder views preserve direct-track counts')
   const laterAlbum = path.join(root, 'Artist', 'Album 2')
   const laterTrackPath = path.join(laterAlbum, '01-later.flac')
   fs.mkdirSync(laterAlbum)
@@ -185,6 +189,7 @@ try {
 
   const emojiView = getLibraryFolders(db, '🎧Artist')
   assert.equal(emojiView.totalTracks, 1001)
+  assert.equal(emojiView.folders[0].directTrackCount, 1001, 'album folder exposes its own direct tracks')
   assert.equal(emojiView.allTracks.length, 1001, 'Unicode folder Play All returns every descendant')
 
   const albumView = getLibraryFolders(db, 'Artist/Album')

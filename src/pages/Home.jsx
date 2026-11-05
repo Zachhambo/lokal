@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, History, ListEnd, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus, Pencil } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, Folder, History, ListEnd, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus, Pencil } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import TrackList from '../components/TrackList'
 import FadeImg from '../components/FadeImg'
@@ -34,6 +34,8 @@ import { DISCOVERY_SHELF_DEFAULTS, DISCOVERY_SHELF_TITLES, readShelfLayout, rest
 import FlowPanel from '../components/FlowPanel'
 import { madeForYou } from '../madeForYou'
 import { personalizedHomeMessages } from '../homeGreeting.mjs'
+import FolderArtwork from '../components/FolderArtwork'
+import { chooseRandomFolders, configuredMusicRoots, getFoldersWithDirectTracks } from '../homeFolders.mjs'
 
 const today = () => new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
 const mixTitle = (mix) => (mix.type === 'artist' ? `${mix.name} Mix` : mix.name)
@@ -67,34 +69,6 @@ function dateLabel(timestamp, t) {
   const value = Number(timestamp) || 0
   if (!value) return t('Unknown date')
   return new Date(value * 1000).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-}
-
-function MixCard({ mix, onClick, onOpen, onSave, saving, onContextMenu }) {
-  const { t } = useTranslation()
-  const arts = [...new Map(mix.tracks.map(track => [trackArtURL(track), track]).filter(([art]) => art)).values()].slice(0, 4)
-  return (
-    <motion.div whileHover={{ scale: 1.03 }} className="relative group" onContextMenu={onContextMenu}>
-      <motion.button whileTap={{ scale: 0.98 }} onClick={onClick}
-        aria-label={`Play ${mixTitle(mix)}`}
-        className="w-full flex flex-col gap-3 p-3 bg-elevated border border-border rounded-xl hover:border-accent/30 transition-all text-left">
-        <div className="w-full aspect-square rounded-lg overflow-hidden bg-card relative">
-          {arts.length === 0 && <div className="w-full h-full flex items-center justify-center text-subtle"><Radio size={36} /></div>}
-          {arts.length === 1 && <QualityImage src={trackArtURL(arts[0])} className="w-full h-full object-cover" />}
-          {arts.length > 1 && <div className="w-full h-full grid grid-cols-2">{arts.map((track, index) => <QualityImage key={index} src={trackArtURL(track)} className="w-full h-full object-cover" />)}</div>}
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"><div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center shadow-xl"><Play size={16} fill="currentColor" className="text-base translate-x-0.5" /></div></div>
-        </div>
-      </motion.button>
-      <button type="button" onClick={onOpen}
-        aria-label={`Open ${mixTitle(mix)} playlist`}
-        className="w-full px-3 pb-1 text-left rounded-md hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
-        <p className="text-sm font-medium truncate">{mix.name}</p>
-        <p className="text-xs text-muted">{plural(mix.tracks.length, 'track')} · {mixTitle(mix)}</p>
-      </button>
-      <button onClick={onSave} disabled={saving} title={t("Save as playlist")} aria-label={`Save ${mixTitle(mix)} as a playlist`} className={`absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white/85 backdrop-blur transition-all hover:bg-black/80 hover:text-accent focus:opacity-100 ${saving ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-        {saving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" /> : <ListPlus size={15} />}
-      </button>
-    </motion.div>
-  )
 }
 
 function SectionHeader({ icon: Icon, eyebrow, title, count, subtitle, onExpand, expanded, action, onContextMenu }) {
@@ -353,6 +327,8 @@ function HomeContent({ user }) {
   const [saving, setSaving] = useState(null)
   const [localArtists, setLocalArtists] = useState([])
   const [artistsLoaded, setArtistsLoaded] = useState(false)
+  const [homeFolders, setHomeFolders] = useState([])
+  const [folderRefreshLoading, setFolderRefreshLoading] = useState(false)
   const hiddenArtists = useDiscoveryArtists(s => s.hidden)
   const followedArtists = useDiscoveryArtists(s => s.followed)
   // Follow / Unfollow for an artist's menu: an artist neither followed nor
@@ -370,6 +346,7 @@ function HomeContent({ user }) {
   const accountRef = useRef(sessionState.account)
   accountRef.current = sessionState.account
   const saveBusyRef = useRef(false)
+  const folderRequestRef = useRef(0)
 
   const saveList = async (key, name, items, description) => {
     if (saveBusyRef.current) return
@@ -383,8 +360,6 @@ function HomeContent({ user }) {
     } catch { showToast(t("Could not create playlist")) }
     finally { saveBusyRef.current = false; setSaving(null) }
   }
-  const saveMix = mix => saveList(`mix:${mix.id}`, `${mixTitle(mix)} - ${today()}`, mix.tracks, `Your ${mixTitle(mix)} from Home`)
-
   const playRecommendation = async (entry, context = 'recommendations', pool = [entry]) => {
     const track = entry?.track || entry
     if (!track) return
@@ -496,6 +471,28 @@ function HomeContent({ user }) {
     await openRadio(navigate, seed, user?.id)
   }
 
+  const loadHomeFolders = useCallback(async (forceRefresh = false) => {
+    const requestId = ++folderRequestRef.current
+    setFolderRefreshLoading(true)
+    try {
+      const settings = await api.getSettings()
+      const roots = configuredMusicRoots(settings)
+      const foldersByRoot = await Promise.all(roots.map(root =>
+        getFoldersWithDirectTracks(api.getLibraryFolders, root, forceRefresh)
+      ))
+      if (requestId !== folderRequestRef.current) return
+      const candidates = foldersByRoot.flatMap((view, index) =>
+        view.filter(folder => folder.artwork_path || folder.artwork_tracks?.length)
+          .map(folder => ({ ...folder, root: roots[index] }))
+      )
+      setHomeFolders(chooseRandomFolders(candidates))
+    } catch (error) {
+      if (requestId === folderRequestRef.current) throw error
+    } finally {
+      if (requestId === folderRequestRef.current) setFolderRefreshLoading(false)
+    }
+  }, [])
+
   const load = () => {
     const uid = user?.id
     const soft = promise => Promise.resolve(promise).catch(() => null)
@@ -517,16 +514,19 @@ function HomeContent({ user }) {
     })
   }
 
-  useEffect(() => { load() }, [user?.id])
+  useEffect(() => { load(); loadHomeFolders().catch(error => showToast(error?.message || t('Could not load music folders'))) }, [user?.id])
   useEffect(() => { loadDiscoveryArtists().catch(() => {}) }, [])
   // Once, with the library loaded: follow everyone already in it (not hidden).
   useEffect(() => { if (artistsLoaded) initFollowedArtists(localArtists).catch(() => {}) }, [artistsLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { session.ensure() }, [session])
   useEffect(() => {
-    const refresh = () => load()
+    const refresh = () => {
+      load()
+      loadHomeFolders(true).catch(error => showToast(error?.message || t('Could not refresh music folders')))
+    }
     window.addEventListener('lokal:refresh', refresh)
     return () => { window.removeEventListener('lokal:refresh', refresh) }
-  }, [user?.id])
+  }, [user?.id, loadHomeFolders, t])
 
   const allowedDiscovery = item => !hiddenArtists.has(discoveryArtistKey(item?.artist)) && !hiddenArtists.has(discoveryArtistKey(item?.seedArtist))
   const data = discovery ? {
@@ -539,14 +539,6 @@ function HomeContent({ user }) {
   } : discovery
   const recommendationTracks = data?.freshFinds || []
   const goHome = (next, section = null) => navigate(next === 'home' ? '/' : `/home/${next}${section ? `/${section}` : ''}`)
-  const openMixMenu = (event, mix) => menu.open(event, [
-    { label: 'Play', icon: Play, onSelect: () => playQueue(mix.tracks, 0) },
-    { label: 'Play next', icon: Clock, onSelect: () => playNextMany(mix.tracks) },
-    { label: 'Add to queue', icon: ListEnd, onSelect: () => addToQueueMany(mix.tracks) },
-    { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylistMany(mix.tracks) },
-    { separator: true },
-    { label: 'Save as playlist', icon: ListPlus, onSelect: () => saveMix(mix), disabled: !!saving },
-  ])
   const visibleArtists = artists => (Array.isArray(artists) ? artists : []).filter(artist => !hiddenArtists.has(discoveryArtistKey(artist.name)))
   const openArtistMenu = (event, artist) => menu.open(event, [
     { label: 'Start artist radio', icon: Radio, onSelect: () => startRadio({ artist: artist.name, type: 'artist' }) },
@@ -728,10 +720,36 @@ function HomeContent({ user }) {
     {picks.length > 0 && <MadeForYou picks={picks}
       onPlay={index => playQueue(pickTracks, index, madeForYouContext)}
       onContextMenu={openPickMenu} />}
-    {mixes.length > 0 && <section><div className="flex items-center gap-2 mb-4"><Radio size={14} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Your Mixes")}</h2></div><div className="grid grid-cols-2 @md:grid-cols-3 gap-3">{mixes.slice(0, 6).map(mix => <MixCard key={mix.id} mix={mix} onClick={() => playQueue(mix.tracks, 0)} onOpen={() => navigate(`/home/home/mix-${encodeURIComponent(mix.id)}`)} onSave={() => saveMix(mix)} saving={saving === `mix:${mix.id}`} onContextMenu={event => openMixMenu(event, mix)} />)}</div></section>}
+    {homeFolders.length > 0 && <section>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2"><Folder size={15} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t('Your Folders')}</h2></div>
+        <button type="button" onClick={() => loadHomeFolders(true).catch(error => showToast(error?.message || t('Could not refresh music folders')))}
+          disabled={folderRefreshLoading} aria-label={t('Refresh folders')} title={t('Refresh folders')}
+          className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-white disabled:opacity-50">
+          <RefreshCw size={13} className={folderRefreshLoading ? 'animate-spin' : ''} />{t('Refresh')}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 @md:grid-cols-3">
+        {homeFolders.map(folder => (
+          <motion.button key={`${folder.root}:${folder.path}`} type="button" whileHover={{ y: -2 }}
+            onClick={() => navigate('/library', { state: { openFolder: folder.path, openRoot: folder.root } })}
+            aria-label={`${t('Open folder')}: ${folder.name}`}
+            className="group min-w-0 overflow-hidden rounded-xl border border-border bg-elevated text-left transition-colors hover:border-accent/40">
+            <div className="relative aspect-square overflow-hidden bg-card">
+              <FolderArtwork folder={folder} />
+              {!folder.artwork_path && !folder.artwork_tracks?.length && <Folder size={38} className="absolute inset-0 m-auto text-muted" />}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/35 to-transparent px-3 pb-3 pt-10">
+                <p className="truncate text-sm font-medium text-white">{folder.name}</p>
+                <p className="mt-0.5 text-xs text-white/70">{plural(folder.trackCount, 'track')}</p>
+              </div>
+            </div>
+          </motion.button>
+        ))}
+      </div>
+    </section>}
     {suggestions.length > 0 && <section><div className="flex items-center gap-2 mb-4"><Sparkles size={14} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Suggested for You")}</h2><button onClick={() => saveList('suggestions', `Suggested for You - ${today()}`, suggestions, 'Suggested for you on Home')} disabled={!!saving} className="ml-auto inline-flex items-center gap-1 text-xs text-accent disabled:opacity-50"><ListPlus size={13} />{t("Save as playlist")}</button></div><TrackList tracks={suggestions.slice(0, 8)} reduceMotion /></section>}
     {recentTracks.length > 0 && <section><div className="flex items-center justify-between mb-4"><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Recently Added")}</h2><button onClick={() => playQueue(recentTracks, 0)} className="text-xs text-accent hover:text-accent/70">{t("Play All")}</button></div><TrackList tracks={recentTracks} reduceMotion /></section>}
-    {loaded && !recentTracks.length && !suggestions.length && !mixes.length && <p className="py-10 text-center text-sm text-muted">{t("No local tracks yet. Pick your music folder in Library.")}</p>}
+    {loaded && !recentTracks.length && !suggestions.length && !homeFolders.length && <p className="py-10 text-center text-sm text-muted">{t("No local tracks yet. Pick your music folder in Library.")}</p>}
   </>
 
   const hour = new Date().getHours()

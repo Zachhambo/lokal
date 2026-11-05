@@ -110,9 +110,12 @@ export default function Library() {
   const folderFilters = useMemo(() => ({ source, genre, format: quality ? '' : format, quality, sort }), [source, genre, format, quality, sort])
 
   useEffect(() => {
-    if (typeof location.state?.openFolder !== 'string') return
-    setFolderPath(location.state.openFolder)
-    setFolderSearch('')
+    if (typeof location.state?.openFolder !== 'string' && typeof location.state?.openRoot !== 'string') return
+    if (typeof location.state.openRoot === 'string') setActiveMusicRoot(location.state.openRoot)
+    if (typeof location.state.openFolder === 'string') {
+      setFolderPath(location.state.openFolder)
+      setFolderSearch('')
+    }
     navigate(location.pathname, { replace: true, state: null })
   }, [location.pathname, location.state, navigate])
 
