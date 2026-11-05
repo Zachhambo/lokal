@@ -462,12 +462,7 @@ export const usePlayerStore = create((set, get) => ({
   },
 
   togglePlay: () => {
-    if (outputRoute) { set(s => ({ isPlaying: !s.isPlaying })); return }
-    const { audioRef, cfAudioRef, activeAudioElement, isPlaying } = get()
-    const activeRef = activeAudioElement === 'primary' ? audioRef : cfAudioRef
-    if (!activeRef?.current) return
-    isPlaying ? activeRef.current.pause() : activeRef.current.play()
-    set({ isPlaying: !isPlaying })
+    set(s => ({ isPlaying: !s.isPlaying }))
   },
 
   next: () => {

@@ -4,6 +4,7 @@ import { loadEqState } from './audio/equalizerConfig.mjs'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { effectiveReplayGainMode, replayGainMultiplier } from './audio/replayGain.mjs'
 import { readCrossfadeSettings, fadeCurve, crossfadeDurations, CROSSFADE_MIN_S } from './audio/crossfade'
+import { readPlayPauseFadeSeconds, schedulePlayPauseFade } from './audio/playPauseFade'
 import { planTransition, AUTOMIX_PRELOAD_S, albumContinues } from './audio/automix'
 import { shouldPrepareGapless, gaplessHandoffPlan } from './audio/gapless'
 import { eligibleStemTransition, createStemPlayback } from './audio/stemPlayback'
@@ -714,6 +715,9 @@ export default function App() {
   const eqRacksRef = useRef(null)
   const activeElementRef = useRef('primary')
   const pauseSuppressRef = useRef(false)
+  const playPauseGainRef = useRef({ primary: null, cf: null })
+  const playPauseTimerRef = useRef(null)
+  const playPauseTokenRef = useRef(0)
   const crossfadeTokenRef = useRef(0)
   const crossfadeTimeoutRef = useRef(null)
   const expectedCrossfadeTrackIdRef = useRef(null)
@@ -1241,6 +1245,11 @@ export default function App() {
     const primaryFade = ctx.createGain()
     const cfFade = ctx.createGain()
     fadeGainRef.current = { primary: primaryFade, cf: cfFade }
+    const primaryPlayPause = ctx.createGain()
+    const cfPlayPause = ctx.createGain()
+    primaryPlayPause.gain.value = 1
+    cfPlayPause.gain.value = 1
+    playPauseGainRef.current = { primary: primaryPlayPause, cf: cfPlayPause }
     const mixFilter = () => {
       const filter = ctx.createBiquadFilter()
       filter.type = 'highpass'
@@ -1263,16 +1272,19 @@ export default function App() {
       // iOS bypasses EQ/fade nodes, but still routes both decks through the
       // analyser as a pass-through so every visualizer receives live audio.
       primarySource.connect(primaryReplayGain)
-      primaryReplayGain.connect(analyser)
+      primaryReplayGain.connect(primaryPlayPause)
+      primaryPlayPause.connect(analyser)
       analyser.connect(ctx.destination)
       cfSource.connect(cfReplayGain)
-      cfReplayGain.connect(analyser)
+      cfReplayGain.connect(cfPlayPause)
+      cfPlayPause.connect(analyser)
     } else {
       primarySource.connect(primaryEqRack.input)
       primaryEqRack.output.connect(primaryReplayGain)
       primaryReplayGain.connect(primaryGain)
       primaryGain.connect(primaryFade)
-      primaryFade.connect(primaryMix)
+      primaryFade.connect(primaryPlayPause)
+      primaryPlayPause.connect(primaryMix)
       primaryMix.connect(analyser)
       analyser.connect(ctx.destination)
 
@@ -1280,7 +1292,8 @@ export default function App() {
       cfEqRack.output.connect(cfReplayGain)
       cfReplayGain.connect(cfGain)
       cfGain.connect(cfFade)
-      cfFade.connect(cfMix)
+      cfFade.connect(cfPlayPause)
+      cfPlayPause.connect(cfMix)
       cfMix.connect(analyser)
     }
 
@@ -1593,9 +1606,7 @@ export default function App() {
         if (!state.isPlaying) state.togglePlay()
         return
       }
-      if (state.castActive) { state.setIsPlaying(true); return }
-      const activeEl = getActiveAudio()
-      activeEl?.play()
+      state.setIsPlaying(true)
     })
     navigator.mediaSession.setActionHandler('pause', () => {
       const state = usePlayerStore.getState()
@@ -1603,9 +1614,6 @@ export default function App() {
         if (state.isPlaying) state.togglePlay()
         return
       }
-      if (state.castActive) { state.setIsPlaying(false); return }
-      const activeEl = getActiveAudio()
-      activeEl?.pause()
       // Record explicit pauses even when a source is failing or being swapped.
       state.setIsPlaying(false)
     })
@@ -3124,7 +3132,6 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (isCrossfadingRef.current) return
     if (!audioRef.current || !cfAudioRef.current) return
     if (usePlayerStore.getState().currentTrack?.atmosNative) return // native Atmos owns output
     if (usePlayerStore.getState().castActive) return // the TV plays (src/cast/useCastPlayback.js)
@@ -3138,16 +3145,47 @@ export default function App() {
       else { pauseRadio(); setIsBuffering(false); stopTimer() }
       return
     }
-    
-    if (isPlaying) { 
+    if (isCrossfadingRef.current) {
+      if (isPlaying) activeEl.play().catch(() => {})
+      else { activeEl.pause(); stopTimer() }
+      return
+    }
+    const token = ++playPauseTokenRef.current
+    clearTimeout(playPauseTimerRef.current)
+    playPauseTimerRef.current = null
+    const fadeNode = playPauseGainRef.current[activeSide]?.gain
+    const fadeSeconds = readPlayPauseFadeSeconds(peekSettings())
+
+    if (isPlaying) {
+      if (fadeNode && audioCtxRef.current) {
+        schedulePlayPauseFade(fadeNode, audioCtxRef.current, 1, fadeSeconds)
+      }
       activeEl.play().catch(() => {})
       if (activeSide === 'primary' && !playTimerRef.current) startTimer()
     }
-    else { 
-      activeEl.pause(); 
-      stopTimer() 
+    else {
+      stopTimer()
+      const duration = fadeNode && audioCtxRef.current
+        ? schedulePlayPauseFade(fadeNode, audioCtxRef.current, 0, fadeSeconds)
+        : 0
+      if (duration > 0) {
+        const trackId = usePlayerStore.getState().currentTrack?.id
+        playPauseTimerRef.current = setTimeout(() => {
+          playPauseTimerRef.current = null
+          const state = usePlayerStore.getState()
+          if (token === playPauseTokenRef.current && !state.isPlaying &&
+              state.activeAudioElement === activeSide && state.currentTrack?.id === trackId) activeEl.pause()
+        }, duration * 1000)
+      } else {
+        activeEl.pause()
+      }
     }
   }, [isPlaying])
+
+  useEffect(() => () => {
+    clearTimeout(playPauseTimerRef.current)
+    playPauseTokenRef.current++
+  }, [])
 
   useEffect(() => {
     const ctx = audioCtxRef.current
