@@ -720,7 +720,7 @@ export default function Settings() {
         // Nightlies aren't offered the stable release; they update by hand.
         setUpdateCheckResult('')
         setCheckingUpdate(false)
-        api.openExternal('https://github.com/Zachhambo/lokal/releases')
+        api.openExternal('https://github.com/lokal-music/Desktop/releases')
         return
       }
       setUpdateCheckResult(t('Checking for updates...'))
