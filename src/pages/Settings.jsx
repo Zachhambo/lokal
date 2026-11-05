@@ -34,6 +34,7 @@ import { repairMissingTracks } from '../ghostDownloads'
 import { plural } from '../plural'
 import { readCrossfadeSettings, CROSSFADE_MIN_S } from '../audio/crossfade'
 import { onlineByDefault, setOnlineByDefault } from '../onlineBrowse'
+import { readPlayPauseFadeSeconds } from '../audio/playPauseFade'
 import { SPEED_MAX, SPEED_MIN, SPEED_STEP, usePlaybackSpeed } from '../playbackSpeed.mjs'
 import SoulseekSignIn from '../components/SoulseekSignIn'
 import { loadMilkDropPresetNames, normalizeEnabledMilkDropPresets } from '../visualizers/milkDropPresets.mjs'
@@ -1762,6 +1763,18 @@ activeCategory === 'data' ? usersTried
               aria-label={t("Increase playback speed")} className="px-1.5 py-1 rounded border border-border text-xs text-muted hover:text-white disabled:opacity-40">+</button>
             <button type="button" onClick={() => setPlaybackSpeed(1)} disabled={playbackSpeed === 1}
               className="text-xs text-muted hover:text-white transition-colors disabled:opacity-40">{t("Reset")}</button>
+          </div>
+        </Row>
+        <Row label={t("Play / pause fade")} desc={t("Fade audio in when playback starts and out when paused. Set to 0 to disable.")}>
+          <div className="flex items-center gap-2">
+            <input type="range" min={0} max={5} step={0.1}
+              value={readPlayPauseFadeSeconds(settings)}
+              onChange={e => set('play_pause_fade_seconds', e.target.value)}
+              aria-label={t("Play / pause fade duration")}
+              className="w-24 accent-accent cursor-pointer" />
+            <span className="w-10 text-right text-xs text-muted">
+              {readPlayPauseFadeSeconds(settings).toFixed(1)}s
+            </span>
           </div>
         </Row>
         <Row label={t("Fetch Lyrics Automatically")} desc={t("Off: songs only show the lyrics they carry themselves (in their tags or a .lrc next to them). Looking again from the lyrics panel still searches online.")}>
