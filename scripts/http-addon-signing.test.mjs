@@ -85,7 +85,7 @@ test('unsigned HTTP addons remain unsigned and signatures do not cross redirect 
 })
 
 
-test('per-add-on keys are redacted, scoped, replaceable and removable', async () => {
+test('per-add-on keys are redacted, scoped, replaceable and fall back to LastWave signing', async () => {
   const database = db()
   const calls = []
   const fetchImpl = async (url, options) => {
@@ -94,18 +94,18 @@ test('per-add-on keys are redacted, scoped, replaceable and removable', async ()
     return json({ tracks: [{ id: 'song', title: 'Track', artist: 'Artist' }] })
   }
   const signed = await addons.install(database, 'https://addons.example/a/abc123/manifest.json', { fetchImpl, signingKey: KEY })
-  const plain = await addons.install(database, 'https://other.example/a/def456/manifest.json', { fetchImpl })
+  const plain = await addons.install(database, 'https://other.example/manifest.json', { fetchImpl })
   assert.equal(signed.hasSigningKey, true)
   assert.equal(plain.hasSigningKey, false)
   assert.ok(!JSON.stringify(addons.list(database)).includes(KEY))
   await addons.search(database, signed.key, 'first', { fetchImpl })
   await addons.search(database, plain.key, 'first', { fetchImpl })
   assert.ok(calls.find(c => c.url.includes('/a/abc123/search')).headers['X-LW-Sign'])
-  assert.equal(calls.find(c => c.url.includes('/a/def456/search')).headers['X-LW-Sign'], undefined)
+  assert.equal(calls.find(c => c.url.includes('other.example/search')).headers['X-LW-Sign'], undefined)
   addons.setSettings(database, signed.key, {}, { signingKey: 'rotated-test-key' })
   await addons.search(database, signed.key, 'second', { fetchImpl })
   assert.ok(calls.filter(c => c.url.includes('/a/abc123/search')).at(-1).headers['X-LW-Sign'])
   addons.setSettings(database, signed.key, {}, { signingKey: '' })
   await addons.search(database, signed.key, 'third', { fetchImpl })
-  assert.equal(calls.filter(c => c.url.includes('/a/abc123/search')).at(-1).headers['X-LW-Sign'], undefined)
+  assert.match(calls.filter(c => c.url.includes('/a/abc123/search')).at(-1).headers['X-LW-Sign'], /^[a-f0-9]{64}$/)
 })

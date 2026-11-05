@@ -25,6 +25,7 @@ const crypto = require('crypto')
 const fs = require('node:fs')
 const net = require('net')
 const { headersForSignedAddon } = require('./httpAddonSigning')
+const { headersForLastWave } = require('./lastwaveSigning')
 const { extractManifest, stageAddonDash } = require('./addonDash')
 const { stageHybrid } = require('./addonHybrid')
 const { streamQuality } = require('./streamQuality')
@@ -118,7 +119,10 @@ async function fetchChecked(url, { fetchImpl = fetch, signal, headers = { Accept
     // Sign only on the configured origin. A redirect cannot forward a
     // listener's token proof to another host, even if it repeats /a/<token>.
     const signature = current.origin === originalOrigin
-      ? headersForSignedAddon(current.toString(), { intent: addonIntent, signingKey }) : {}
+      ? (signingKey
+        ? headersForSignedAddon(current.toString(), { intent: addonIntent, signingKey })
+        : headersForLastWave(current.toString(), { intent: addonIntent }))
+      : {}
     const res = await fetchImpl(current.toString(), { headers: { 'User-Agent': USER_AGENT, ...headers, ...signature }, redirect: 'manual', signal })
     report(onDiagnostic, 'addon-http-status', { status: res.status, hop })
     if (!REDIRECT.has(res.status)) return res
