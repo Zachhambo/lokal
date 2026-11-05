@@ -7,31 +7,10 @@ import { fetchAllErrorTrackIds, getFolderPlaybackTracks } from '../libraryHelper
 import TrackList, { TrackColumnPickerControl } from './TrackList'
 import FadeImg from './FadeImg'
 import CoverFlow from './CoverFlow'
+import FolderArtwork from './FolderArtwork'
 import { useAppearanceFlag } from '../appearanceFlags'
 import { useTranslation } from '../i18n'
 import ContextMenu, { useContextMenu } from './ContextMenu'
-
-function FolderArtwork({ folder, artSrc }) {
-  const explicit = folder?.artwork_path
-    ? (api.isElectron ? api.fileURL(folder.artwork_path) : api.folderArtworkURL(folder.artwork_path))
-    : null
-  const covers = explicit ? [] : (Array.isArray(folder?.artwork_tracks) ? folder.artwork_tracks : [])
-    .map(track => track.artwork_path ? artSrc(track) : (track.artwork_url || (track.id ? api.artworkURL(track.id) : null)))
-    .filter(Boolean)
-    .slice(0, 4)
-
-  if (explicit) return <FadeImg src={explicit} alt="" className="h-full w-full object-cover" />
-  if (!covers.length) return null
-  if (covers.length === 1) return <FadeImg src={covers[0]} alt="" className="h-full w-full object-cover" />
-
-  return (
-    <div className={`grid h-full w-full overflow-hidden ${covers.length === 2 ? 'grid-cols-2 grid-rows-1' : 'grid-cols-2 grid-rows-2'}`}>
-      {covers.map((src, index) => (
-        <FadeImg key={src + ':' + index} src={src} alt="" className="h-full w-full min-h-0 min-w-0 object-cover" />
-      ))}
-    </div>
-  )
-}
 
 export default function LibraryFolderBrowser({
   folderPath,
@@ -522,7 +501,7 @@ export default function LibraryFolderBrowser({
               wheelOneStep
               renderArtwork={pick => (
                 <div className="relative h-full w-full">
-                  <FolderArtwork folder={pick.item} artSrc={artSrc} />
+                  <FolderArtwork folder={pick.item} />
                   {!pick.item.artwork_path && !(pick.item.artwork_tracks || []).length && (
                     <Folder size={42} strokeWidth={1.5} className="absolute inset-0 m-auto text-muted" />
                   )}
@@ -547,7 +526,7 @@ export default function LibraryFolderBrowser({
                     className={`group flex min-w-0 flex-col gap-2 rounded-xl p-1.5 text-left transition-colors ${selected ? 'bg-accent/10 ring-1 ring-accent/60' : 'hover:bg-elevated/40'}`}
                   >
                     <div className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border bg-elevated transition-colors ${selected ? 'border-accent' : 'border-border group-hover:border-accent/40 group-hover:bg-accent/5'}`}>
-                      <FolderArtwork folder={folder} artSrc={artSrc} />
+                      <FolderArtwork folder={folder} />
                       {!folder.artwork_path && !(folder.artwork_tracks || []).length && (
                         <Folder size={42} strokeWidth={1.5} className={`transition-colors ${selected ? 'text-accent' : 'text-muted group-hover:text-accent'}`} />
                       )}
@@ -578,7 +557,7 @@ export default function LibraryFolderBrowser({
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${selected ? 'bg-accent/10 ring-1 ring-inset ring-accent/60' : 'hover:bg-elevated/80'}`}
                   >
                     <div className={`relative flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-md border bg-elevated ${selected ? 'border-accent' : 'border-border'}`}>
-                      <FolderArtwork folder={folder} artSrc={artSrc} />
+                      <FolderArtwork folder={folder} />
                       {!folder.artwork_path && !(folder.artwork_tracks || []).length && <Folder size={17} className={selected ? 'text-accent' : 'text-muted'} />}
                     </div>
                     <span className="min-w-0 flex-1 truncate text-sm text-white">{folder.name}</span>

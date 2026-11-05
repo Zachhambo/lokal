@@ -5,6 +5,8 @@ import { clampIndex, flowCoverGeometry, flowIndexAt, flowDrag, flowCoastPlan, fl
 
 const shelf = readFileSync(new URL('../src/components/MadeForYou.jsx', import.meta.url), 'utf8')
 const flow = readFileSync(new URL('../src/components/CoverFlow.jsx', import.meta.url), 'utf8')
+const folderBrowser = readFileSync(new URL('../src/components/LibraryFolderBrowser.jsx', import.meta.url), 'utf8')
+const folderArtwork = readFileSync(new URL('../src/components/FolderArtwork.jsx', import.meta.url), 'utf8')
 const home = readFileSync(new URL('../src/pages/Home.jsx', import.meta.url), 'utf8')
 
 test('projected Cover Flow triangle corners match the traced original iTunes artwork', () => {
@@ -331,6 +333,7 @@ test('custom artwork renderers skip unused Cover Flow artwork preloading', () =>
   const customArtworkGuard = flow.indexOf('if (renderArtwork) return undefined')
   const preloadArtwork = flow.indexOf('const batches = picks.map')
   assert.ok(customArtworkGuard >= 0 && preloadArtwork > customArtworkGuard, 'custom artwork skips built-in cover preloading')
+  assert.ok(folderArtwork.includes('trackFullArtURL(track)'), 'folder cover flow collages request full-resolution embedded artwork')
 })
 
 test('reflection implementation and its Home-specific paint layering are completely removed', () => {
