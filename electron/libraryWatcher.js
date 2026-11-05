@@ -163,6 +163,7 @@ async function scan(folder) {
   // scan's directory walk: scanner.walkDir was not exported, and a second
   // walk could return a different snapshot after a NAS disconnect.
   if (!scanned || scanned.errors || !inventory || walkFailures?.length) return false
+  const files = inventory
   if (!selectedRoot(target) || !await isReadableRoot(target)) return false
   const { verifiedPruneExists } = require('./ipc/networkLibrary')
   const verifiedExists = await verifiedPruneExists(

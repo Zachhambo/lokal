@@ -4,8 +4,8 @@
 // likes, plays and playlist places to that one before it goes. Without a new
 // copy the entry is removed like a song deleted in Lokal.
 //
-// Nothing is removed when the scan found no files at all: the music folder
-// (or its drive) being unavailable must not empty the library.
+// Empty inventories are pruned only when the caller opts in after confirming
+// that the root was reachable and its full directory walk succeeded.
 
 const fs = require('fs')
 const path = require('path')
@@ -60,16 +60,22 @@ function dropTracks(db, stale, copyOf) {
 /**
  * @param folderPath    the music folder just scanned
  * @param scannedFiles  the audio files the scan found in it
- * -> { removed, moved }
+ * -> { removed, moved, ids }
  */
-function pruneMissingTracks(db, folderPath, scannedFiles, { exists = fs.existsSync } = {}) {
-  if (!folderPath || !Array.isArray(scannedFiles) || !scannedFiles.length || !exists(folderPath)) return { removed: 0, moved: 0 }
+function pruneMissingTracks(db, folderPath, scannedFiles, {
+  exists = fs.existsSync,
+  allowEmpty = false,
+} = {}) {
+  if (!folderPath || !Array.isArray(scannedFiles) ||
+      (!scannedFiles.length && !allowEmpty) || !exists(folderPath)) {
+    return { removed: 0, moved: 0, ids: [] }
+  }
   const [prefix, upper] = pathRange(folderPath)
   const found = new Set(scannedFiles.map(file => path.resolve(file).toLowerCase()))
   const rows = db.prepare("SELECT * FROM tracks WHERE file_path >= ? AND file_path < ? AND file_path NOT LIKE 'ghost://%'").all(prefix, upper)
   const stale = rows.filter(row => !found.has(path.resolve(row.file_path).toLowerCase()) && !exists(row.file_path))
   const present = rows.filter(row => !stale.includes(row))
-  return dropTracks(db, stale, old => present.find(row => sameSong(row, old)))
+  return { ...dropTracks(db, stale, old => present.find(row => sameSong(row, old))), ids: stale.map(row => row.id) }
 }
 
 /**
