@@ -422,14 +422,41 @@ async function scanFolders(folderPaths = []) {
   const artistNamePreference = getArtistNamePreference(db)
   const forceArtistNameRefresh = artistNamePreferenceNeedsRescan(db, artistNamePreference)
   const results = []
+  const inventories = []
   for (const folder of onlineFolders) {
-    results.push(await scanFolder(folder, {
+    let files = null
+    let walkFailures = null
+    const result = await scanFolder(folder, {
       saveRoot: false,
       watch: false,
       forceArtistNameRefresh,
       persistArtistNamePreference: false,
       artistNamePreference,
-    }))
+      onInventory(inventory, failures) {
+        files = inventory
+        walkFailures = failures
+      },
+    })
+    results.push(result)
+    inventories.push({ folder, files, walkFailures, errors: result?.errors ?? 1 })
+  }
+  const missingTrackIds = []
+  for (const inventory of inventories) {
+    if (!Array.isArray(inventory.files) || inventory.errors > 0 || inventory.walkFailures?.length) continue
+    const knownPaths = getTrackRowsUnderFolder(db, inventory.folder).map(row => row.file_path)
+    const verifiedExists = await require('./networkLibrary').verifiedPruneExists(
+      inventory.folder, inventory.files, knownPaths)
+    if (!verifiedExists) continue
+    try {
+      const pruned = require('../libraryPrune').pruneMissingTracks(
+        db, inventory.folder, inventory.files, { exists: verifiedExists, allowEmpty: true })
+      missingTrackIds.push(...pruned.ids)
+    } catch (error) {
+      console.warn('[scanner] Could not remove missing tracks after rescan:', inventory.folder, error.message)
+    }
+  }
+  if (missingTrackIds.length) {
+    emit('library:changed', { added: [], updated: [], removed: [...new Set(missingTrackIds)] })
   }
   // Persist only after all roots scan without file errors, so a failed rescan
   // is retried next time.

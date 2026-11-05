@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { test } from 'node:test'
 const require = createRequire(import.meta.url)
 const { initDB, getDB } = require('../electron/ipc/db')
-const { scanFolder, applyFileChanges } = require('../electron/ipc/scanner')
+const { scanFolder, scanFolders, applyFileChanges } = require('../electron/ipc/scanner')
 const { stopWatching, scanRootForCatchUp, discardPendingForRoot } = require('../electron/libraryWatcher')
 const { noteFileWritten } = require('../electron/fileStamp')
 const scanMetadata = require('../electron/ipc/scannerMetadata')
@@ -71,6 +71,27 @@ test('a scan reads only new and changed files; a changed file keeps its library 
   reads.length = 0
   await scanFolder(path.dirname(a))
   assert.deepEqual(reads, [])
+})
+
+test('a complete library rescan removes deleted tracks, including the last track in an emptied folder', async t => {
+  const { db, music, write, row } = fixture(t)
+  const watcher = require('../electron/libraryWatcher')
+  t.mock.method(watcher, 'watchLibraryRoots', () => {})
+  const a = write('a.mp3')
+  const b = write('b.mp3')
+  await scanFolders([music])
+  assert.ok(row(a))
+  assert.ok(row(b))
+
+  fs.rmSync(a)
+  await scanFolders([music])
+  assert.equal(row(a), undefined)
+  assert.ok(row(b))
+
+  fs.rmSync(b)
+  await scanFolders([music])
+  assert.equal(row(b), undefined)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tracks WHERE file_path NOT LIKE 'ghost://%'").get().n, 0)
 })
 
 test('a file Lokal wrote into itself is not read again', async t => {

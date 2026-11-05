@@ -5,10 +5,10 @@ import { DEFAULT_RADIO_CATALOG_URL, resolveRadioCatalogUrl } from '../src/radio/
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
 
-test('Electron updater and release publishing target the renamed Desktop repository', () => {
+test('Electron updater publishes to the fork while project links target the canonical Desktop repository', () => {
   const manifest = JSON.parse(read('package.json'))
   assert.deepEqual(manifest.build.publish, {
-    provider: 'github', owner: 'lokal-music', repo: 'Desktop',
+    provider: 'github', owner: 'Zachhambo', repo: 'lokal',
   })
   assert.match(read('src/App.jsx'), /api\.github\.com\/repos\/lokal-music\/Desktop\/releases\/latest/)
   assert.match(read('src/pages/Settings.jsx'), /github\.com\/lokal-music\/Desktop\/releases/)
