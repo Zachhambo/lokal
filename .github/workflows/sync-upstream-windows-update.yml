@@ -27,7 +27,7 @@ jobs:
           ref: 4k-fork-new
           fetch-depth: 0
 
-      - name: Merge upstream and bump patch version
+      - name: Rebase onto upstream and bump patch version
         id: sync
         shell: bash
         run: |
@@ -48,12 +48,12 @@ jobs:
             exit 0
           fi
           if ! git merge-base HEAD upstream/main >/dev/null; then
-            echo "::error::The fork and upstream have no common history; refusing to merge unrelated histories."
+            echo "::error::The fork and upstream have no common history; refusing to rebase unrelated histories."
             exit 1
           fi
 
-          echo "Merging upstream main into 4k-fork-new."
-          git merge --no-edit upstream/main
+          echo "Rebasing 4k-fork-new onto upstream main."
+          git rebase upstream/main
 
           CURRENT=$(node -p "require('./package.json').version")
           if ! [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -86,7 +86,7 @@ jobs:
 
           git add package.json package-lock.json README.md
           git commit -m "Version $NEW after upstream sync"
-          git push origin HEAD:refs/heads/4k-fork-new
+          git push --force-with-lease origin HEAD:refs/heads/4k-fork-new
 
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
