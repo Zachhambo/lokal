@@ -21,8 +21,15 @@
   </div>
 
   <!-- The music video (Lokal → On the TV → Video): muted, kept to the song. -->
+  <div id="youtube-video" aria-hidden="true"></div>
   <video id="video" muted playsinline preload="auto" aria-hidden="true"></video>
 
+  <nav id="views" aria-label="Receiver view">
+    <button type="button" data-mode="nowplaying" aria-pressed="true">Cover</button>
+    <button type="button" data-mode="lyrics" aria-pressed="false">Lyrics</button>
+    <button type="button" data-mode="video" aria-pressed="false">Video</button>
+  </nav>
+  <div id="view-status" role="status"></div>
   <main id="app">
     <section id="idle">
       <img src="icon.png" alt="" class="idle-logo">
@@ -67,7 +74,7 @@
     <div id="buffering" aria-hidden="true"></div>
   </main>
 
-  <audio id="audio" preload="auto"></audio>
+  <audio id="audio" class="castMediaElement" preload="auto"></audio>
   <script src="receiver.js"></script>
 </body>
 </html>

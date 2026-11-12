@@ -29,11 +29,12 @@ const { normalizeArtwork, writeEmbeddedArtwork } = require('../fileArtwork')
 const { artistIdFromName, findArtistById, migrateUnknownArtist, resolveArtistId, trackArtistLinks } = require('../artistId')
 
 const DEFAULT_MUSIC_PATH = 'C:\\Users\\sipbuu\\Music'
-const AUDIO_EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac', '.opus', '.wma', '.alac', '.ape'])
+const { walkDir, AUDIO_EXTS } = require('./walkMusicFiles')
+const { isPrivatePhoneUploadPath } = require('../phoneUploadPaths')
 const { isPreparedStemClipName } = require('../automix/stem-clip')
 // Same secrets as the web server's SECRET_KEYS (server/routes/settings.js):
 // masked by settings:get, left out of settings:exportAll, kept on import.
-const SECRET_SETTING_KEYS = new Set(['soulseek_api_key', 'soulseek_password', 'spicylyrics_api_key', 'spotify_sp_dc', 'apple_music_user_token', 'listenbrainz_token', 'lastfm_api_secret', 'lastfm_session_key', 'yt_cookie_header'])
+const { SECRET_SETTING_KEYS, exportAppData: buildBackup } = require('../appDataExport')
 const SECRET_SETTING_PLACEHOLDER = '••••••••'
 const DRUM_KIT_PATTERNS = /\b(kick|snare|808|hi[- ]?hat|hihat|rimshot|clap|crash|cymbal|drum( kit| loop| sample)?|sample pack|loop kit|one[- ]?shot|fx[- ]?sound|bass[- ]?drum|perc(ussion)?|stem[s]?|acapella)\b/i
 
@@ -205,36 +206,6 @@ async function extractArtwork(metadata, trackId, fallbackArtwork = null) {
   return fallbackArtwork || null
 }
 
-// `failures` collects folders that could not be read, so a scan can tell it
-// missed files instead of looking complete.
-async function walkDir(dir, files = [], failures = null) {
-  // SMB/WebDAV mounts may take seconds to reply or disappear mid-scan.
-  // Never perform directory enumeration synchronously in Electron's main
-  // thread, and avoid a recursive JS stack on deeply nested NAS libraries.
-  const { withTimeout } = require('./networkLibrary')
-  const pending = [dir]
-  const visited = new Set()
-  while (pending.length) {
-    const current = pending.pop()
-    if (visited.has(current)) continue
-    visited.add(current)
-    let entries
-    try {
-      entries = await withTimeout(fsp.readdir)(current, { withFileTypes: true })
-    } catch (error) {
-      failures?.push(current)
-      console.warn('[scanner] Folder enumeration failed:', current, error.message)
-      continue
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name)
-      if (entry.isDirectory()) pending.push(full)
-      else if (entry.isFile() && !isPreparedStemClipName(entry.name) &&
-          AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(full)
-    }
-  }
-  return files
-}
 
 function isDrumKit(title, album, genre) {
   if (DRUM_KIT_PATTERNS.test(title)) return true
@@ -1272,13 +1243,6 @@ async function applyBatchTrackUpdates(db, trackIds = [], operations = {}) {
   return updatedIds.map(id => db.prepare('SELECT * FROM tracks WHERE id = ?').get(id)).filter(Boolean)
 }
 
-function toDataUrl(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return null
-  const ext = path.extname(filePath).toLowerCase()
-  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
-  return `data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`
-}
-
 async function writePlaylistCover(playlistId, imageData) {
   if (!imageData) return null
   const base64 = String(imageData).split(',')[1] || ''
@@ -1289,39 +1253,7 @@ async function writePlaylistCover(playlistId, imageData) {
   return coverPath
 }
 
-function exportAppData() {
-  const db = getDB()
-  const theme = db.prepare("SELECT value FROM settings WHERE key = 'theme'").get()?.value || 'dark'
-  let themeOverrides = {}
-  try {
-    const raw = db.prepare("SELECT value FROM settings WHERE key = 'theme_overrides'").get()?.value
-    themeOverrides = raw ? JSON.parse(raw) : {}
-  } catch {}
-  const users = db.prepare('SELECT id, username, display_name, avatar_path, bio, created_at, password_hash FROM users ORDER BY created_at DESC').all().map((user) => ({
-    ...user,
-    avatar_data: toDataUrl(user.avatar_path),
-  }))
-  return {
-    exported_at: Date.now(),
-    version: 1,
-    theme,
-    theme_overrides: themeOverrides,
-    settings: Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().filter(row => !SECRET_SETTING_KEYS.has(row.key)).map(row => [row.key, row.value])),
-    users,
-    user_settings: db.prepare('SELECT user_id, key, value FROM user_settings ORDER BY user_id, key').all(),
-    playlists: db.prepare('SELECT * FROM playlists ORDER BY created_at DESC').all().map((playlist) => ({
-      ...playlist,
-      cover_data: toDataUrl(playlist.cover_path),
-    })),
-    playlist_tracks: db.prepare('SELECT * FROM playlist_tracks ORDER BY playlist_id, position, id').all(),
-    user_likes: db.prepare('SELECT * FROM user_likes ORDER BY user_id, liked_at DESC').all(),
-    play_history: db.prepare('SELECT * FROM play_history ORDER BY played_at DESC').all(),
-    listening_events: db.prepare('SELECT * FROM listening_events ORDER BY created_at DESC').all(),
-    artists: db.prepare('SELECT * FROM artists ORDER BY name').all(),
-    artist_track_links: db.prepare('SELECT * FROM artist_track_links ORDER BY artist_id, track_id').all(),
-    tracks: db.prepare('SELECT * FROM tracks ORDER BY added_at DESC').all(),
-  }
-}
+function exportAppData() { return buildBackup(getDB()) }
 
 function registerScannerHandlers(ipcMain) {
   const { BrowserWindow } = require('electron')
@@ -2112,6 +2044,7 @@ function updateTrackArtistLinks(db, trackId, artist) {
 }
 
 async function indexSingleFile(filePath, opts = {}) {
+  if (isPrivatePhoneUploadPath(filePath)) return null
   const db = getDB()
   const stat = fs.statSync(filePath)
   const trackId = 't-' + hashFile(filePath, stat)
@@ -2348,7 +2281,7 @@ async function applyFileChanges(changes = [], activeRoots) {
     if (!rawPath) continue
     const filePath = path.resolve(String(rawPath))
     // Prepared stem clips are internal transition cache, not library songs.
-    if (isPreparedStemClipName(filePath)) continue
+    if (isPreparedStemClipName(filePath) || isPrivatePhoneUploadPath(filePath)) continue
     const owner = rootFor(filePath)
     if (!owner || seen.has(filePath)) continue
     seen.add(filePath)
@@ -2606,5 +2539,7 @@ function registerV4Handlers(ipcMain) {
 
 
 // Reuse this bounded, failure-reporting walker for watcher catch-up.
+// Reuse the exact manual-import-compatible export for scheduled backups.
+module.exports.exportAppData = exportAppData
 module.exports.walkDir = walkDir
 module.exports.registerV4Handlers = registerV4Handlers

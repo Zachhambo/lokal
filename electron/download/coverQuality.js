@@ -45,13 +45,14 @@ async function fetchBestCover(url, { fetchImpl = globalThis.fetch, timeoutMs = C
         const response = await fetchImpl(candidate, { signal: controller.signal, redirect: 'follow' })
         if (!response.ok) continue
         const declaredType = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase()
-        if (!/^image\/(?:jpeg|png|webp)$/.test(declaredType)) continue
+        if (declaredType && !/^image\/(?:jpeg|jpg|png|webp|avif)$/.test(declaredType) &&
+            !['application/octet-stream', 'binary/octet-stream'].includes(declaredType)) continue
         const declaredLength = Number(response.headers.get('content-length'))
         if (declaredLength > COVER_MAX_BYTES) continue
         const bytes = await readBoundedBody(response, COVER_MAX_BYTES)
         if (!bytes?.length) continue
         const meta = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS }).metadata()
-        if (!['jpeg', 'png', 'webp'].includes(meta.format)) continue
+        if (!['jpeg', 'png', 'webp', 'heif'].includes(meta.format)) continue
         const width = Number(meta.width) || 0
         const height = Number(meta.height) || 0
         const side = Math.min(width, height)
@@ -69,6 +70,12 @@ async function fetchBestCover(url, { fetchImpl = globalThis.fetch, timeoutMs = C
       }
     }
   } finally { clearTimeout(timer) }
+  // MP4's covr atom supports JPEG/PNG. WebP/AVIF written as generic data
+  // disappears in tag readers, even though the cover loaded in the UI.
+  if (best && !['image/jpeg', 'image/png'].includes(best.mime)) {
+    best.bytes = await sharp(best.bytes).rotate().jpeg({ quality: 94 }).toBuffer()
+    best.mime = 'image/jpeg'
+  }
   return best
 }
 

@@ -29,6 +29,9 @@
   var audio = $('audio')
   var video = $('video')
   var all = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)) }
+  // Older senders can prepare the next recording before CAF changes tracks.
+  // Keep a small window without ever painting another recording's content.
+  var presentations = new Map()
 
   var state = {
     senderProtocol: 1, // the version of Lokal's messages (PROTOCOL), from the last one
@@ -53,6 +56,7 @@
 
   var switching = null
   function applyView() {
+    all('#views button').forEach(function (button) { button.setAttribute('aria-pressed', String(button.getAttribute('data-mode') === state.want)) })
     var next = view()
     var current = body.getAttribute('data-view')
     if (current === next) return
@@ -115,6 +119,9 @@
       paintBackdrop(track.image)
       if (state.lyrics && state.lyrics.trackId !== track.id) setLyrics(null)
       if (state.video && state.video.trackId !== track.id) setVideo(null)
+      var prepared = presentations.get(track.id)
+      if (prepared && prepared.lyrics) setLyrics(prepared.lyrics)
+      if (prepared && prepared.video) setVideo(prepared.video)
       renderUpNext()
       showVideoInfo()
       // A new song: the screen first, then a look at what's next.
@@ -224,6 +231,7 @@
     lines.appendChild(nodes)
     lines.classList.toggle('plain', !!state.lyrics && !state.lyrics.synced)
     box.classList.toggle('empty', !!state.lyrics && list.length === 0)
+    if (state.want === 'lyrics') $('view-status').textContent = ''
     if (view() === 'lyrics') tick(true)
   }
 
@@ -260,9 +268,63 @@
 
   // Lokal sends a song's music video: { trackId, url, segments }. It plays
   // muted, kept to the song's clock (the TV's audio): it never sets the pace.
+  var youtube = null
+  var youtubeLoading = null
+  function youtubeAPI() {
+    if (window.YT && window.YT.Player) return Promise.resolve()
+    if (!youtubeLoading) youtubeLoading = new Promise(function (resolve, reject) {
+      var previous = window.onYouTubeIframeAPIReady
+      var ready = function () { clearTimeout(deadline); if (previous) previous(); resolve() }
+      window.onYouTubeIframeAPIReady = ready
+      var script = document.createElement('script')
+      script.src = 'https://www.youtube.com/iframe_api'
+      var fail = function () {
+        clearTimeout(deadline)
+        youtubeLoading = null
+        if (window.onYouTubeIframeAPIReady === ready) window.onYouTubeIframeAPIReady = previous
+        script.remove()
+        reject(new Error('Video unavailable'))
+      }
+      var deadline = setTimeout(fail, 20000)
+      script.onerror = fail
+      document.head.appendChild(script)
+    })
+    return youtubeLoading
+  }
+  function stopYoutube() {
+    if (youtube) { youtube.destroy(); youtube = null }
+    $('youtube-video').textContent = ''
+  }
+  function setYoutube(info) {
+    if (state.video && state.video.videoId === info.videoId && state.video.trackId === String(info.trackId) && (state.video.ready || state.video.loading)) {
+      if (info.segments) state.video.segments = Array.isArray(info.segments) && info.segments.length ? info.segments : [{ start: 0, end: null, offset: 0 }]
+      applyView(); loop(); return
+    }
+    body.setAttribute('data-video-kind', 'youtube')
+    stopYoutube()
+    video.pause(); video.removeAttribute('src'); video.load()
+    var current = state.video = { trackId: String(info.trackId), videoId: info.videoId, ready: false, loading: true,
+      segments: Array.isArray(info.segments) && info.segments.length ? info.segments : [{ start: 0, end: null, offset: 0 }] }
+    youtubeAPI().then(function () {
+      if (state.video !== current) return
+      var mount = document.createElement('div'); $('youtube-video').appendChild(mount)
+      youtube = new YT.Player(mount, { videoId: info.videoId,
+        playerVars: { autoplay: 0, controls: 0, playsinline: 1, disablekb: 1, origin: location.origin },
+        events: {
+          onReady: function (event) { if (state.video !== current) return; event.target.mute(); current.loading = false; current.ready = true; $('view-status').textContent = ''; applyView(); loop() },
+          onError: function () { if (state.video !== current) return; current.loading = false; current.ready = false; $('view-status').textContent = 'Video unavailable'; applyView() },
+        },
+      })
+    }).catch(function () { if (state.video === current) { current.loading = false; current.ready = false; $('view-status').textContent = 'Video unavailable'; applyView() } })
+  }
+
   function setVideo(info) {
+    if (info && /^[A-Za-z0-9_-]{11}$/.test(info.videoId || '')) { setYoutube(info); return }
+    stopYoutube()
+    body.setAttribute('data-video-kind', 'native')
     if (!info || !info.url) {
       state.video = null
+      $('view-status').textContent = state.want === 'video' ? 'No video available' : ''
       video.pause()
       video.removeAttribute('src')
       video.load()
@@ -271,18 +333,19 @@
     }
     var segments = Array.isArray(info.segments) && info.segments.length ? info.segments : [{ start: 0, end: null, offset: 0 }]
     if (state.video && state.video.url === info.url) { state.video.segments = segments; return }
+    $('view-status').textContent = ''
     state.video = { trackId: info.trackId, url: info.url, segments: segments, ready: false }
     video.src = info.url
     video.load()
   }
 
   video.addEventListener('loadeddata', function () {
-    if (!state.video) return
+    if (!state.video || !state.video.url) return
     state.video.ready = true
     applyView()
     loop()
   })
-  video.addEventListener('error', function () { if (state.video) { state.video = null; applyView() } })
+  video.addEventListener('error', function () { if (state.video && state.video.url) { state.video = null; $('view-status').textContent = 'Video unavailable'; applyView() } })
 
   function syncVideo(t) {
     var v = state.video
@@ -291,6 +354,13 @@
     for (var i = 0; i < v.segments.length; i++) {
       var segment = v.segments[i]
       if (t >= segment.start && (segment.end == null || t < segment.end)) { target = t + segment.offset; break }
+    }
+    if (v.videoId && youtube) {
+      var active = state.playback === 'playing' && target != null && target >= 0 && view() === 'video'
+      if (target != null && target >= 0 && Math.abs((youtube.getCurrentTime() || 0) - target) > 0.5) youtube.seekTo(target, true)
+      if (active && youtube.getPlayerState() !== 1) youtube.playVideo()
+      else if (!active && youtube.getPlayerState() !== 2) youtube.pauseVideo()
+      return
     }
     var end = video.duration || 0
     // Where the video doesn't have this part of the song: it waits (its picture stays).
@@ -366,14 +436,27 @@
   var PROTOCOL = 1
 
   function onMessage(data) {
-    if (!data || typeof data !== 'object') return
+    // Native senders and raw Cast V2 clients can deliver either JSON form.
+    if (typeof data === 'string') { try { data = JSON.parse(data) } catch (_) { return } }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return
     state.senderProtocol = Number(data.protocol) || 1
+    if ((data.type === 'lyrics' || data.type === 'video') && data.trackId != null) {
+      data = Object.assign({}, data, { trackId: String(data.trackId) })
+      var prepared = presentations.get(data.trackId) || {}
+      prepared[data.type] = data
+      presentations.delete(data.trackId)
+      presentations.set(data.trackId, prepared)
+      while (presentations.size > 4) presentations.delete(presentations.keys().next().value)
+      if (!state.track || data.trackId !== state.track.id) return
+    }
     if (data.type === 'upnext') setUpNext(data.items)
     else if (data.type === 'lyrics') setLyrics(data)
-    else if (data.type === 'video') setVideo(data.url ? data : null)
+    else if (data.type === 'video') setVideo(data.url || data.videoId ? data : null)
     else if (data.type === 'view') {
       if (data.view) state.want = data.view === 'lyrics' || data.view === 'video' ? data.view : 'nowplaying'
       if (/^#[0-9a-f]{3,8}$/i.test(String(data.accent || ''))) document.documentElement.style.setProperty('--accent', data.accent)
+      $('view-status').textContent = state.want === 'video' && (!state.video || !state.video.ready) ? 'Loading video…'
+        : state.want === 'lyrics' && (!state.lyrics || !state.track || state.lyrics.trackId !== state.track.id) ? 'Loading lyrics…' : ''
       applyView()
     }
   }
@@ -381,6 +464,14 @@
   // ---------------------------------------------------------------- the TV's remote
 
   var tell = function () {}
+  all('#views button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      state.want = button.getAttribute('data-mode')
+      $('view-status').textContent = state.want === 'video' && (!state.video || !state.video.ready) ? 'Loading video…' : ''
+      applyView()
+      tell({ type: 'view', view: state.want })
+    })
+  })
   document.addEventListener('keydown', function (event) {
     if (!state.track) return
     // Down: what's next; Up: put it away.
@@ -450,9 +541,12 @@
     })
 
     var options = new framework.CastReceiverOptions()
+    // Startup otherwise chooses the first media element: the intentionally
+    // muted music-video layer. Metadata/clock then move with no audible song.
+    options.mediaElement = audio
+    audio.muted = false
     options.customNamespaces = {}
     options.customNamespaces[NS] = framework.system.MessageType.JSON
-    options.skipPlayersLoad = true // plain audio files and streams: no adaptive-streaming players to load
     options.statusText = 'Lokal'
     options.supportedCommands = framework.messages.Command.ALL_BASIC_MEDIA |
       framework.messages.Command.QUEUE_NEXT | framework.messages.Command.QUEUE_PREV

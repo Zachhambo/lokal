@@ -1,0 +1,37 @@
+name: Automatic backup regression
+on:
+  pull_request:
+    paths:
+      - 'electron/automaticBackups.js'
+      - 'electron/automaticBackupWorker.js'
+      - 'electron/automaticBackupIpc.js'
+      - 'electron/appDataExport.js'
+      - 'electron/main.js'
+      - 'electron/ipc/scanner.js'
+      - 'scripts/automatic-backups.test.mjs'
+      - 'src/components/AutomaticBackupSettings.jsx'
+      - '.github/workflows/automatic-backups.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  automatic-backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check backup module syntax
+        run: |
+          node --check electron/automaticBackups.js
+          node --check electron/automaticBackupWorker.js
+          node --check electron/automaticBackupIpc.js
+          node --check electron/appDataExport.js
+          node --check electron/main.js
+      - name: Run automatic backup regressions
+        run: node --test scripts/automatic-backups.test.mjs

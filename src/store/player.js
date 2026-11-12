@@ -520,10 +520,8 @@ export const usePlayerStore = create((set, get) => ({
   },
 
   autoNext: () => {
-    if (typeof localStorage !== 'undefined' && localStorage.getItem('lokal-autoplay') === '0') {
-      set({ isPlaying: false, progress: 0 })
-      return
-    }
+    // Album/playlist and manually queued songs always continue. Autoplay
+    // only decides whether recommendations may extend the queue (App.jsx).
     const { shuffle, shuffleQueue, shuffleIndex, queue, queueIndex, repeat, playHistory } = get()
     
     if (shuffle && shuffleQueue.length > 0) {
@@ -555,15 +553,17 @@ export const usePlayerStore = create((set, get) => ({
           playHistory: [nextTrack.id],
           futureHistory: []
         })
+      } else {
+        set({ isPlaying: false, progress: 0 })
       }
       return
     }
     
-    if (!queue.length) return
+    if (!queue.length) { set({ isPlaying: false, progress: 0 }); return }
     let idx
     if (queueIndex < queue.length - 1) idx = queueIndex + 1
     else if (repeat === 'all') idx = 0
-    else return
+    else { set({ isPlaying: false, progress: 0 }); return }
     
     const nextTrack = queue[idx]
     const newHistory = [...playHistory, nextTrack.id]

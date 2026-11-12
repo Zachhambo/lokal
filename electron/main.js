@@ -18,7 +18,9 @@ Object.assign(console, log.functions)
 
 const { autoUpdater } = require('electron-updater')
 const { createUpdateInstaller, shouldQuitOnWindowClosed } = require('./updaterInstall')
-const { initDB, getDB } = require('./ipc/db')
+const { initDB, getDB, getStorageDir } = require('./ipc/db')
+const { createAutomaticBackups } = require('./automaticBackups')
+const { registerAutomaticBackupIpc } = require('./automaticBackupIpc')
 const { registerScannerHandlers, registerExtraHandlers, registerV4Handlers, AUDIO_EXTS } = require('./ipc/scanner')
 const { registerNetworkLibraryHandlers } = require('./ipc/networkLibrary')
 const { registerMixesHandlers } = require('./ipc/mixes')
@@ -628,6 +630,25 @@ app.whenReady().then(async () => {
     })
   } catch (e) { console.error('registerAtmosHandlers:', e.message) }
   try { registerSpotifyLikesHandlers(ipcMain) } catch (e) { console.error('registerSpotifyLikesHandlers:', e.message) }
+
+  // Schedule in Electron; worker threads perform the heavy SQLite export.
+  try {
+    registerAutomaticBackupIpc({
+      ipcMain, BrowserWindow, shell,
+      getWindow: () => mainWindow,
+      dialog: require('electron').dialog,
+      documentsPath: app.getPath('documents'),
+      createBackups: getPreferences => createAutomaticBackups({
+        db: getDB(),
+        dbPath: path.join(getStorageDir(), 'lokal.db'),
+        getPreferences,
+        documentsPath: app.getPath('documents'),
+      }),
+    })
+  } catch (error) {
+    console.error('[backups] Could not initialize automatic backups:', error.message)
+  }
+
   try { registerAutomixHandlers(ipcMain) } catch (e) { console.error('registerAutomixHandlers:', e.message) }
   try { registerFlowHandlers(ipcMain) } catch (e) { console.error('registerFlowHandlers:', e.message) }
   try { registerCastHandlers(ipcMain, { getWindow: () => mainWindow, powerSaveBlocker }) } catch (e) { console.error('registerCastHandlers:', e.message) }
@@ -747,6 +768,7 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('remote:createPairing', () => require('./link').getLink()?.createPairing())
   ipcMain.handle('remote:listDevices', () => require('./link').getLink()?.devices() || [])
+  ipcMain.handle('remote:renameDevice', (_, {id,name}) => require('./link').getLink()?.renameDevice(String(id),name))
   ipcMain.handle('remote:revokeDevice', (_, id) => require('./link').getLink()?.revoke(String(id)))
   ipcMain.handle('remote:commandDevice', (_, {id,command}) => require('./link').getLink()?.commandDevice(String(id),command))
   ipcMain.handle('dialog:openFolder', async () => {

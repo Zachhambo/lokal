@@ -145,6 +145,15 @@ function providers() {
         // Only the choice/transport hint reaches the renderer. No credentials,
         // tokens or unredacted settings are exposed.
         playbackQuality: selected?.id || null,
+        // Mornye's picker uses qualityOptions as its source of truth.
+        // Labels/descriptions are safe display fields; never expose tokens.
+        qualityOptions: a.kind === 'mornye'
+          ? (a.qualityOptions || []).filter(q => q && typeof q.id === 'string')
+            .slice(0, 30).map(q => ({
+              id: q.id, label: q.label || q.name || q.id,
+              description: q.description || '',
+            }))
+          : [],
         nativeSpatialPreferred: !!httpSpatial ||
           (spatial && /^(?:DOLBY[_ -]?ATMOS|ATMOS|AC-?4)$/i.test(String(selected.id))),
         nativeSpatialCodec: httpSpatial?.codec ||
@@ -281,11 +290,9 @@ function registerOnlineHandlers(ipcMain) {
 
   ipcMain.handle('online:radio', (_, videoId) => accountRequest(auth => youtube.fetchRadio(videoId, auth)).catch(() => []))
   ipcMain.handle('online:setAccountLiked', (_, videoId, liked) => accountRequest(({ cookies, fetchImpl }) => youtube.setAccountLiked(videoId, liked, cookies, fetchImpl)).catch(e => ({ error: e.message })))
-  // Direct audio link of an addon track, for "Save to library" (the downloader fetches it).
+  // An opaque addon identity for Save to library; the queue resolves its media.
   ipcMain.handle('online:downloadUrl', async (_, provider, id) => {
-    const key = sources.addons.keyOfProvider(provider)
-    if (key && sources.addons.packageService(getDB()).find(key)) return { package: true, url: `mornye://${key}/${encodeURIComponent(id)}` }
-    try { return { url: (await sources.resolveStream(provider, id, { ...streamOptions(), force: true })).url } } catch (e) { return { error: e.message } }
+    try { return sources.addonDownloadRequest(getDB(), provider, id) } catch (e) { return { error: e.message } }
   })
   // Addons' manifests are read again now and then (new resources, settings).
   sources.addons.refreshManifests(getDB()).catch(() => {})

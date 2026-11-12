@@ -25,3 +25,4 @@ native/smtc-bridge/target/
 
 native/audio-output/build/
 build/webview2-signin/
+__pycache__/

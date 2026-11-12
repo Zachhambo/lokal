@@ -6,35 +6,7 @@ const { buildM3u } = require('../playlists/exportM3u');
 const { configuredMusicRoots } = require('../libraryFolder');
 const { smartTracks, playlistRules } = require('../playlists/smart');
 
-function parseM3U(fileContent) {
-  const lines = fileContent.split(/\r?\n/);
-  const entries = [];
-  let currentMeta = null;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith('#EXTM3U')) continue;
-    if (line.startsWith('#EXTINF:')) {
-      const match = line.match(/#EXTINF:(-?\d+),(.+)/);
-      if (match) {
-        const meta = match[2].trim();
-        const dashIndex = meta.lastIndexOf(' - ');
-        if (dashIndex > 0) {
-          currentMeta = { artist: meta.substring(0, dashIndex).trim(), title: meta.substring(dashIndex + 3).trim() };
-        } else {
-          currentMeta = { title: meta, artist: null };
-        }
-      } else {
-        currentMeta = null;
-      }
-      continue;
-    }
-    if (line.startsWith('#')) continue;
-    entries.push({ file_path: line, title: currentMeta?.title || null, artist: currentMeta?.artist || null });
-    currentMeta = null;
-  }
-  return entries;
-}
+const { parseM3U, findByFilename } = require('../playlists/importM3u');
 
 function parseCsvLine(line) {
   const result = [];
@@ -289,10 +261,7 @@ function findTrack(db, entry) {
   const primaryArtist = String(normalizedArtist || '').split(/\s*,\s*/).map(s => s.trim()).filter(Boolean)[0] || null;
   if (entry.file_path) {
     track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND file_path = ?").get(entry.file_path);
-    if (!track) {
-      const filename = entry.file_path.split(/[/\\]/).pop().replace(/\.[^.]+$/, '').toLowerCase();
-      track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND LOWER(title) = ? LIMIT 1").get(filename);
-    }
+    if (!track) track = findByFilename(db, entry);
   }
   if (!track && entry.title && normalizedArtist) {
     track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND LOWER(title) = ? AND LOWER(artist) = ? LIMIT 1").get(entry.title.toLowerCase(), normalizedArtist.toLowerCase());

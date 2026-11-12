@@ -9,6 +9,7 @@ import { Check, Download, AlertCircle, ArrowUpCircle } from 'lucide-react'
 import { useDownloads } from '../store/downloads'
 import { api } from '../api'
 import SourceIcon from './SourceIcon'
+import Modal from './Modal'
 import { DEFAULT_FIND_ON_SOURCES, orderedFindOnSources, buildFindOnRequest } from '../findOnSources'
 import { downloadUrlFor, isGhostTrack, providerLabel as labelOf, saveToLibrary, streamRef, sourceRefKey } from '../onlineTracks'
 import { libraryCopy, useLibraryIndex } from '../libraryIndex'
@@ -56,6 +57,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
   const [requested, setRequested] = useState(false)
   const [error, setError] = useState(null)
   const [menu, setMenu] = useState(null) // { x, y }
+  const [qualityChoice, setQualityChoice] = useState(null)
   const [menuPosition, setMenuPosition] = useState(null)
   const [findSources, setFindSources] = useState(DEFAULT_FIND_ON_SOURCES)
   const menuRef = useRef(null)
@@ -66,7 +68,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
   useEffect(() => {
     if (keyRef.current === refKey) return
     keyRef.current = refKey
-    setInLibrary(false); setRequested(false); setError(null); setJobId(null)
+    setInLibrary(false); setRequested(false); setError(null); setJobId(null); setQualityChoice(null)
   }, [refKey])
 
   const state = !error && !job && !requested && !inLibrary && upgradable ? 'upgrade'
@@ -81,6 +83,10 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
     const openFromPlayerMenu = (event) => {
       const eventKey = event.detail?.key
       if (eventKey == null || openMenuEventKey == null || String(eventKey) !== String(openMenuEventKey)) return
+      if (event.detail?.downloadNow === true) {
+        requestSave({ force: true })
+        return
+      }
       const rect = externalMenuButtonRef.current?.getBoundingClientRect()
       if (!rect) return
       setMenuPosition(null)
@@ -133,7 +139,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
     (atmosRequestable(meta) || atmosRequestable(track))
 
   /** Download from where the song streams. */
-  const saveFromSource = async ({ force = false } = {}) => {
+  const saveFromSource = async ({ force = false, addonQuality } = {}) => {
     setMenu(null)
     if (state === 'saving' || (state === 'saved' && !(force && ownedOnly))) return
     setError(null)
@@ -141,7 +147,10 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
     const clickedKey = refKey
     const target = await resolveTrack().catch(() => null)
     const result = target?.file_path && !isGhostTrack(target) ? { alreadyInLibrary: true }
-      : target ? await saveToLibrary(target, { replaceTrackId: replaceTrackId || undefined }).catch(e => ({ error: e.message })) : { error: 'Could not save this song' }
+      : target ? await saveToLibrary(target, {
+          replaceTrackId: replaceTrackId || undefined,
+          addonQuality,
+        }).catch(e => ({ error: e.message })) : { error: 'Could not save this song' }
     if (keyRef.current !== clickedKey) return
     if (result?.alreadyInLibrary) {
       // Nothing to download: the song is in the library, and this streamed
@@ -170,6 +179,29 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
     useDownloads.getState().load?.()
   }
 
+  // Same Mornye contract as mobile: list exact manifest tiers for a single
+  // save, without modifying the extension's preferred playback quality.
+  const requestSave = async ({ force = false } = {}) => {
+    setMenu(null)
+    const clickedKey = refKey
+    if (!/^a-[0-9a-f]{10}$/.test(ref?.provider || '')) {
+      return saveFromSource({ force })
+    }
+    try {
+      const providers = await api.onlineProviders()
+      if (keyRef.current !== clickedKey) return
+      const provider = Array.isArray(providers)
+        ? providers.find(p => p.id === ref.provider && p.package)
+        : null
+      const options = (provider?.qualityOptions || [])
+        .filter(option => typeof option.id === 'string' && option.id)
+      if (!options.length) return saveFromSource({ force })
+      setQualityChoice({ provider, options, force })
+    } catch (error) {
+      setError('Could not load addon download qualities: ' + (error?.message || error))
+    }
+  }
+
   /** Open Search on the selected source, keeping the original stream as the replacement target. */
   const findOnSource = async (provider) => {
     setMenu(null)
@@ -193,7 +225,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
     <>
       <button
         ref={externalMenuButtonRef}
-        onClick={(e) => { e.stopPropagation(); saveFromSource() }}
+        onClick={(e) => { e.stopPropagation(); requestSave() }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenuPosition(null); setMenu({ x: e.clientX, y: e.clientY }) }}
         title={label}
         aria-label={label}
@@ -217,7 +249,7 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
           className="w-60 rounded-xl border border-border bg-elevated py-1 shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <button role="menuitem" onClick={() => saveFromSource({ force: true })} disabled={state === 'saving' || (state === 'saved' && !ownedOnly)}
+          <button role="menuitem" onClick={() => requestSave({ force: true })} disabled={state === 'saving' || (state === 'saved' && !ownedOnly)}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-text hover:bg-card disabled:opacity-50">
             <Download size={14} className="text-muted" /> Download from {providerLabel}
           </button>
@@ -240,6 +272,23 @@ export default function SaveToLibraryButton({ track, getTrack, source, meta, siz
         </div>,
         document.body,
       )}
+      <Modal open={!!qualityChoice} onClose={() => setQualityChoice(null)}
+        title={qualityChoice ? 'Download quality · ' + qualityChoice.provider.label : 'Download quality'}>
+        {qualityChoice && <div className="space-y-1">
+          {qualityChoice.options.map(option => (
+            <button key={option.id} type="button"
+              className="flex w-full flex-col rounded-xl border border-border px-4 py-3 text-left hover:border-accent/60 hover:bg-card"
+              onClick={() => {
+                const force = qualityChoice.force
+                setQualityChoice(null)
+                saveFromSource({ force, addonQuality: option.id })
+              }}>
+              <span className="text-sm font-medium text-white">{option.label || option.id}</span>
+              {option.description && <span className="mt-1 text-xs text-muted">{option.description}</span>}
+            </button>
+          ))}
+        </div>}
+      </Modal>
     </>
   )
 }

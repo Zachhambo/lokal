@@ -219,3 +219,15 @@ body.upnext.has-upnext[data-view="now"] #stage { transform: translateY(-14vh) sc
 }
 [data-state="buffering"] #buffering { opacity: 1; animation-play-state: running; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+#youtube-video { position: fixed; inset: 0; opacity: 0; pointer-events: none; background: #000; }
+#youtube-video iframe { width: 100%; height: 100%; border: 0; }
+[data-view="video"][data-video-kind="youtube"] #youtube-video { opacity: 1; }
+[data-view="video"][data-video-kind="youtube"] #video { opacity: 0; }
+
+#views { position: fixed; top: 4vh; right: 5vw; z-index: 20; display: flex; gap: 0.4vw; padding: 0.4vh; border-radius: 99px; border: 1px solid #ffffff26; background: #121214b8; }
+#views button { border: 0; border-radius: 99px; background: transparent; color: #ffffffa6; font: 500 1.6vh var(--font); padding: 0.9vh 1.2vw; cursor: pointer; }
+#views button[aria-pressed="true"] { color: #fff; background: #ffffff22; }
+#views button:focus-visible { outline: 2px solid var(--accent); }
+#view-status { position: fixed; top: 10vh; right: 6vw; z-index: 20; font-size: 1.5vh; color: var(--soft); }
+[data-view="idle"] #views { visibility: hidden; }

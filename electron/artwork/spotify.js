@@ -778,23 +778,39 @@ async function madeForYou(rawCookie, { query } = {}) {
   return homeMixes(data)
 }
 
-/** Up to `max` songs of a Spotify playlist. */
+/** Spotify playlist tracks: null max loads every page; Discovery keeps its 200-track preview. */
 async function playlistTracks(rawCookie, uri, { query, max = 200 } = {}) {
   if (!/^spotify:playlist:[A-Za-z0-9]{22}$/.test(String(uri || ''))) throw new Error('Not a Spotify playlist.')
   if (!query && !cookieValue(rawCookie)) throw new Error('Add your Spotify cookie (sp_dc) in Settings → Integrations → Spotify first.')
   const run = query || tokenQuery(rawCookie)
   const tracks = []
+  const limit = max == null ? Infinity : Math.max(0, Math.floor(Number(max) || 0))
   let title = ''
-  for (let offset = 0; offset < max; offset += 100) {
+  let offset = 0
+  // Never silently stop at 1,000 items: continue until Spotify's totalCount
+  // is exhausted. The guard only rejects endpoints that fail to terminate.
+  for (let pages = 0; offset < limit; pages++) {
+    if (pages >= 10000) throw new TransientError('Spotify playlist pagination exceeded its safety limit.')
     const data = await run('fetchPlaylist', { uri, offset, limit: 100, enableWatchFeedEntrypoint: false, includeEpisodeContentRatingsV2: false })
     const playlist = data?.playlistV2
     if (playlist?.__typename !== 'Playlist') throw new TransientError(`Spotify: ${playlist?.message || 'the playlist couldn\'t be read'}`)
     title = title || playlist.name || ''
-    const items = playlist.content?.items || []
+    const items = playlist.content?.items
+    if (!Array.isArray(items) || items.length > 100) throw new TransientError('Spotify returned an invalid playlist page.')
+    const rawTotal = playlist.content?.totalCount
+    const total = rawTotal == null ? null : Number(rawTotal)
+    if (total != null && (!Number.isSafeInteger(total) || total < 0)) throw new TransientError('Spotify returned an invalid playlist total.')
+    if (!items.length) {
+      if (total != null && offset < total) throw new TransientError('Spotify stopped before loading all playlist tracks. Retry later.')
+      break
+    }
     tracks.push(...items.map(playlistEntry).filter(Boolean))
-    if (items.length < 100 || offset + 100 >= (playlist.content?.totalCount || 0)) break
+    // Offset counts all Spotify entries, not just supported tracks.
+    offset += items.length
+    if (total != null && offset >= total) break
+    if (total == null && items.length < 100) break
   }
-  return { title, tracks: tracks.slice(0, max) }
+  return { title, tracks: max == null ? tracks : tracks.slice(0, limit) }
 }
 
 

@@ -61,6 +61,7 @@ export function useCastPlayback(helpers) {
       device: null,
       upNextKey: null,
       lyricsFor: null,
+      lyricsRequest: null,
       videoFor: null, // the song whose music video the receiver was sent (or told it has none)
     })
 
@@ -89,8 +90,9 @@ export function useCastPlayback(helpers) {
       session.sentCurrent = String(window.current.id)
       session.songPending = false
       session.syncs++
+      let loaded = false
       try {
-        await api.castSetWindow({
+        const result = await api.castSetWindow({
           current: window.current,
           upcoming: window.upcoming,
           repeat: window.repeat,
@@ -98,8 +100,13 @@ export function useCastPlayback(helpers) {
           play: play ?? player().isPlaying,
           reload,
         })
+        loaded = !result?.error
       } catch {} finally { session.syncs-- }
+      if (live !== session || !loaded) return
       sendUpNext()
+      // CAF may discard custom messages while LOAD is still starting its
+      // receiver. Re-send this recording's presentation after media is ready.
+      if (changedSong || reload || !session.extrasSent) sendExtras()
     }
 
     // ------------------------------------------------------------ Lokal's receiver
@@ -122,11 +129,24 @@ export function useCastPlayback(helpers) {
       if (!track?.id || (!force && live.lyricsFor === String(track.id))) return
       live.lyricsFor = String(track.id)
       const session = live
-      Promise.resolve(api.getLyrics(track.id, track.title, track.artist, track.album, track.duration, track.file_path))
-        .catch(() => null)
-        .then(result => {
+      // LOAD completion and view selection may both request a resend. Share
+      // and retain successful content for this recording; empty lookups retry.
+      let request = session.lyricsRequest
+      if (!request || request.id !== String(track.id)) {
+        request = { id: String(track.id) }
+        request.work = Promise.resolve(api.getLyrics(track.id, track.title, track.artist, track.album, track.duration, track.file_path))
+          .catch(() => null)
+          .then(receiverLyrics)
+          .then(content => {
+            if (!content.lines.length && session.lyricsRequest === request) session.lyricsRequest = null
+            return content
+          })
+        session.lyricsRequest = request
+      }
+      request.work
+        .then(content => {
           if (live !== session || String(player().currentTrack?.id) !== String(track.id)) return
-          api.castCustom({ type: 'lyrics', trackId: String(track.id), ...receiverLyrics(result) }).catch(() => {})
+          api.castCustom({ type: 'lyrics', trackId: String(track.id), ...content }).catch(() => {})
         })
     }
 
@@ -346,7 +366,6 @@ export function useCastPlayback(helpers) {
         ...(status.volume ? { volume: Number(status.volume.level) } : {}),
       })
       sendWindow({ position, play, force: true })
-      sendExtras()
     }
 
     const deactivate = ({ reason, last }) => {
@@ -395,7 +414,11 @@ export function useCastPlayback(helpers) {
     const offCast = useCastStore.subscribe((state, prev) => {
       if (state.session && state.session !== prev.session) activate(state.session)
       if (state.ended && state.ended !== prev.ended) deactivate(state.ended)
-      if (state.tvView !== prev.tvView) { sendLook(); sendVideo() }
+      if (state.tvView !== prev.tvView) {
+        sendLook()
+        if (state.tvView === 'lyrics') sendLyrics(true)
+        sendVideo()
+      }
       // Lokal's receiver known only after the session started: what it shows goes now.
       if (live && !live.extrasSent && state.status?.receiver === 'lokal') sendExtras()
     })

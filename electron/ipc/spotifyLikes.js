@@ -156,8 +156,10 @@ function registerSpotifyLikesHandlers(ipcMain) {
     if (!/^spotify:playlist:[A-Za-z0-9]{22}$/.test(String(uri || '')))
       return { tracks: [], error: 'Invalid Spotify playlist.' }
     return libraryResource(
-      `libraryPlaylist:${uri}`, !!force,
-      cookie => spotify.playlistTracks(cookie, String(uri), { max: 1000 }),
+      // Use a new cache key so previously truncated 1,000-song snapshots
+      // are re-fetched on first open, even with auto-update disabled.
+      `libraryPlaylistComplete:${uri}`, !!force,
+      cookie => spotify.playlistTracks(cookie, String(uri), { max: null }),
       { tracks: [] },
     )
   })

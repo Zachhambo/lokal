@@ -7,7 +7,7 @@ const { installCapture } = require('./capture')
 const { reconcilePlaylists, savePlaylistSnapshot } = require('./reconcile')
 const { createLinkedLibraryRefresh } = require('./libraryRefresh')
 const { envelope, decode, text } = require('./protocol')
-const { advertise } = require('./discovery')
+const { advertise, reconcileDiscovery } = require('./discovery')
 let instance
 
 function getLink() { return instance }
@@ -37,8 +37,13 @@ function createLink({ server, db, remote, enabled = () => true }) {
     const legacy = String(process.env.REMOTE_TOKEN || '').trim()
     return legacy && token && safeEqual(legacy, token) ? { id:'legacy',name:'Legacy remote',user_id:currentUser(),legacy:true } : null
   }
-  const ensureDiscovery = () => {
-    if (!stopDiscovery && enabled()) try { stopDiscovery=advertise({id:store.deviceId,port:Number(process.env.PORT)||3421,version:require('../../package.json').version}) } catch {}
+  const ensureDiscovery = (pairing = false) => {
+    try {
+      stopDiscovery = reconcileDiscovery({
+        enabled: enabled(), paired: pairing || store.hasPairedDevices(), stop: stopDiscovery,
+        start: () => advertise({id:store.deviceId,port:Number(process.env.PORT)||3421,version:require('../../package.json').version}),
+      })
+    } catch {}
   }
   function closeDevice(id, reason = 'revoked') { sockets.get(id)?.close(4001,reason); sockets.delete(id); snapshots.delete(id) }
   function assertActive(device) {
@@ -74,7 +79,9 @@ function createLink({ server, db, remote, enabled = () => true }) {
         if (!device.legacy) store.touch(device.id)
         const body=message.body
         switch (message.type) {
-          case 'hello': break
+          case 'hello':
+            if (!device.legacy) store.updateDeviceName(device.id, device.user_id, body.deviceName)
+            break
           case 'state': snapshots.set(device.id,{...body,updatedAt:Date.now()}); break
           case 'ack': {
             const request=pending.get(message.id)
@@ -124,6 +131,7 @@ function createLink({ server, db, remote, enabled = () => true }) {
     socket.on('close',()=>{ if(sockets.get(device.id)===socket){sockets.delete(device.id);snapshots.delete(device.id)} })
   })
   const stateListener=state => {
+    ensureDiscovery()
     for (const [id,socket] of sockets) {
       const device=store.devices(currentUser()).find(item=>item.id===id && !item.revoked)
       if ((!device && id!=='legacy') || !enabled()) {closeDevice(id,'access changed');continue}
@@ -133,15 +141,16 @@ function createLink({ server, db, remote, enabled = () => true }) {
   remote.events.on('state',stateListener)
   remote.events.on('theme',themeListener)
   const heartbeat=setInterval(()=>{
-    if (!enabled() && stopDiscovery) {stopDiscovery();stopDiscovery=null}
+    ensureDiscovery()
     for(const socket of sockets.values()){if(!socket.alive)socket.terminate();else{socket.alive=false;socket.ping()}}
   },30000)
   heartbeat.unref?.()
   const api = {
     store, auth,
+    identity(body) { return store.identity(body, currentUser()) },
     async createPairing() {
       if (!enabled()) throw new Error('Enable Phone Remote before pairing.')
-      ensureDiscovery()
+      ensureDiscovery(true)
       const pairing=store.createPairing(currentUser())
       const info=remote.getRemoteConnectionInfo()
       const host=info.primary?new URL(info.primary).hostname:null
@@ -150,6 +159,11 @@ function createLink({ server, db, remote, enabled = () => true }) {
     },
     pair(body,address) { const result=store.pair(body,address);closeDevice(body.deviceId,'paired again');return result },
     devices() { return store.devices(currentUser()).map(device=>({...device,connected:sockets.has(device.id),state:snapshots.get(device.id)||null})) },
+    renameDevice(id, name) {
+      const user = currentUser()
+      if (!store.renameDevice(id, user, name)) return {ok:false,error:'The device is unavailable.'}
+      return {ok:true,device:store.devices(user).find(device=>device.id===id)}
+    },
     revoke(id) { const result=store.revoke(id,currentUser());if(result)closeDevice(id);return {ok:result} },
     commandDevice(id,command) {
       const socket=sockets.get(id)
@@ -164,7 +178,7 @@ function createLink({ server, db, remote, enabled = () => true }) {
   }
   server.once('close',api.close)
   instance=api
-  if(store.devices(currentUser()).some(d=>!d.revoked))ensureDiscovery()
+  ensureDiscovery()
   return api
 }
 module.exports={createLink,getLink}

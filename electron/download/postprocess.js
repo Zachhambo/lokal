@@ -226,6 +226,14 @@ function renameWithoutArtist(filePath, artist) {
 // whatever the file itself doesn't have.
 
 const { fetchBestCover } = require('./coverQuality')
+let downloadArtworkResolver
+
+function resolveDownloadArtwork(title, artist, exclude) {
+  downloadArtworkResolver ||= require('../discoveryArtwork').createArtworkResolver({
+    fetchImpl: (...args) => globalThis.fetch(...args),
+  })
+  return downloadArtworkResolver([{ type: 'track', title, artist, remoteOnly: true, exclude }])
+}
 
 /** Tags for a download from the client, checked: { title, artist, album, cover, year, track, disc, isrc, genre } or undefined. */
 function knownTagsOf(value) {
@@ -251,11 +259,11 @@ function knownTagsOf(value) {
  *               used where the file has none
  * @returns {{ filePath: string, lyrics: string|null, lyricsSource: string|null, cover: boolean }}
  */
-async function finishFile(filePath, { db, settings = {}, url, meta = null, kind = 'single', outputDir = null, known = null }) {
+async function finishFile(filePath, { db, settings = {}, url, meta = null, kind = 'single', outputDir = null, known = null, recoverArtwork = false }) {
   const out = { filePath, lyrics: null, lyricsSource: null, cover: false }
   const info = readInfo(filePath)
   if (!info) return out
-  if (known) return finishKnownFile(filePath, info, { db, settings, known, outputDir, out })
+  if (known) return finishKnownFile(filePath, info, { db, settings, known, outputDir, out, recoverArtwork })
   const clean = settings.clean_download_metadata !== '0'
   // "Artist - Song" videos: the artist is in the title, not the channel.
   // YouTube and SoundCloud: the artist from the title ("Artist - Song"), not
@@ -313,7 +321,7 @@ function resolveKnownAlbum(existingAlbum, knownAlbum) {
 }
 
 /** finishFile for a file whose song is known from its source (an addon). */
-async function finishKnownFile(filePath, info, { db, settings, known, outputDir, out }) {
+async function finishKnownFile(filePath, info, { db, settings, known, outputDir, out, recoverArtwork }) {
   // yt-dlp tags a bare link with its own guesses, written over anything the
   // file had: the title is the link's file name ("7779369") and the artist
   // "Unknown Artist" (or the host). So the addon's title and artist win.
@@ -330,7 +338,18 @@ async function finishKnownFile(filePath, info, { db, settings, known, outputDir,
   if (album.replace) changes.album = album.value
   // Year, track and disc numbers, ISRC, genre: only where the file has none.
   for (const key of ['year', 'track', 'disc', 'isrc', 'genre']) if (known[key]) changes[key] = known[key]
-  const cover = known.cover ? await fetchBestCover(known.cover) : null
+  let cover = known.cover ? await fetchBestCover(known.cover) : null
+  if (!cover && !info.hasCover && recoverArtwork && tags.title && tags.artist) {
+    // LastWave may omit cover metadata. Use the same strict recording match
+    // as online artwork recovery, without accepting a similarly named song.
+    try {
+      const [found] = await resolveDownloadArtwork(tags.title, tags.artist, known.cover)
+      if (found?.image) {
+        cover = await fetchBestCover(found.image)
+        if (cover) known.cover = found.image // retained in download history
+      }
+    } catch { /* Artwork failure must not discard downloaded audio. */ }
+  }
   if (cover) { changes.coverBytes = cover.bytes; changes.coverMime = cover.mime; changes.upgradeLowResolutionCover = true }
 
   if (settings.download_embed_lyrics !== '0' && !info.hasLyrics && tags.title && tags.artist && db) {

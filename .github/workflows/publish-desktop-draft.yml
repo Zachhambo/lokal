@@ -1,0 +1,37 @@
+name: Publish Desktop Draft
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: ID of the completed draft release to publish without rebuilding
+        required: true
+        type: string
+      version:
+        description: Application version in the draft (for example 14.3.2)
+        required: true
+        type: string
+      channel:
+        description: Rolling release channel
+        type: choice
+        options: [desktop, nightly]
+        default: desktop
+permissions:
+  contents: read
+concurrency:
+  group: release-lokal
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify and publish the completed draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGED_RELEASE_ID: ${{ inputs.release_id }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: python3 scripts/desktop_releases.py promote --release-id "$STAGED_RELEASE_ID" --tag "v$RELEASE_VERSION" --version "$RELEASE_VERSION" --channel "$RELEASE_CHANNEL"

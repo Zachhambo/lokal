@@ -45,6 +45,16 @@ app.post('/api/remote/pair', (req, res) => {
   try { res.json(link.pair(req.body || {}, req.socket.remoteAddress)) }
   catch (error) { res.status(error.status || 400).json({ error: error.message }) }
 })
+// An existing phone verifies a changed LAN address before sending credentials.
+// Like pairing, this endpoint is local-only and available only when opted in.
+app.post('/api/remote/identity', (req, res) => {
+  const link = require('../electron/link').getLink()
+  res.set('Cache-Control', 'no-store')
+  if (!isPhoneRemoteEnabled() || !link) return res.status(503).json({ error: 'Desktop link is unavailable.' })
+  if (!require('./apiKey').isLocalAddress(req.socket.remoteAddress)) return res.status(403).json({ error: 'Connect on the same local network.' })
+  try { res.json(link.identity(req.body || {})) }
+  catch (error) { res.status(error.status || 400).json({ error: error.message }) }
+})
 app.use('/api', (req, res, next) => {
   const mediaOrRemote = /^\/(remote(?:\/|$)|stream\/|artwork\/|lyrics(?:\/|$))/.test(req.path)
   const token = req.headers['x-remote-token']

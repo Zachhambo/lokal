@@ -64,6 +64,42 @@ test('playlist songs: pages of 100 until the end, capped', async () => {
   assert.deepEqual(asked.map(a => a[2]), [0, 100])
 })
 
+test('saved Spotify playlists load past 1,000 tracks without changing Discovery limits', async () => {
+  const all = Array.from({ length: 1234 }, (_, n) => track(n))
+  const offsets = []
+  const query = async (_, { offset, limit }) => {
+    offsets.push(offset)
+    return { playlistV2: { __typename: 'Playlist', name: 'Large library', content: {
+      totalCount: all.length, items: all.slice(offset, offset + limit),
+    } } }
+  }
+  const full = await playlistTracks('', DW, { query, max: null })
+  assert.equal(full.tracks.length, 1234)
+  assert.deepEqual(offsets, Array.from({ length: 13 }, (_, i) => i * 100))
+  offsets.length = 0
+  assert.equal((await playlistTracks('', DW, { query })).tracks.length, 200)
+  assert.deepEqual(offsets, [0, 100])
+})
+
+test('Spotify pagination advances by actual page size, and rejects an incomplete library', async () => {
+  const all = Array.from({ length: 132 }, (_, n) => track(n))
+  const offsets = []
+  const query = async (_, { offset }) => {
+    offsets.push(offset)
+    return { playlistV2: { __typename: 'Playlist', content: {
+      totalCount: all.length, items: all.slice(offset, offset + 40),
+    } } }
+  }
+  assert.equal((await playlistTracks('', DW, { query, max: null })).tracks.length, 132)
+  assert.deepEqual(offsets, [0, 40, 80, 120])
+  const broken = async (_, { offset }) => ({ playlistV2: {
+    __typename: 'Playlist', content: {
+      totalCount: 150, items: offset >= 100 ? [] : all.slice(0, 100),
+    },
+  } })
+  await assert.rejects(playlistTracks('', DW, { query: broken, max: null }), /before loading all/)
+})
+
 test('playlist songs: a missing playlist says so', async () => {
   await assert.rejects(playlistTracks('', DW, { query: async () => ({ playlistV2: { __typename: 'NotFound', message: 'Not found' } }) }), /Not found/)
 })

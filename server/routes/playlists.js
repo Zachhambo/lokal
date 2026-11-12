@@ -67,33 +67,7 @@ function parseExplicit(value) {
   return ['1', 'true', 'yes', 'y', 'explicit'].includes(normalized) ? 1 : 0
 }
 
-function parseM3U(fileContent) {
-  const lines = fileContent.split(/\r?\n/)
-  const entries = []
-  let currentMeta = null
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('#EXTM3U')) continue
-    if (trimmed.startsWith('#EXTINF:')) {
-      const match = trimmed.match(/#EXTINF:(-?\d+),(.+)/)
-      if (match) {
-        const duration = parseInt(match[1], 10)
-        const meta = match[2].trim()
-        const dashIndex = meta.lastIndexOf(' - ')
-        if (dashIndex > 0) {
-          currentMeta = { artist: meta.substring(0, dashIndex).trim(), title: meta.substring(dashIndex + 3).trim(), duration }
-        } else {
-          currentMeta = { title: meta, artist: null, duration }
-        }
-      }
-      continue
-    }
-    if (trimmed.startsWith('#') || !trimmed) continue
-    entries.push({ file_path: trimmed, title: currentMeta?.title || null, artist: currentMeta?.artist || null, duration: currentMeta?.duration || null })
-    currentMeta = null
-  }
-  return entries
-}
+const { parseM3U, findByFilename } = require('../../electron/playlists/importM3u')
 
 function parseCSV(fileContent) {
   const lines = fileContent.split(/\r?\n/).filter(l => l.trim())
@@ -287,10 +261,7 @@ function findTrack(db, entry) {
   const primaryArtist = String(normalizedArtist || '').split(/\s*,\s*/).map(s => s.trim()).filter(Boolean)[0] || null
   if (entry.file_path) {
     track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND file_path = ?").get(entry.file_path)
-    if (!track) {
-      const filename = entry.file_path.split(/[/\\]/).pop().replace(/\.[^.]+$/, '').toLowerCase()
-      track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND LOWER(title) = ? LIMIT 1").get(filename)
-    }
+    if (!track) track = findByFilename(db, entry)
   }
   if (!track && entry.title && normalizedArtist) {
     track = db.prepare("SELECT id FROM tracks WHERE file_path NOT LIKE 'ghost://%' AND LOWER(title) = ? AND LOWER(artist) = ? LIMIT 1").get(entry.title.toLowerCase(), normalizedArtist.toLowerCase())
@@ -662,6 +633,7 @@ router.post('/import', (req, res) => {
     
     if (entry.file_path) {
       track = db.prepare('SELECT id FROM tracks WHERE file_path = ?').get(entry.file_path)
+      if (!track) track = findByFilename(db, entry)
     }
     
     
@@ -704,28 +676,7 @@ router.post('/import-file', (req, res) => {
   let entries = []
   
   if (fileType === 'm3u' || fileType === 'm3u8') {
-    const lines = fileContent.split(/\r?\n/)
-    let currentMeta = null
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('#EXTM3U')) continue
-      if (trimmed.startsWith('#EXTINF:')) {
-        const match = trimmed.match(/#EXTINF:(\d+),(.+)/)
-        if (match) {
-          const meta = match[2].trim()
-          const dashIndex = meta.lastIndexOf(' - ')
-          if (dashIndex > 0) {
-            currentMeta = { artist: meta.substring(0, dashIndex).trim(), title: meta.substring(dashIndex + 3).trim() }
-          } else {
-            currentMeta = { title: meta, artist: null }
-          }
-        }
-        continue
-      }
-      if (trimmed.startsWith('#') || !trimmed) continue
-      entries.push({ file_path: trimmed, title: currentMeta?.title || null, artist: currentMeta?.artist || null })
-      currentMeta = null
-    }
+    entries = parseM3U(fileContent)
   } else if (fileType === 'csv') {
     const lines = fileContent.split(/\r?\n/).filter(l => l.trim())
     if (lines.length >= 2) {
@@ -758,10 +709,7 @@ router.post('/import-file', (req, res) => {
     let track = null
     if (entry.file_path) {
       track = db.prepare('SELECT id FROM tracks WHERE file_path = ?').get(entry.file_path)
-      if (!track) {
-        const filename = entry.file_path.split(/[/\\]/).pop().replace(/\.[^.]+$/, '').toLowerCase()
-        track = db.prepare('SELECT id FROM tracks WHERE LOWER(title) = ? LIMIT 1').get(filename)
-      }
+      if (!track) track = findByFilename(db, entry)
     }
     if (!track && entry.title && entry.artist) {
       track = db.prepare('SELECT id FROM tracks WHERE LOWER(title) = ? AND LOWER(artist) = ? LIMIT 1').get(entry.title.toLowerCase(), entry.artist.toLowerCase())

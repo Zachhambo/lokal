@@ -92,11 +92,9 @@ router.get('/account-playlist/:id', async (req, res) => res.json(await youtube.f
 router.get('/radio/:videoId', async (req, res) => res.json(await youtube.fetchRadio(req.params.videoId, { cookies: accountCookies() }).catch(() => [])))
 router.post('/account-liked', async (req, res) => res.json(await youtube.setAccountLiked(req.body?.videoId, !!req.body?.liked, accountCookies()).catch(e => ({ error: e.message }))))
 
-// Direct audio link of an addon track, for "Save to library".
+// Queue the addon identity without exposing its resolved URL or staged path.
 router.post('/download-url/:provider/:id', async (req, res) => {
-  const key = sources.addons.keyOfProvider(req.params.provider)
-  if (key && sources.addons.packageService(getDB()).find(key)) return res.json({ package: true, url: `spotiflac://${key}/${encodeURIComponent(req.params.id)}` })
-  try { res.json({ url: (await sources.resolveStream(req.params.provider, req.params.id, { ...streamOptions(), force: true })).url }) } catch (e) { res.json({ error: e.message }) }
+  try { res.json(sources.addonDownloadRequest(getDB(), req.params.provider, req.params.id)) } catch (e) { res.json({ error: e.message }) }
 })
 
 // Addons (Settings → Addons).

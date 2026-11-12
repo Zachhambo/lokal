@@ -154,7 +154,7 @@ test('"Playing from" leads back to an online album or artist page', () => {
   assert.equal(isContextNavigable({ type: 'discovery', name: 'x', path: 'https://evil.example' }), false)
 })
 
-import { mergeWithLibrary, isConnected, releaseTitleKey } from '../src/onlineBrowse.js'
+import { mergeWithLibrary, releaseTitleKey } from '../src/onlineBrowse.js'
 
 test('the full album keeps its order, with the library copies in place of the songs it has', () => {
   const lib = [
@@ -173,9 +173,9 @@ test('the full album keeps its order, with the library copies in place of the so
   assert.equal(merged.owned, 2)
 })
 
-test('release titles compare without edition labels; nothing remembered without storage', () => {
+test('release titles compare without edition labels; pages use the online default without storage', () => {
   assert.equal(releaseTitleKey('I Am (Expanded Edition)'), releaseTitleKey('I am'))
-  assert.equal(isConnected('album:x|y'), false)
+  assert.equal(isConnected('album:x|y'), true)
 })
 
 import { libraryAlbumCounts, releaseOwnership } from '../src/onlineBrowse.js'
