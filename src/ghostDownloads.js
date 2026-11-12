@@ -208,3 +208,21 @@ export async function ghostDownloadSuggestions(query, provider, client = api) {
   const rows = Array.isArray(response) ? response : response?.results || []
   return rows.filter(item => !item.preview).slice(0, 8).map(item => ({ ...item, provider }))
 }
+
+
+/** Download a whole collection without requiring a row selection. */
+export async function downloadMissingCollectionTracks(tracks, options = {}) {
+  const unique = [...new Map((tracks || []).filter(track => track?.id).map(track => [track.id, track])).values()]
+  const isCurrent = downloadBatchCurrent(options.isCurrent || (() => true))
+  const ghosts = unique.filter(isGhostTrack)
+  const missing = unique.filter(track => !isGhostTrack(track) && track.missing)
+  const result = await downloadGhostSongs(ghosts, { ...options, isCurrent })
+  result.existing += unique.length - ghosts.length - missing.length
+  if (isCurrent() && missing.length) {
+    const repaired = await repairMissingTracks(missing, { ...options, isCurrent, onProgress: ({ done, total }) => options.onProgress?.(`Queuing missing files… ${done}/${total}`) })
+    result.started += repaired.queued
+    result.failed += repaired.failed + repaired.unsupported
+  }
+  if (!isCurrent()) result.cancelled = true
+  return result
+}

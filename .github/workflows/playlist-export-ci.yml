@@ -16,6 +16,8 @@ on:
       - 'electron/libraryFolder.js'
       - 'electron/preload.js'
       - 'src/pages/Playlist.jsx'
+      - 'src/ghostDownloads.js'
+      - 'scripts/ghost-downloads.test.mjs'
       - 'src/api.js'
       - 'scripts/playlist-m3u-export.test.mjs'
       - 'package.json'
@@ -40,6 +42,8 @@ jobs:
         run: npm run test:playlist-export
       - name: Validate portable M3U imports and per-download addon quality
         run: node --test scripts/m3u-extension-quality.test.mjs
+      - name: Verify collection downloads and existing selection downloads
+        run: node --test scripts/ghost-downloads.test.mjs scripts/recommendation-downloads.test.mjs
       - name: Validate Electron source syntax
         run: npm run test:electron-syntax
       - name: Install desktop dependencies

@@ -376,3 +376,42 @@ test('batch repair queues every supported missing library file and reports unsup
   assert.deepEqual(progress.sort((a, b) => a - b), [1, 2, 3, 4])
   assert.equal(calls.length, 3)
 })
+
+const { downloadMissingCollectionTracks } = await import('../src/ghostDownloads.js')
+
+test('collection download skips local files, dedupes rows, and includes streamed ghosts', async () => {
+  const local = { id: 'local', file_path: '/music/owned.flac' }
+  const stream = { id: 'yt-bbbbbbbbbbb', title: 'Streamed', artist: 'X', file_path: 'ghost://youtube/online/bbbbbbbbbbb' }
+  const calls = []
+  const result = await downloadMissingCollectionTracks([local, stream, stream, imported(1)], {
+    client: client({ inLibrary: [{ id: 'existing', title: 'Song 1', artist: 'Artist 1', file_path: '/music/1.flac' }] }),
+    save: async track => { calls.push(track.id); return { downloadId: 'new' } },
+  })
+  assert.deepEqual(calls, [stream.id])
+  assert.deepEqual(result, { started: 1, existing: 2, failed: 0, notFound: 0 })
+})
+
+test('collection download repairs absent files from their known source and reports unsupported rows', async () => {
+  const calls = []
+  const result = await downloadMissingCollectionTracks([
+    { id: 'missing', title: 'Absent', missing: true, file_path: '/gone.flac', source_ref: 'yt:abcdefghijk' },
+    { id: 'unknown', title: 'Unknown', missing: true, file_path: '/unknown.flac' },
+  ], { client: { downloadYT: async (...args) => { calls.push(args); return { downloadId: 'repair' } } } })
+  assert.equal(result.started, 1)
+  assert.equal(result.failed, 1)
+  assert.equal(result.existing, 0)
+  assert.equal(calls[0][1].upgradeTrackId, 'missing')
+})
+
+test('collection download stops before queuing further ghosts or missing-file repairs', async () => {
+  let current = true
+  const calls = []
+  const result = await downloadMissingCollectionTracks([
+    { id: 'yt-aaaaaaaaaaa', file_path: 'ghost://youtube/online/aaaaaaaaaaa' },
+    { id: 'yt-bbbbbbbbbbb', file_path: 'ghost://youtube/online/bbbbbbbbbbb' },
+    { id: 'repair', missing: true, source_ref: 'yt:ccccccccccc' },
+  ], { concurrency: 1, client: client(), isCurrent: () => current,
+    save: async track => { calls.push(track.id); current = false; return { downloadId: 'first' } } })
+  assert.deepEqual(calls, ['yt-aaaaaaaaaaa'])
+  assert.equal(result.cancelled, true)
+})

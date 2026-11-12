@@ -5,12 +5,13 @@ import { Heart, Music, Play, Shuffle, Trash2, Edit2, Check, X, RefreshCw, Image 
 import { usePlayerStore, useAppStore } from '../store/player'
 import TrackList from '../components/TrackList'
 import ContextMenu, { useContextMenu } from '../components/ContextMenu'
-import { showToast } from '../components/Toaster'
+import { showLoadingToast, showToast } from '../components/Toaster'
 import PlaylistCover from '../components/PlaylistCover'
 import { api } from '../api'
 import { describeRules, openSmartPlaylistEditor } from '../smartPlaylists'
 import { openShareCard, coversOf } from '../shareCard'
 import { makePlaylistContext } from '../playbackContext'
+import { downloadMissingCollectionTracks, ghostDownloadMessage } from '../ghostDownloads'
 import { isPlayable } from '../onlineTracks'
 import { plural } from '../plural'
 import { useCachedState, usePageReady } from '../pageCache'
@@ -27,6 +28,8 @@ const ICON_BUTTON = 'flex h-9 w-9 items-center justify-center rounded-full text-
 export default function Playlist() {
   const { t } = useTranslation()
   const exportMenu = useContextMenu()
+  const downloadingRef = useRef(false)
+  const [downloading, setDownloading] = useState(false)
   const [exportingPlaylist, setExportingPlaylist] = useState(false)
   const { id } = useParams()
   const nav = useNavigate()
@@ -284,9 +287,31 @@ export default function Playlist() {
     }
   }
 
+  const downloadMissing = async () => {
+    if (downloadingRef.current) return
+    downloadingRef.current = true
+    setDownloading(true)
+    const toast = showLoadingToast('Finding songs to download…')
+    try {
+      const result = await downloadMissingCollectionTracks(tracks, { onProgress: (message, progress) => toast.update(message, progress) })
+      toast.close(ghostDownloadMessage(result))
+      load()
+      window.dispatchEvent(new Event('lokal:refresh'))
+    } catch {
+      toast.close('Could not download the missing songs.')
+    } finally {
+      downloadingRef.current = false
+      setDownloading(false)
+    }
+  }
+
   const showExportMenu = event => exportMenu.open(event, [
-    { label: 'Export playlist as M3U8 (.m3u8)', icon: Download, onSelect: () => exportPlaylistFile('m3u8') },
-    { label: 'Export playlist as M3U (.m3u)', icon: Download, onSelect: () => exportPlaylistFile('m3u') },
+    { label: downloading ? 'Preparing downloads…' : 'Download missing songs', icon: Download, disabled: downloading || !loaded, onSelect: downloadMissing },
+    ...(api.isElectron ? [
+      { separator: true },
+      { label: 'Export playlist as M3U8 (.m3u8)', icon: Download, onSelect: () => exportPlaylistFile('m3u8') },
+      { label: 'Export playlist as M3U (.m3u)', icon: Download, onSelect: () => exportPlaylistFile('m3u') },
+    ] : []),
   ])
 
   const shuffleTracks = () => {
@@ -429,7 +454,7 @@ export default function Playlist() {
             <button type="button" onClick={sharePlaylist} disabled={!tracks.length} aria-label={t("Share as a picture")} title={t("Share as a picture")} className={ICON_BUTTON}>
               <Share2 size={17} />
             </button>
-            {api.isElectron && (
+            {loaded && (
               <button
                 type="button"
                 onClick={showExportMenu}
