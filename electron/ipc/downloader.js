@@ -84,8 +84,8 @@ function manager() {
     getDB,
     getStorageDir,
     findTools: () => ({ ytdlp: findYtDlp(), ffmpeg: findFfmpeg(), ffprobe: findFfprobe() }),
-    // A fresh link for an addon download, right before it starts.
-    resolveAddonUrl: async (provider, id) => (await require('../online/sources').resolveStream(provider, id, { db: getDB(), force: true, download: true })).url,
+    // Keep URL and staged-file results in main, resolving with download intent.
+    resolveAddonStream: (provider, id) => require('../online/sources').resolveStream(provider, id, { db: getDB(), force: true, download: true }),
     verifyAddonAccess: key => require('../mornye/api').dispatch(getDB(), { action: 'package.verifyAndWait', key }),
     requireFfmpeg: true,
     index: async (filepath, opts) => {
@@ -162,8 +162,16 @@ function registerDownloaderHandlers(ipcMain) {
     const provider = String(source?.provider || '')
     clean.addonSource = /^a-[0-9a-f]{10}$/.test(provider) && typeof source?.id === 'string' && source.id && source.id.length <= 300 && !/[\r\n]/.test(source.id)
       ? { provider, id: source.id } : undefined
-    clean.explicitAtmosDownload = clean.addonSource && clean.explicitAtmosDownload === true && clean.addonQuality === 'DOLBY_ATMOS'
-    clean.addonQuality = clean.explicitAtmosDownload ? 'DOLBY_ATMOS' : undefined
+    // Mornye exposes manifest-defined download tiers. Preserve a one-off
+    // quality selection instead of discarding everything but Atmos.
+    // The extension runtime validates it against the installed manifest.
+    clean.addonQuality = clean.addonSource &&
+        typeof clean.addonQuality === 'string' &&
+        /^[a-z0-9_-]{1,80}$/i.test(clean.addonQuality)
+      ? clean.addonQuality : undefined
+    clean.explicitAtmosDownload = !!clean.addonSource &&
+      clean.explicitAtmosDownload === true &&
+      clean.addonQuality === 'DOLBY_ATMOS'
     // What the source said about the song, for a file that comes without tags.
     clean.tags = require('../download/postprocess').knownTagsOf(clean.tags)
     const expectedDuration = Number(clean.expectedDuration)

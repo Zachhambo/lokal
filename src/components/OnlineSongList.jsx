@@ -5,10 +5,11 @@
 // somewhere. Songs the library has (mergeWithLibrary puts its copies in the
 // list) are marked "In library" and use the file.
 
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Clock, Disc3, Download, ListEnd, Play, Plus, Radio, User, Gem } from 'lucide-react'
 import ContextMenu, { useContextMenu } from './ContextMenu'
+import Modal from './Modal'
 import DiscoveryImage from './DiscoveryImage'
 import { addToPlaylistMany, addToQueueMany, playNextMany } from '../trackActions'
 import { downloadOnline, resolveOnline } from '../onlineActions'
@@ -48,6 +49,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
   const { t } = useTranslation()
   const nav = useNavigate()
   const menu = useContextMenu()
+  const [downloadChoice, setDownloadChoice] = useState(null)
   const userId = useAppStore(state => state.user?.id)
   const highlight = recommendationKey(highlightTitle)
 
@@ -131,6 +133,24 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
     const [row] = await resolveOnline([track])
     if (row) action([row])
   }
+  const requestDownload = async track => {
+    const source = anchorOf(track)
+    if (!/^a-/.test(source.provider || '') || source.id == null) {
+      return downloadOnline([track])
+    }
+    try {
+      const providers = await api.onlineProviders()
+      const provider = Array.isArray(providers)
+        ? providers.find(item => item.id === source.provider && item.package)
+        : null
+      const options = (provider?.qualityOptions || [])
+        .filter(option => typeof option.id === 'string' && option.id)
+      if (!options.length) return downloadOnline([track])
+      setDownloadChoice({ track, provider, options })
+    } catch (error) {
+      showToast('Could not load download qualities: ' + (error?.message || error))
+    }
+  }
   const openMenu = (event, track) => {
     const own = !isOnlineTrack(track)
     menu.open(event, [
@@ -138,7 +158,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
       { label: 'Play next', icon: Clock, onSelect: () => withResolved(track, playNextMany) },
       { label: 'Add to queue', icon: ListEnd, onSelect: () => withResolved(track, addToQueueMany) },
       { label: 'Add to playlist…', icon: Plus, onSelect: () => withResolved(track, addToPlaylistMany) },
-      !own && { label: 'Download song', icon: Download, onSelect: () => downloadOnline([track]) },
+      !own && { label: 'Download song', icon: Download, onSelect: () => requestDownload(track) },
       atmosDownloadRef(track) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
         const response = await downloadAtmosVersion(track).catch(error => ({ error: error.message }))
         showToast(response?.error || 'Dolby Atmos download queued.')
@@ -152,6 +172,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
   }
 
   return (
+    <>
     <div className="flex flex-col">
       {tracks.map((track, index) => {
         const marked = highlight && recommendationKey(track.title) === highlight
@@ -184,7 +205,7 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
             <span className="flex items-center justify-end gap-3">
               {atmosRequestable(track) && <AtmosPlayButton track={{ ...track, ...anchorOf(track) }} onPlay={(mode, device) => playNativeDolby(track, mode, device)} />}
               {own && <span title={t('In your library')} className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent"><CheckCircle2 size={11} /> {t('In library')}</span>}
-              {markOwned && !own && <button type="button" onContextMenu={event => { event.preventDefault(); event.stopPropagation(); openMenu(event, track) }} onClick={event => { event.stopPropagation(); downloadOnline([track]) }} title={t('Download {title}', { title: track.title })} aria-label={t('Download {title}', { title: track.title })} className="text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 focus:opacity-100"><Download size={14} /></button>}
+              {markOwned && !own && <button type="button" onContextMenu={event => { event.preventDefault(); event.stopPropagation(); openMenu(event, track) }} onClick={event => { event.stopPropagation(); requestDownload(track) }} title={t('Download {title}', { title: track.title })} aria-label={t('Download {title}', { title: track.title })} className="text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 focus:opacity-100"><Download size={14} /></button>}
               <span className="text-xs tabular-nums text-subtle">{time(track.duration)}</span>
             </span>
           </div>
@@ -192,5 +213,31 @@ export default function OnlineSongList({ tracks, onPlay, numbered = false, showA
       })}
       <ContextMenu menu={menu} />
     </div>
+    <Modal
+      open={!!downloadChoice}
+      onClose={() => setDownloadChoice(null)}
+      title={downloadChoice ? `Download quality · ${downloadChoice.provider.label}` : 'Download quality'}
+    >
+      {downloadChoice && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">{downloadChoice.track.artist} — {downloadChoice.track.title}</p>
+          <div className="space-y-1">
+            {downloadChoice.options.map(option => (
+              <button key={option.id} type="button"
+                className="flex w-full flex-col rounded-xl border border-border px-4 py-3 text-left hover:border-accent/60 hover:bg-card"
+                onClick={() => {
+                  const track = downloadChoice.track
+                  setDownloadChoice(null)
+                  downloadOnline([track], { addonQuality: option.id })
+                }}>
+                <span className="text-sm font-medium text-white">{option.label || option.id}</span>
+                {option.description && <span className="mt-1 text-xs text-muted">{option.description}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+    </>
   )
 }

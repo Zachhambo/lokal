@@ -263,7 +263,10 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
       { label: 'Add to queue', icon: ListEnd, onSelect: () => withTrack(item, row => addToQueueMany([row])) },
       { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylist(item) },
       { label: known ? (liked ? 'Remove from Liked Songs' : 'Like') : 'Like / Unlike', icon: Heart, onSelect: () => toggleResultLike(item) },
-      { label: 'Download song', icon: Download, onSelect: () => withTrack(item, saveToLibrary) },
+      { label: 'Download song', icon: Download, onSelect: () =>
+        window.dispatchEvent(new CustomEvent('lokal:open-save-source-menu', {
+          detail: { key: `${item.provider}:${item.id}`, downloadNow: true },
+        })) },
       atmosDownloadRef(item) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
         const response = await downloadAtmosVersion(item).catch(error => ({ error: error.message }))
         showToast(response?.error || 'Dolby Atmos download queued.')
@@ -378,6 +381,8 @@ export default function OnlineResults({ query, soulseekFor = null, findOn = null
                     getTrack={async () => (await asTracks([item]))[0]}
                     size={15}
                     offerUpgrade
+                    openMenuOnEvent
+                    openMenuEventKey={`${item.provider}:${item.id}`}
                     className="opacity-0 group-hover:opacity-100 focus:opacity-100"
                   />
                   <span className="text-xs text-muted font-display w-10 text-right">{fmtDuration(item.duration)}</span>

@@ -187,12 +187,22 @@ test('artwork endpoint requires pairing, source ownership and bounded JPEG bytes
   assert.match(icon, /Played on Lokal Mobile · audio not stored on this PC/)
 })
 
-test('phone audio copies preserve external album art only when missing', () => {
+test('phone audio metadata retains existing artwork when audio has no embedded cover', () => {
   const remote = readFileSync(new URL('../server/routes/remote.js', import.meta.url), 'utf8')
-  const importer = readFileSync(new URL('../server/linkUpload.js', import.meta.url), 'utf8')
   assert.match(remote, /router\.post\('\/files\/:trackId\/artwork'/)
   assert.match(remote, /row\.download_source !== 'mobile'/)
   assert.match(remote, /artwork_path IS NULL OR artwork_path=''/)
-  assert.match(importer, /ghost\?\.artwork_path/)
-  assert.match(importer, /await fs\.pathExists\(ghost\.artwork_path\)/)
+  const { savePhoneFileMetadata } = require('../server/phoneFileMetadata')
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec(`CREATE TABLE tracks(id TEXT PRIMARY KEY, download_source TEXT, album_artist TEXT,
+      track_num INTEGER, year INTEGER, genre TEXT, genres TEXT, bitrate INTEGER, last_modified REAL,
+      artwork_path TEXT);
+      INSERT INTO tracks(id,artwork_path) VALUES ('retained','existing-cover.jpg'),('missing',NULL);`)
+    const metadata = { common: {}, format: {} }
+    savePhoneFileMetadata(db, 'retained', metadata, { artwork: null, mtimeMs: 1000 })
+    assert.equal(db.prepare('SELECT artwork_path FROM tracks WHERE id=?').get('retained').artwork_path, 'existing-cover.jpg')
+    savePhoneFileMetadata(db, 'missing', metadata, { artwork: 'new-cover.jpg', mtimeMs: 1000 })
+    assert.equal(db.prepare('SELECT artwork_path FROM tracks WHERE id=?').get('missing').artwork_path, 'new-cover.jpg')
+  } finally { db.close() }
 })

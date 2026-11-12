@@ -25,7 +25,7 @@ const { finishFile } = require('./postprocess')
 const { isCookieError, markUnreadable, COOKIE_FAILURE_MESSAGE } = require('../ipc/ytCookies')
 const { jsRuntimeRefused } = require('../online/jsRuntime')
 const slskd = require('./slskd')
-const { sourceIdentity, onlineTrackId, streamedTwins, sourceRefOf, sourceRefOfTrack } = require('../online/sources')
+const { sourceIdentity, onlineTrackId, streamedTwins, sourceRefOf, sourceRefOfTrack, addonDownloadRequest } = require('../online/sources')
 const { readInfo, coverThumbnail, imageThumbnail } = require('./tagger')
 const { makePlayable } = require('./convert')
 
@@ -525,9 +525,13 @@ class DownloadManager {
     this.init()
     if (!url || typeof url !== 'string') return { error: 'URL is required' }
     const packageSource = kind === 'single' && this.isPackageSource(opts.addonSource)
-    if (kind !== 'soulseek' && !packageSource && !isHttpUrl(url)) return { error: 'Only http(s) links can be downloaded.' }
+    let addonRequest = false
+    if (kind === 'single' && opts.addonSource && url.startsWith('lokal-addon://')) {
+      try { addonRequest = addonDownloadRequest(this.db(), opts.addonSource.provider, opts.addonSource.id).url === url } catch {}
+    }
+    if (kind !== 'soulseek' && !packageSource && !addonRequest && !isHttpUrl(url)) return { error: 'Only http(s) links can be downloaded.' }
     // Soulseek downloads go through slskd, not yt-dlp.
-    const check = kind === 'soulseek' || kind === 'music-video' || packageSource
+    const check = kind === 'soulseek' || kind === 'music-video' || packageSource || addonRequest
       ? { tools: this.deps.findTools?.() || {} }
       : this.checkTools()
     if (check.error) return check
@@ -536,10 +540,11 @@ class DownloadManager {
     // Merge all playlist requests even when they use exactly the same URL.
     // Addon identities take precedence: a shared endpoint can serve different songs.
     const ref = jobSourceRef(kind, url, opts)
-    const atmosIntent = packageSource && opts.explicitAtmosDownload === true && opts.addonQuality === 'DOLBY_ATMOS'
     const running = [...this.jobs.values()].find(j => ACTIVE.has(j.status) && !j.stop &&
       (ref ? j.sourceRef === ref : j.url === url && j.kind === kind) &&
-      (!packageSource || (j.opts?.explicitAtmosDownload === true) === atmosIntent))
+      // Distinct explicitly requested renditions must not collapse into
+      // one download job with the first song's quality.
+      (!packageSource || (j.opts?.addonQuality || '') === (opts.addonQuality || '')))
     if (running) {
       if (opts.replaceTrackId && opts.replaceTrackId !== running.opts.replaceTrackId) {
         if (!running.opts.replaceTrackId) running.opts.replaceTrackId = opts.replaceTrackId
@@ -599,7 +604,7 @@ class DownloadManager {
     this.persist(job)
     this.emit(job, true)
     // Named after its link ("YouTube Track"): ask the source for the real name.
-    if (!packageSource && !youtubeMusicPlaylistId(url) && (kind === 'playlist' || kind === 'single') && (!opts.title || GENERIC_TITLE.test(String(opts.title).trim()))) this.lookUpTitle(job, check.tools.ytdlp)
+    if (!packageSource && !addonRequest && !youtubeMusicPlaylistId(url) && (kind === 'playlist' || kind === 'single') && (!opts.title || GENERIC_TITLE.test(String(opts.title).trim()))) this.lookUpTitle(job, check.tools.ytdlp)
     this.pump()
     return { downloadId: job.id, playlistId: job.playlistId, queued: true }
   }
@@ -905,26 +910,30 @@ class DownloadManager {
     // An addon download: its link expires, so ask the addon for a fresh one
     // right before yt-dlp starts (first run, restart or retry alike). The job
     // holds its slot meanwhile.
-    if (job.opts?.addonSource && this.deps.resolveAddonUrl && !job.urlRefreshed) {
+    const resolveAddon = this.deps.resolveAddonStream || this.deps.resolveAddonUrl
+    if (job.opts?.addonSource && resolveAddon && !job.urlRefreshed) {
       job.resolvingUrl = true
       job.stop = null
       this.running++
       this.update(job, { status: 'downloading', message: 'Getting a fresh link from the addon...', error: null })
       const { provider, id } = job.opts.addonSource
-      Promise.resolve(this.deps.resolveAddonUrl(provider, id)).then((url) => {
-        if (!url || typeof url !== 'string') throw new Error('The addon gave no download link')
-        return url
-      }).then((url) => {
+      Promise.resolve().then(() => resolveAddon(provider, id)).then((stream) => {
+        if (stream?.type === 'file' && stream.file) return stream
+        const url = typeof stream === 'string' ? stream : stream?.url
+        if (!url || !isHttpUrl(url)) throw new Error('The addon gave no download link or staged audio file')
+        return { url }
+      }).then((stream) => {
         job.resolvingUrl = false
         this.running--
-        if (job.stop || job.status !== 'downloading') return // cancelled meanwhile
-        job.url = url
+        if (job.stop || job.status !== 'downloading') { this.pump(); return } // cancelled meanwhile
+        if (stream.type === 'file') return this.startAddonArtifact(job, async () => ({ file: stream.file }))
+        job.url = stream.url
         job.urlRefreshed = true
         this.start(job)
       }, (e) => {
         job.resolvingUrl = false
         this.running--
-        if (job.stop || job.status !== 'downloading') return
+        if (job.stop || job.status !== 'downloading') { this.pump(); return }
         const message = `Couldn't get a link from the addon: ${e.message}`
         this.update(job, { status: 'error', error: message, message, finishedAt: Date.now() }, { persist: true })
         this.pump()
@@ -1060,21 +1069,31 @@ class DownloadManager {
   }
 
   startPackage(job) {
+    return this.startAddonArtifact(job, controller => {
+      const { provider, id } = job.opts.addonSource
+      return this.downloadPackageWithVerification(provider.slice(2), id, {
+        signal: controller.signal, quality: job.opts.addonQuality,
+        // A direct manifest quality choice authorizes that *one* encoded
+        // save, not native Atmos playback or changing default preferences.
+        allowAtmos: !!job.opts.addonQuality,
+        onProgress: update => { if (job.packageAbort === controller && !job.stop) this.update(job, { progress: update.percent ?? job.progress, message: update.message || 'Downloading addon audio…' }) },
+      }, {
+        onVerificationRequired: () => this.update(job, { message: 'Waiting for addon verification…' }),
+        onVerificationComplete: () => this.update(job, { message: 'Verification complete. Retrying addon download…' }),
+      })
+    })
+  }
+
+  // Package downloads and HTTP DASH/hybrid staging both yield a local artifact.
+  // Copy it before postprocessing; the HTTP file still belongs to playback's cache.
+  startAddonArtifact(job, loadArtifact) {
     const controller = new AbortController(), runId = Symbol('package-run')
     job.packageAbort = controller; job.packageRunId = runId; job.startedAt = Date.now(); job.stop = null; job.exited = false
     job.settings = this.settings(); job.post = Promise.resolve(); this.running++
     this.update(job, { status: 'downloading', message: 'Resolving addon audio…', error: null, seen: false }, { persist: true })
     let artifact
     Promise.resolve().then(async () => {
-      const { provider, id } = job.opts.addonSource
-      artifact = await this.downloadPackageWithVerification(provider.slice(2), id, {
-        signal: controller.signal, quality: job.opts.addonQuality,
-        allowAtmos: job.opts.explicitAtmosDownload === true && job.opts.addonQuality === 'DOLBY_ATMOS',
-        onProgress: update => { if (job.packageRunId === runId && !job.stop) this.update(job, { progress: update.percent ?? job.progress, message: update.message || 'Downloading addon audio…' }) },
-      }, {
-        onVerificationRequired: () => this.update(job, { message: 'Waiting for addon verification…' }),
-        onVerificationComplete: () => this.update(job, { message: 'Verification complete. Retrying addon download…' }),
-      })
+      artifact = await loadArtifact(controller)
       controller.signal.throwIfAborted()
       const outputDir = require('../storageLocations').downloadDirectory(job.settings, job.opts.outputDir)
       fs.ensureDirSync(outputDir)
@@ -1096,9 +1115,10 @@ class DownloadManager {
       if (job.stop) this.update(job, { status: job.stop === 'suspend' ? 'queued' : 'cancelled', message: job.stop === 'suspend' ? 'Resuming…' : 'Cancelled', finishedAt: job.stop === 'suspend' ? null : Date.now() }, { persist: true })
       else this.fail(job, error?.message || String(error))
     }).finally(async () => {
-      await artifact?.cleanup()
-      if (job.packageRunId === runId) job.packageAbort = null
-      this.running--; this.pump()
+      try { await artifact?.cleanup?.() } finally {
+        if (job.packageRunId === runId) job.packageAbort = null
+        this.running--; this.pump()
+      }
     })
   }
 
@@ -1346,7 +1366,7 @@ class DownloadManager {
         // its metadata was already set during the copy/remux and verified.
         const done = job.opts.explicitAtmosDownload
           ? { filePath: filepath, lyrics: null, cover: false }
-          : await finishFile(filepath, { db: this.db(), settings, url: job.url, meta, kind: job.kind, outputDir, known: job.opts?.tags || null })
+          : await finishFile(filepath, { db: this.db(), settings, url: job.url, meta, kind: job.kind, outputDir, known: job.opts?.tags || null, recoverArtwork: !!job.opts?.addonSource })
         finalPath = done.filePath
         // Explicit output paths and lossless replacements keep their own destinations.
         const downloadFolder = String(job.settings?.download_folder || '').trim()

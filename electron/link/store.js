@@ -1,7 +1,8 @@
-const { randomBytes, randomUUID, createHash, timingSafeEqual } = require('crypto')
+const { randomBytes, randomUUID, createHash, createHmac, timingSafeEqual } = require('crypto')
 const { MAX_BATCH, text, trackKey, nextClock, compareStamp } = require('./protocol')
 const { splitArtists } = require('../artistSplit')
 const { keepCommaSetFromDb } = require('../artistRoles')
+const deviceName = value => typeof value === 'string' ? Array.from(value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 100).join('') : ''
 const hash = token => createHash('sha256').update(String(token)).digest('hex')
 const safeEqual = (a, b) => { const aa = Buffer.from(String(a)), bb = Buffer.from(String(b)); return aa.length === bb.length && timingSafeEqual(aa, bb) }
 
@@ -25,6 +26,10 @@ class LinkStore {
       CREATE INDEX IF NOT EXISTS link_history_user_cursor ON history_events(user_id, cursor);
       CREATE INDEX IF NOT EXISTS link_ops_user_cursor ON library_ops(user_id, cursor);
     `)
+    // Existing pairings retain their names and tokens; aliases are optional.
+    if (!db.prepare('PRAGMA table_info(remote_devices)').all().some(column => column.name === 'custom_name')) {
+      db.exec("ALTER TABLE remote_devices ADD COLUMN custom_name TEXT NOT NULL DEFAULT ''")
+    }
     let id = db.prepare("SELECT value FROM link_meta WHERE key='device_id'").get()?.value
     if (!id) { id = randomUUID(); db.prepare("INSERT INTO link_meta VALUES ('device_id', ?)").run(id) }
     this.deviceId = id
@@ -43,7 +48,7 @@ class LinkStore {
     this.pairing = { code: String(require('crypto').randomInt(100000, 1000000)), userId, expiresAt: this.now() + 120000 }
     return { code: this.pairing.code, expiresAt: this.pairing.expiresAt, desktopId: this.deviceId }
   }
-  pair({ code, deviceName, deviceId }, address) {
+  pair({ code, deviceName: reportedName, deviceId }, address) {
     const now = this.now()
     const prior = this.attempts.get(address)
     const attempt = prior && prior.until > now ? prior : { count: 0, until: now + 60000 }
@@ -53,10 +58,10 @@ class LinkStore {
     if (++attempt.count > 10) throw Object.assign(new Error('Too many pairing attempts. Try again shortly.'), { status: 429 })
     const pairing = this.pairing
     if (!pairing || pairing.expiresAt <= now || !safeEqual(pairing.code, String(code))) throw Object.assign(new Error('Pairing code is invalid or expired.'), { status: 401 })
-    const id = text(deviceId, 128), name = text(deviceName, 100)
+    const id = text(deviceId, 128), name = deviceName(reportedName)
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(id) || !name) throw Object.assign(new Error('A device ID and name are required.'), { status: 400 })
     const token = randomBytes(32).toString('base64url')
-    this.db.prepare('INSERT INTO remote_devices (id,name,token_hash,user_id,created,last_seen,revoked) VALUES (?,?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name,token_hash=excluded.token_hash,user_id=excluded.user_id,created=excluded.created,last_seen=excluded.last_seen,revoked=0').run(id, name, hash(token), pairing.userId, now, now)
+    this.db.prepare('INSERT INTO remote_devices (id,name,token_hash,user_id,created,last_seen,revoked) VALUES (?,?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET custom_name=CASE WHEN remote_devices.user_id=excluded.user_id THEN remote_devices.custom_name ELSE \'\' END,name=excluded.name,token_hash=excluded.token_hash,user_id=excluded.user_id,created=excluded.created,last_seen=excluded.last_seen,revoked=0').run(id, name, hash(token), pairing.userId, now, now)
     this.pairing = null
     return { token, desktopId: this.deviceId, user: { id: pairing.userId } }
   }
@@ -64,7 +69,34 @@ class LinkStore {
     if (typeof token !== 'string' || token.length < 16 || token.length > 512) return null
     return this.db.prepare('SELECT id,name,user_id FROM remote_devices WHERE token_hash=? AND revoked=0').get(hash(token)) || null
   }
-  devices(userId) { return this.db.prepare('SELECT id,name,created,last_seen,revoked FROM remote_devices WHERE user_id=? ORDER BY created DESC').all(userId) }
+  // Reconnect discovery never needs to disclose the phone's bearer token.
+  // Prove possession of its persisted verifier using a fresh phone challenge.
+  identity({ deviceId, challenge }, userId) {
+    if (typeof deviceId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(deviceId) ||
+        typeof challenge !== 'string' || !/^[a-f0-9]{64}$/.test(challenge)) {
+      throw Object.assign(new Error('Invalid identity challenge.'), { status: 400 })
+    }
+    const device = this.db.prepare('SELECT token_hash,user_id FROM remote_devices WHERE id=? AND revoked=0').get(deviceId)
+    if (!device || device.user_id !== userId) {
+      throw Object.assign(new Error('Pairing is unavailable for this profile.'), { status: 401 })
+    }
+    const desktopId = this.deviceId
+    const proof = createHmac('sha256', Buffer.from(device.token_hash, 'hex'))
+      .update(JSON.stringify(['lokal-link-identity-v1', challenge, desktopId, deviceId, userId]))
+      .digest('hex')
+    return { desktopId, userId, proof }
+  }
+  devices(userId) { return this.db.prepare("SELECT id,COALESCE(NULLIF(custom_name,''),name) AS name,name AS reportedName,custom_name AS customName,created,last_seen,revoked FROM remote_devices WHERE user_id=? ORDER BY created DESC").all(userId) }
+  updateDeviceName(id, userId, reportedName) {
+    const name = deviceName(reportedName)
+    if (!name) return false // Old clients may omit the optional hello field.
+    return this.db.prepare('UPDATE remote_devices SET name=? WHERE id=? AND user_id=? AND revoked=0').run(name, id, userId).changes > 0
+  }
+  renameDevice(id, userId, name) {
+    if (typeof name !== 'string' || name.length > 100) throw Object.assign(new Error('Device name must be at most 100 characters.'), { status: 400 })
+    return this.db.prepare('UPDATE remote_devices SET custom_name=? WHERE id=? AND user_id=? AND revoked=0').run(deviceName(name), id, userId).changes > 0
+  }
+  hasPairedDevices() { return Boolean(this.db.prepare('SELECT 1 FROM remote_devices WHERE revoked=0 LIMIT 1').get()) }
   revoke(id, userId) { return this.db.prepare('UPDATE remote_devices SET revoked=1 WHERE id=? AND user_id=?').run(id, userId).changes > 0 }
   touch(id) { this.db.prepare('UPDATE remote_devices SET last_seen=? WHERE id=?').run(this.now(), id) }
   pull(table, userId, cursor = 0) {

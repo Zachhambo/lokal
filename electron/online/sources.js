@@ -75,6 +75,17 @@ function resolveStream(provider, id, opts = {}) {
   return provider === 'sc' ? sc.resolveStream(id, opts) : yt.resolveStream(id, opts)
 }
 
+/** Queue an addon identity; its media may be a URL or a staged DASH/hybrid file.
+ * Resolve only when the job starts, keeping paths and signed links in main.
+ */
+function addonDownloadRequest(db, provider, id) {
+  const key = addons.keyOfProvider(provider)
+  if (!key || typeof id !== 'string' || !validId(provider, id)) return { error: 'Unknown addon song' }
+  const addon = addons.findByKey(db, key)
+  if (!addon || addon.enabled === false) return { error: 'This addon is not installed or is turned off.' }
+  return { url: `lokal-addon://${provider}/${encodeURIComponent(id)}` }
+}
+
 // How long an addon's media server may take to start answering (per
 // attempt; resolving the stream has its own timeout in addons.js).
 const ADDON_MEDIA_TIMEOUT_MS = 20000
@@ -557,7 +568,7 @@ module.exports = {
   streamQuality,
   cancellableBody,
   PROVIDERS, providerOf, validId, ghostPath, addons,
-  search, resolveStream, fetchStream,
+  search, resolveStream, fetchStream, addonDownloadRequest,
   onlineTrackId, streamRef, sourceIdentity, saveOnlineTracks, pruneOnlineTracks, streamedTwins,
   sameSong, sourceRefOf, sourceRefOfTrack, libraryCopyOf, libraryTrackId, songIds, toggleSongLike, setSongLike, foldStreamedLikes,
 }

@@ -61,7 +61,7 @@ account both belong to the project, and every copy of Lokal then uses them.
    **GitHub Actions**. Then Actions → **Cast receiver** → Run workflow (it
    also runs on every change to `receiver/` on `main`). The receiver is then
    at `https://<owner>.github.io/<repo>/receiver/`, so for Lokal:
-   `https://lokal-music.github.io/Desktop/receiver/`. Open it in a browser
+   `https://lokal-music.github.io/desktop/receiver/`. Open it in a browser
    once: a blank dark page is right (it only comes alive on a Cast device).
 2. **Register it.** At the [Google Cast SDK Developer
    Console](https://cast.google.com/publish), sign in, pay the one-time
@@ -86,7 +86,7 @@ register again (the URL stays the same).
 
 ## After the repository transfer
 
-The receiver now deploys to `https://lokal-music.github.io/Desktop/receiver/`.
+The receiver now deploys to `https://lokal-music.github.io/desktop/receiver/`.
 GitHub repository redirects do not update the URL registered with Google Cast.
 
 1. Enable **Settings → Pages → Source: GitHub Actions** in `lokal-music/Desktop`

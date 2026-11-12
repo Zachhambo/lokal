@@ -50,7 +50,6 @@ test('preparation does not interfere with crossfade, pause, repeat one, Cast or 
     { mode: 'automix' },
     { repeat: 'one' },
     { playing: false },
-    { autoplay: false },
     { castActive: true },
     { localCurrent: false },
     { localNext: false },

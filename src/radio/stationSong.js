@@ -14,7 +14,14 @@ export function resolveStationSong(station, client = api, resolve = resolveRecom
   if (!station?.song_key || !station.title) return Promise.resolve(null)
   const key = station.song_key
   if (cache.has(key)) return cache.get(key)
-  const pending = Promise.resolve(resolve([{ title: station.title, artist: station.artist || '' }], client))
+  const pending = Promise.resolve(resolve([{ title: station.title, artist: station.artist || '' }], client, {
+    // PlayerBar runs this automatically for each broadcast song. The station
+    // already supplies the audio; only look up the metadata for Like and Save.
+    prepareStreams: false,
+    // Saving metadata can also report missing access. Let the catch below
+    // return null instead of opening the resolver's interactive retry popup.
+    onAddonVerificationRequired: () => {},
+  }))
     .then(found => (Array.isArray(found) ? found[0] || null : null))
     .catch(() => null)
   cache.set(key, pending)

@@ -1,0 +1,38 @@
+name: Cast receiver playback
+on:
+  pull_request:
+    paths:
+      - 'receiver/**'
+      - 'electron/cast/**'
+      - 'src/cast/**'
+      - 'scripts/cast-*.mjs'
+      - '.github/workflows/cast-receiver-test.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  receiver:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install isolated browser test dependency
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cast-browser" --no-package-lock --ignore-scripts playwright@1.62.1
+          # The hosted Ubuntu image already provides Chrome and its libraries.
+          # Avoid a second apt/browser installation (and unrelated mirror outages).
+          chrome_path="$(command -v google-chrome)"
+          test -x "$chrome_path"
+          echo "CHROMIUM_PATH=$chrome_path" >> "$GITHUB_ENV"
+      - name: Test protocol, media, queue, and audible receiver output
+        env:
+          NODE_PATH: ${{ runner.temp }}/cast-browser/node_modules
+        run: |
+          node --test scripts/cast-controller.test.mjs scripts/cast-media.test.mjs scripts/cast-window.test.mjs scripts/cast-protocol.test.mjs
+          node --test scripts/cast-receiver-browser.test.mjs scripts/cast-playback-browser.test.mjs

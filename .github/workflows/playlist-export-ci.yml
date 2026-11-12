@@ -4,6 +4,14 @@ on:
   pull_request:
     paths:
       - 'electron/playlists/exportM3u.js'
+      - 'electron/playlists/importM3u.js'
+      - 'server/routes/playlists.js'
+      - 'src/components/OnlineSongList.jsx'
+      - 'src/onlineTracks.js'
+      - 'electron/mornye/playbackQuality.js'
+      - 'electron/ipc/downloader.js'
+      - 'electron/download/manager.js'
+      - 'scripts/m3u-extension-quality.test.mjs'
       - 'electron/ipc/playlists.js'
       - 'electron/libraryFolder.js'
       - 'electron/preload.js'
@@ -30,6 +38,8 @@ jobs:
           node-version: '22'
       - name: Validate portable M3U and M3U8 formatting
         run: npm run test:playlist-export
+      - name: Validate portable M3U imports and per-download addon quality
+        run: node --test scripts/m3u-extension-quality.test.mjs
       - name: Validate Electron source syntax
         run: npm run test:electron-syntax
       - name: Install desktop dependencies

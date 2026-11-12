@@ -1,0 +1,41 @@
+name: Desktop release helper checks
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/nightly.yml
+      - .github/workflows/publish-desktop-draft.yml
+      - .github/workflows/desktop-releases-ci.yml
+      - scripts/desktop_releases.py
+      - scripts/test_desktop_releases.py
+      - scripts/desktop-updater-release.test.cjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/nightly.yml
+      - .github/workflows/publish-desktop-draft.yml
+      - .github/workflows/desktop-releases-ci.yml
+      - scripts/desktop_releases.py
+      - scripts/test_desktop_releases.py
+      - scripts/desktop-updater-release.test.cjs
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install PyYAML==6.0.2
+      - run: python3 -m unittest discover -s scripts -p test_desktop_releases.py
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Check the shipped updater against rolling releases
+        run: |
+          npm install --prefix "$RUNNER_TEMP/updater-contract" --ignore-scripts --no-package-lock electron-updater@6.8.9
+          NODE_PATH="$RUNNER_TEMP/updater-contract/node_modules" node --test scripts/desktop-updater-release.test.cjs

@@ -39,16 +39,17 @@ function stereoPlaybackQuality(addon, settings = {}) {
 function addonDownloadQuality(addon, settings = {}, { quality, allowAtmos = false, purpose = 'download' } = {}) {
   const options = addon?.manifest?.qualityOptions || []
   if (quality) {
-    if (spatialQuality(addon, quality)) {
+    // Treat a per-song request as an exact manifest tier, not an arbitrary
+    // string passed from the renderer. Keep Amazon's existing Atmos alias.
+    const selected = options.find(q => q.id === quality) ||
+      (/^amazon(?:-(?:new|web))?$/i.test(addon?.name || '') && /^DOLBY[_ -]?ATMOS$/i.test(quality)
+        ? options.find(q => /^ac-?4$/i.test(q.id)) : null)
+    if (!selected) throw new Error('The addon does not offer the requested quality')
+    if (spatialQuality(addon, selected.id)) {
       if (purpose === 'playback') throw new Error('Configured spatial audio needs native output; PCM playback cannot preserve the encoded stream.')
       if (!allowAtmos) throw new Error('Native spatial audio requires explicit authorization')
-      const selected = options.find(q => q.id === quality) ||
-        (/^amazon(?:-(?:new|web))?$/i.test(addon?.name || '') && /^DOLBY[_ -]?ATMOS$/i.test(quality)
-          ? options.find(q => /^ac-?4$/i.test(q.id)) : null)
-      if (!selected) throw new Error('The addon does not offer the requested spatial tier')
-      return selected.id
     }
-    return quality
+    return selected.id
   }
   const preferred = addonPlaybackQuality(addon, settings)
   if (purpose === 'playback' && spatialQuality(addon, preferred)) {

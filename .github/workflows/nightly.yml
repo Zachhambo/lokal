@@ -11,8 +11,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-lokal
+  cancel-in-progress: false
+
 jobs:
   version:
+    if: github.ref == 'refs/heads/main'
     # Works out the nightly version once and pins the commit, so the three
     # build runners (and the release) use the same version from the same tag
     # snapshot, even if main or the tags move while they run.
@@ -34,60 +39,11 @@ jobs:
         env:
           # Through the environment, not pasted into the script: a ref is user input.
           REF: ${{ inputs.ref || 'main' }}
-        # Build as e.g. 2.0.3-nightly.42 rather than plain 2.0.3: a pre-release
-        # version counts as *older* than the release it leads up to, so people
-        # on a nightly are still offered the official 2.0.3 by the updater once
-        # it's out.
-        # If that version is already released (its tag exists), the nightly is
-        # a pre-release of the *next* patch: after v2.0.3 is tagged, main's
-        # 2.0.3 builds as 2.0.4-nightly.N, so it stays newer than the release
-        # without anyone having to bump package.json after each release.
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          BASE=$(node -p "require('./package.json').version.split('-')[0]")
-          # Must succeed: without the latest tags, the version and nightly
-          # number below would be worked out from stale ones.
-          git fetch --tags --force --quiet origin
-          if git rev-parse -q --verify "refs/tags/v${BASE}" >/dev/null; then
-            BASE=$(node -p "const [a, b, c] = process.argv[1].split('.').map(Number); [a, b, c + 1].join('.')" "$BASE")
-            echo "v$(node -p "require('./package.json').version") is already released; building the next patch."
-          fi
-          # The nightly number starts again after each release: it's how many
-          # changes (merges/commits on the first-parent line) have landed since
-          # the last release tag, so after v2.0.3 the builds go 2.0.4-nightly.1,
-          # .2, ... It only goes up as main moves forward, and it comes from git
-          # alone. With no release tag at all, fall back to the workflow run
-          # number. The tag is looked up along the
-          # first-parent line too, so a tag inside a merged branch doesn't count.
-          LAST=$(git describe --first-parent --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' HEAD 2>/dev/null) || LAST=""
-          if [ -n "$LAST" ]; then
-            N=$(git rev-list --count --first-parent "${LAST}..HEAD")
-            if [ "$N" -eq 0 ]; then
-              # This commit IS the release: a nightly of it would only be a
-              # "nightly.0" copy of that release under another version.
-              echo "::error::Nothing has changed since ${LAST}; there is no nightly to build. Merge a change first, or build another ref."
-              exit 1
-            fi
-            echo "${N} change(s) since ${LAST}."
-          else
-            N=${{ github.run_number }}
-            echo "No release tag found; using the run number."
-          fi
-          VERSION="${BASE}-nightly.${N}"
-          echo "Nightly version: ${VERSION}"
-          # The release's tag is the version itself (v2.1.2-nightly.3): GitHub
-          # orders same-day releases by the version in the tag name, and a
-          # plain "nightly-main" tag sorted below that day's stable release.
-          # A build of another ref gets it appended (v2.1.2-nightly.3.my-branch).
-          if [ "$REF" = "main" ]; then
-            TAG="v${VERSION}"
-          else
-            TAG="v${VERSION}.$(printf '%s' "$REF" | tr -c '0-9A-Za-z-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40)"
-          fi
-          echo "Nightly tag: ${TAG}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git show "$GITHUB_SHA:scripts/desktop_releases.py" > "$RUNNER_TEMP/desktop_releases.py"
+          python3 "$RUNNER_TEMP/desktop_releases.py" nightly
 
   build:
     name: Build (${{ matrix.os }})
@@ -185,7 +141,7 @@ jobs:
             if [ -n "$MSIX_PUBLISHER" ]; then ARGS+=(-c.appx.publisher "$MSIX_PUBLISHER"); fi
             if [ -n "$MSIX_PUBLISHER_DISPLAY_NAME" ]; then ARGS+=(-c.appx.publisherDisplayName "$MSIX_PUBLISHER_DISPLAY_NAME"); fi
           fi
-          npm run build -- --publish never "${ARGS[@]}"
+          npm run build -- --publish never -c.detectUpdateChannel=false "${ARGS[@]}"
 
       - name: Check the MSIX
         if: runner.os == 'Windows'
@@ -251,7 +207,7 @@ jobs:
             echo "No signing certificate configured; signing ad-hoc."
           fi
           for attempt in 1 2; do
-            if npm run build -- --publish never "${SIGN_ARGS[@]}"; then exit 0; fi
+            if npm run build -- --publish never -c.detectUpdateChannel=false "${SIGN_ARGS[@]}"; then exit 0; fi
             echo "::warning::macOS build attempt ${attempt} failed."
             [ "$attempt" = 2 ] && exit 1
             for d in $(hdiutil info 2>/dev/null | awk '/^\/dev\/disk/{print $1}'); do hdiutil detach -force "$d" >/dev/null 2>&1 || true; done
@@ -371,7 +327,7 @@ jobs:
           # The release is re-created each run (see below), so only link a
           # banner this run actually made.
           if [ -f release-banner.png ]; then
-            echo "md=![Release Banner](https://github.com/${{ github.repository }}/releases/download/${{ needs.version.outputs.tag }}/release-banner.png)" >> "$GITHUB_OUTPUT"
+            echo "md=![Release Banner](https://github.com/${{ github.repository }}/releases/download/nightly/release-banner.png)" >> "$GITHUB_OUTPUT"
           else
             echo "md=" >> "$GITHUB_OUTPUT"
           fi
@@ -424,32 +380,6 @@ jobs:
           fi
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Remove the previous nightly
-        # Only one nightly per ref is kept: the previous one (release and tag)
-        # goes, whether it has the old "nightly-<ref>" tag or a versioned one
-        # (v2.1.2-nightly.2 for main, v2.1.2-nightly.2.<ref> for another ref).
-        # Stable releases are never touched: only pre-releases with a
-        # "-nightly." tag of this ref. (Releases made with the workflow token
-        # don't trigger other workflows, so the v* tag doesn't start a stable
-        # release build and nothing is announced on Discord.)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REF: ${{ inputs.ref || 'main' }}
-          NEW_TAG: ${{ needs.version.outputs.tag }}
-        shell: bash
-        run: |
-          SUFFIX=""
-          if [ "$REF" != "main" ]; then SUFFIX="\.${NEW_TAG##*-nightly.[0-9]*.}"; fi
-          gh release list --repo "${{ github.repository }}" --limit 200 --json tagName,isPrerelease \
-            --jq '.[] | select(.isPrerelease) | .tagName' |
-          while read -r tag; do
-            if [ "$tag" = "nightly-$REF" ] || [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]+${SUFFIX}$ ]]; then
-              [ "$tag" = "$NEW_TAG" ] && continue
-              echo "Removing the previous nightly: $tag"
-              gh release delete "$tag" --repo "${{ github.repository }}" --cleanup-tag --yes || true
-            fi
-          done
-
       - name: Create Nightly Release
         id: create_release
         uses: softprops/action-gh-release@v3
@@ -458,6 +388,7 @@ jobs:
           target_commitish: ${{ steps.commit_info.outputs.SHA }}
           name: "Lokal Nightly (${{ inputs.ref || 'main' }})"
           prerelease: true
+          draft: true
           files: |
             release_all/**/*.exe
             release_all/**/*.dmg
@@ -493,33 +424,17 @@ jobs:
 
             ${{ steps.checksums.outputs.HASHES }}
 
-      - name: Remove older nightly files
-        # Nightly file names carry the build number (2.0.3-nightly.84), so a new
-        # run no longer overwrites the previous one's files. Once this run's
-        # files are up, delete every other file on the nightly release, so it
-        # always holds exactly one build (and never none, since this runs after
-        # the upload).
+      - name: Publish the rolling nightly and clean old tags
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NIGHTLY_TAG: ${{ needs.version.outputs.tag }}
-        shell: bash
+          GH_TOKEN: ${{ github.token }}
+          STAGED_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_SHA: ${{ needs.version.outputs.sha }}
+          STAGED_RELEASE_ID: ${{ steps.create_release.outputs.id }}
         run: |
-          # The banner is always kept: when this run couldn't make one, the
-          # previous banner stays rather than leaving a broken image. (Written
-          # for the runner's `bash -e -o pipefail`: a bare `[ -f ... ] && ...`
-          # for the banner returned 1 and stopped the whole step.)
-          keep=$( { find release_all -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.zip' -o -name 'latest*.yml' \) -printf '%f\n'; echo release-banner.png; } | sort -u )
-          if [ "$keep" = "release-banner.png" ]; then
-            echo "No files from this run; leaving the release as it is."
-            exit 0
-          fi
-          gh api "repos/${{ github.repository }}/releases/tags/$NIGHTLY_TAG" --jq '.assets[] | "\(.id)\t\(.name)"' |
-          while IFS=$'\t' read -r id name; do
-            if ! grep -qxF -- "$name" <<< "$keep"; then
-              echo "Deleting older nightly file: $name"
-              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$id" || true
-            fi
-          done
+          git show "$GITHUB_SHA:scripts/desktop_releases.py" > "$RUNNER_TEMP/desktop_releases.py"
+          python3 "$RUNNER_TEMP/desktop_releases.py" promote --release-id "$STAGED_RELEASE_ID" --channel nightly --tag "$STAGED_TAG" --version "$RELEASE_VERSION" --sha "$RELEASE_SHA"
+
       - name: Discord Notification (Build Complete)
         shell: bash
         env:
@@ -537,11 +452,11 @@ jobs:
             exit 0
           fi
 
-          BANNER_URL="https://github.com/${{ github.repository }}/releases/download/${{ needs.version.outputs.tag }}/release-banner.png"
+          BANNER_URL="https://github.com/${{ github.repository }}/releases/download/nightly/release-banner.png"
 
           PAYLOAD=$(jq -n \
             --arg version "Nightly (${{ inputs.ref || 'main' }})" \
-            --arg url "${{ steps.create_release.outputs.html_url }}" \
+            --arg url "https://github.com/${{ github.repository }}/releases/tag/nightly" \
             --arg msg "${{ steps.commit_info.outputs.MSG }}" \
             --arg image "$BANNER_URL" \
             --arg footer_icon "https://i.imgur.com/ZC3mEUC.png" \

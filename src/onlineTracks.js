@@ -152,10 +152,9 @@ export async function saveToLibrary(track, extra = {}) {
   const ref = streamRef(track)
   let url = downloadUrlFor(track)
   if (ref && isAddonProvider(ref.provider)) {
-    if (extra.downloadAtmos === true) {
-      // Mornye resolves its own media after the job starts. Never prefetch
-      // a stereo stream (or cause a failed hi-res request) before Atmos.
-      // The download manager verifies that this is an installed package.
+    if (extra.downloadAtmos === true || extra.addonQuality) {
+      // A selected Mornye quality must reach the extension's *download*
+      // method, not an already resolved playback/stream URL.
       url = 'lokal-addon://' + ref.provider + '/' + encodeURIComponent(ref.id)
     } else {
       const got = await api.onlineDownloadUrl(ref.provider, ref.id)
@@ -179,8 +178,11 @@ export async function saveToLibrary(track, extra = {}) {
     // An addon's link expires: the downloader asks the addon for a fresh one
     // each time the job starts (queued, restarted or retried).
     addonSource: ref && isAddonProvider(ref.provider) ? { provider: ref.provider, id: ref.id } : undefined,
-    ...(extra.downloadAtmos === true && ref && isAddonProvider(ref.provider) ? {
-      addonQuality: 'DOLBY_ATMOS', explicitAtmosDownload: true,
+    ...(ref && isAddonProvider(ref.provider) &&
+      (extra.downloadAtmos === true || extra.addonQuality) ? {
+      addonQuality: extra.downloadAtmos === true
+        ? 'DOLBY_ATMOS' : extra.addonQuality,
+      explicitAtmosDownload: extra.downloadAtmos === true,
     } : {}),
     // Monochrome also serves bare FLAC URLs without embedded song tags.
     // Preserve the catalogue title, artist, album and cover as real file tags.
@@ -216,7 +218,7 @@ export async function saveToLibrary(track, extra = {}) {
 }
 
 /** Queue unique streamed songs, keeping local files and failed downloads separate. */
-export async function saveTracksToLibrary(tracks, { isCurrent = () => true, onProgress, save = saveToLibrary } = {}) {
+export async function saveTracksToLibrary(tracks, { isCurrent = () => true, onProgress, save = saveToLibrary, addonQuality } = {}) {
   isCurrent = downloadBatchCurrent(isCurrent)
   const result = { started: 0, existing: 0, failed: 0 }
   const seen = new Set()
@@ -240,7 +242,7 @@ export async function saveTracksToLibrary(tracks, { isCurrent = () => true, onPr
       continue
     }
     report(`Queuing download of “${track.title}”…`)
-    const response = await save(track, { isCurrent }).catch(error => ({ error: error.message }))
+    const response = await save(track, { isCurrent, addonQuality }).catch(error => ({ error: error.message }))
     if (response?.cancelled) break
     if (response?.alreadyInLibrary) { result.existing++; refresh = true }
     else if (response?.error) result.failed++

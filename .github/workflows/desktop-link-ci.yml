@@ -1,9 +1,19 @@
-name: Desktop link playlist regression
+name: Desktop link regression
 
 on:
   pull_request:
     paths:
       - 'electron/link/**'
+      - 'server/index.js'
+      - 'scripts/link-persistence.test.mjs'
+      - 'scripts/link-device-names.test.mjs'
+      - 'src/components/LinkedDevicesPanel.jsx'
+      - 'electron/main.js'
+      - 'electron/preload.js'
+      - 'electron/network/**'
+      - 'electron/ipc/remote.js'
+      - 'scripts/link-lan-discovery.test.cjs'
+      - 'scripts/cast-discovery.test.mjs'
       - 'scripts/desktop-link-playlist-reconcile.test.mjs'
       - 'scripts/mobile-history-artwork.test.mjs'
       - 'package.json'
@@ -26,7 +36,13 @@ jobs:
         run: |
           node --check electron/link/index.js
           node --check electron/link/reconcile.js
+          node --check electron/network/lanInterfaces.js
+          node --check electron/network/mdns.js
+      - name: Test LAN pairing and shared multicast routing
+        run: node --test scripts/link-lan-discovery.test.cjs scripts/cast-discovery.test.mjs
       - name: Test desktop playlist synchronization
         run: npm run test:desktop-link-playlists
       - name: Test mobile history attribution and artwork guards
         run: npm run test:mobile-history-artwork
+      - name: Test durable pairing and authenticated address discovery
+        run: node --experimental-sqlite --test scripts/link-persistence.test.mjs scripts/link-device-names.test.mjs

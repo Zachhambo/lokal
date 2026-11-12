@@ -36,12 +36,15 @@ function readInfo(filePath) {
     const tag = file.tag
     const artist = tag.performers?.[0] || tag.albumArtists?.[0] || ''
     const duration = file.properties?.durationMilliseconds ? file.properties.durationMilliseconds / 1000 : 0
+    let hasCover = false
+    try { hasCover = !!frontCover(T, file) } catch {}
     return {
       title: tag.title || '',
       artist: tag.performers?.length ? tag.performers.join(', ') : artist,
       album: tag.album || '',
       duration,
       hasLyrics: !!(tag.lyrics && tag.lyrics.trim()),
+      hasCover,
     }
   } catch {
     return null

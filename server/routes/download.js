@@ -31,8 +31,8 @@ function manager() {
     getDB,
     getStorageDir,
     findTools: () => ({ ytdlp: findBinary('yt-dlp'), ffmpeg: findBinary('ffmpeg', '-version'), ffprobe: findBinary('ffprobe', '-version') }),
-    // A fresh link for an addon download, right before it starts.
-    resolveAddonUrl: async (provider, id) => (await require('../../electron/online/sources').resolveStream(provider, id, { db: getDB(), force: true, download: true })).url,
+    // Resolve URL and staged-file results with the same download intent as desktop.
+    resolveAddonStream: (provider, id) => require('../../electron/online/sources').resolveStream(provider, id, { db: getDB(), force: true, download: true }),
     requireFfmpeg: false,
     index: async (filepath, opts) => {
       const { indexSingleFile } = require('../../electron/ipc/scanner')

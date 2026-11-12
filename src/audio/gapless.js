@@ -36,7 +36,6 @@ export function shouldPrepareGapless({
   playing = true,
   enabled = true,
   repeat = 'none',
-  autoplay = true,
   current,
   next,
   remaining,
@@ -44,7 +43,7 @@ export function shouldPrepareGapless({
   localNext = true,
   castActive = false,
 } = {}) {
-  if (!enabled || !playing || !autoplay || repeat === 'one' || castActive) return false
+  if (!enabled || !playing || repeat === 'one' || castActive) return false
   if (!current || !next || !localCurrent || !localNext) return false
   if (current.atmosNative || next.atmosNative || current.atmosEncoded || next.atmosEncoded) return false
   if (!(remaining > 0 && remaining <= GAPLESS_PREPARE_AHEAD_S)) return false

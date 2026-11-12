@@ -22,7 +22,7 @@ import { groupReleases, releaseTypeCounts, useAlbumsPageReleaseTypes } from '../
 import { applyCachedReleaseTypes } from '../albumReleaseTypes'
 import { startReleaseRefresh, useReleaseRefresh } from '../store/releaseRefresh'
 import { albumCacheKey, isConnected, loadOnlineAlbumCached, mergeWithLibrary, onlineAlbumPath, peekOnline, setConnected } from '../onlineBrowse'
-import { downloadOnline, playOnline } from '../onlineActions'
+import { downloadOnline, playOnline, queueOnline } from '../onlineActions'
 import { losslessMenuItem, losslessManyMenuItem } from '../quality'
 import { useTranslation } from '../i18n'
 
@@ -202,6 +202,7 @@ export default function Albums() {
   }, [connected, connectKey, reloadOnline]) // eslint-disable-line react-hooks/exhaustive-deps
   const merged = useMemo(() => mergeWithLibrary(onlineAlbum.tracks, albumTracks), [onlineAlbum.tracks, albumTracks])
   const showOnline = connected && !onlineAlbum.loading && onlineAlbum.tracks.length > 0
+  const albumActionsLoading = loadingTracks || (connected && onlineAlbum.loading)
   const toggleConnected = () => setConnectedState(on => { setConnected(connectKey, !on); return !on })
   const playMerged = (selected) => playOnline(merged.tracks, { selected, name: selectedAlbum?.title, path: onlineAlbumPath({ artist: albumArtist, album: selectedAlbum?.title }) })
   const downloadMissing = async () => {
@@ -496,11 +497,13 @@ export default function Albums() {
               onBack={() => navigate(-1)}
               onArtist={() => navigate(artistPath(selectedAlbum.album_artist || selectedAlbum.artists))}
             >
-              <button onClick={() => (showOnline ? playMerged(merged.tracks[0]) : playQueue(albumTracks, 0, albumContext))} disabled={!(showOnline ? merged.tracks.length : albumTracks.length)}
+              <button onClick={() => (showOnline ? playMerged(merged.tracks[0]) : playQueue(albumTracks, 0, albumContext))} disabled={albumActionsLoading || !(showOnline ? merged.tracks.length : albumTracks.length)}
                 className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-base transition-opacity hover:opacity-90 disabled:opacity-40"><Play size={15} fill="currentColor" /> {t("Play")}</button>
-              <button onClick={() => playNextMany(showOnline ? merged.tracks : albumTracks)} disabled={!(showOnline ? merged.tracks.length : albumTracks.length)}
+              <button onClick={() => showOnline ? queueOnline(merged.tracks, { next: true }) : playNextMany(albumTracks)} disabled={albumActionsLoading || !(showOnline ? merged.tracks.length : albumTracks.length)}
                 className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Clock size={15} /> {t("Play next")}</button>
-              <button onClick={() => { const list = shuffledList(albumTracks); if (list.length) playQueue(list, 0, albumContext) }} disabled={!albumTracks.length}
+              <button onClick={() => showOnline ? queueOnline(merged.tracks) : addToQueueMany(albumTracks)} disabled={albumActionsLoading || !(showOnline ? merged.tracks.length : albumTracks.length)}
+                className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><ListEnd size={15} /> {t("Add to queue")}</button>
+              <button onClick={() => { const list = shuffledList(showOnline ? merged.tracks : albumTracks); if (list.length) { if (showOnline) playOnline(list, { selected: list[0], name: selectedAlbum?.title }); else playQueue(list, 0, albumContext) } }} disabled={albumActionsLoading || !(showOnline ? merged.tracks.length : albumTracks.length)}
                 className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Shuffle size={15} /> {t("Shuffle")}</button>
               {albumTracks.length > 0 && (
                 <button onClick={toggleConnected} aria-pressed={connected}
