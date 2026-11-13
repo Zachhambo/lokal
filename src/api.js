@@ -1,3 +1,4 @@
+import { announceTrackMerges } from './mergedTracks.js'
 import { artistMediaFileURL } from './artistMediaFileURL.mjs'
 import { loadBrowserPerformanceSettings, saveBrowserPerformanceSettings, onBrowserPerformanceSettings } from './browserPerformanceSettings.mjs'
 import { updateYoutubeAccountStatus, clearYoutubeAccountStatus, youtubeAccountStatusRevision } from './youtubeAccountStatus.js'
@@ -213,6 +214,7 @@ export const api = {
   searchTracks: (q) => isE() ? el().searchTracks(q) : apiFetch(`/tracks/search?q=${encodeURIComponent(q)}`),
   // The library's files in short: [[artist, title, source_ref], ...] (see libraryIndex.js).
   libraryKeys: () => isE() ? el().libraryKeys() : apiFetch('/tracks/library-keys'),
+  findOwnedTracks: candidates => isE() ? el().findOwnedTracks(candidates) : apiFetch('/tracks/owned', { method: 'POST', body: { candidates } }),
   searchLyrics: (q) => isE() ? el().searchLyrics(q) : apiFetch(`/tracks/search-lyrics?q=${encodeURIComponent(q)}`),
   toggleLike: async (tid, uid, track = null) => {
     const r = await (isE() ? el().toggleLike(tid, uid) : apiFetch(`/tracks/${tid}/like`, { method:'POST', body:{userId:uid} }))
@@ -267,8 +269,8 @@ export const api = {
   getRelated: (tid, uid) => isE() ? el().getRelated(tid, uid) : apiFetch(`/tracks/${tid}/related?userId=${uid||'guest'}`),
   checkDuplicates: () => isE() ? el().checkDuplicates() : apiFetch('/tracks/duplicates'),
   checkPossibleDuplicates: () => isE() ? el().checkPossibleDuplicates() : apiFetch('/tracks/possible-duplicates'),
-  mergeDuplicates: (keepId, removeIds) => isE() ? el().mergeDuplicates(keepId, removeIds) : apiFetch('/tracks/merge', { method:'POST', body:{keepId, removeIds} }),
-  mergeAllDuplicates: () => isE() ? el().mergeAllDuplicates() : apiFetch('/tracks/merge-all', { method:'POST' }),
+  mergeDuplicates: async (keepId, removeIds) => announceTrackMerges(await (isE() ? el().mergeDuplicates(keepId, removeIds) : apiFetch('/tracks/merge', { method:'POST', body:{keepId, removeIds} }))),
+  mergeAllDuplicates: async () => announceTrackMerges(await (isE() ? el().mergeAllDuplicates() : apiFetch('/tracks/merge-all', { method:'POST' }))),
   deleteTracks: (ids) => isE() ? el().deleteTracks(ids) : apiFetch('/tracks/batch-delete', { method:'POST', body:{ids} }),
   deleteTrackByPath: (filePath) => isE() ? el().deleteTrackByPath(filePath) : apiFetch('/tracks/delete-by-path', { method:'POST', body:{filePath} }),
   getArtists: () => isE() ? el().getArtists() : apiFetch('/artists'),
@@ -388,7 +390,7 @@ export const api = {
     }
     return r
   }),
-  exportAllData: () => isE() ? el().exportAllData() : apiFetch('/settings/export-all'),
+  exportAllData: (options) => isE() ? el().exportAllData(options) : apiFetch('/settings/export-all'),
   automaticBackupStatus: () => isE() ? el().automaticBackupStatus() : Promise.resolve({ frequency: 'off' }),
   automaticBackupConfigure: (options) => isE() ? el().automaticBackupConfigure(options) : Promise.resolve({ error: 'Desktop app only.' }),
   automaticBackupChooseFolder: () => isE() ? el().automaticBackupChooseFolder() : Promise.resolve({ error: 'Desktop app only.' }),
@@ -654,6 +656,7 @@ export const api = {
   historyExport: (uid, format) => isE() ? el().historyExport(uid, format) : apiFetch(`/tracks/history/export?userId=${uid||'guest'}&format=${format||'json'}`),
   register: (d) => isE() ? el().register(d) : apiFetch('/users/register', { method:'POST', body:d }),
   login: (d) => isE() ? el().login(d) : apiFetch('/users/login', { method:'POST', body:d }),
+  resetLocalPassword: (d) => isE() ? el().resetLocalPassword(d) : Promise.resolve({ error: 'Reset local passwords in the desktop app.' }),
   listUsers: () => isE() ? el().listUsers() : apiFetch('/users'),
   deleteUser: (userId) => isE() ? el().deleteUser(userId) : apiFetch(`/users/${userId}`, { method:'DELETE' }),
   updateProfile: async (d) => {

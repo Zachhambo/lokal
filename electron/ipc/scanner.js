@@ -31,9 +31,11 @@ const { artistIdFromName, findArtistById, migrateUnknownArtist, resolveArtistId,
 const DEFAULT_MUSIC_PATH = 'C:\\Users\\sipbuu\\Music'
 const { walkDir, AUDIO_EXTS } = require('./walkMusicFiles')
 const { isPrivatePhoneUploadPath } = require('../phoneUploadPaths')
+const downloadFiles = require('../download/libraryFiles')
+const libraryPaths = require('../libraryPathIdentity')
 const { isPreparedStemClipName } = require('../automix/stem-clip')
 // Same secrets as the web server's SECRET_KEYS (server/routes/settings.js):
-// masked by settings:get, left out of settings:exportAll, kept on import.
+// Masked by settings:get, omitted by default from exports, kept on import.
 const { SECRET_SETTING_KEYS, exportAppData: buildBackup } = require('../appDataExport')
 const SECRET_SETTING_PLACEHOLDER = '••••••••'
 const DRUM_KIT_PATTERNS = /\b(kick|snare|808|hi[- ]?hat|hihat|rimshot|clap|crash|cymbal|drum( kit| loop| sample)?|sample pack|loop kit|one[- ]?shot|fx[- ]?sound|bass[- ]?drum|perc(ussion)?|stem[s]?|acapella)\b/i
@@ -494,7 +496,8 @@ async function scanFolder(folderPath, {
   }
 
   const linkArtist = db.prepare(`INSERT OR IGNORE INTO artist_track_links (artist_id, track_id) VALUES (?, ?)`)
-  const findExistingTrackByPath = db.prepare('SELECT id FROM tracks WHERE file_path = ?')
+  libraryPaths.ensureIndex(db)
+  const findExistingTrackByPath = { get: file => libraryPaths.findByPath(db, file) }
   const insertTrack = db.prepare(`
     INSERT INTO tracks
     (id, file_path, file_hash, title, artist, album, album_artist, track_num, year, genre, duration, artwork_path, bitrate, last_modified, replaygain)
@@ -503,11 +506,12 @@ async function scanFolder(folderPath, {
   const updateTrackByPath = db.prepare(`
     UPDATE tracks
     SET file_hash = @file_hash, title = @title, artist = @artist, album = @album, album_artist = @album_artist, track_num = @track_num, year = @year, genre = @genre, duration = @duration, artwork_path = @artwork_path, bitrate = @bitrate, last_modified = @last_modified, replaygain = @replaygain
-    WHERE file_path = @file_path
+    WHERE id = @id
   `)
 
   const insertBatchTransaction = db.transaction((items) => {
     for (const item of items) {
+      if (downloadFiles.isHidden(item.file_path)) continue
       const existing = findExistingTrackByPath.get(item.file_path)
       const trackId = existing?.id || item.id
       item.id = trackId
@@ -535,6 +539,16 @@ async function scanFolder(folderPath, {
     }
   })
   const insertBatch = async (items) => {
+    // A download or tag editor can move a file while metadata is being read.
+    // Recheck asynchronously: a disconnected NAS must not block Electron.
+    const current = await Promise.all(items.map(async item => {
+      if (downloadFiles.isHidden(item.file_path)) return null
+      try {
+        const stat = await require('./networkLibrary').withTimeout(fsp.stat)(item.file_path)
+        return 't-' + hashFile(item.file_path, stat) === item.file_hash ? item : null
+      } catch { return null }
+    }))
+    items = current.filter(item => item && !downloadFiles.isHidden(item.file_path))
     insertBatchTransaction(items)
     // New entries without a LOKAL_ADDED tag take the library's date and write
     // it into the file. Existing entries are deliberately not re-dated.
@@ -587,10 +601,11 @@ async function scanFolder(folderPath, {
   }
 
   for (const filePath of files) {
+    if (downloadFiles.isHidden(filePath)) continue
     try {
       const stat = await require('./networkLibrary').withTimeout(fsp.stat)(filePath)
       const trackId = 't-' + hashFile(filePath, stat)
-      const existing = db.prepare('SELECT id, last_modified, artwork_path FROM tracks WHERE file_path = ?').get(filePath)
+      const existing = libraryPaths.findByPath(db, filePath)
       const networkArtwork = isNetworkArtworkPath(filePath, networkRoots)
       // A refresh re-reads unchanged files, but not ones whose artist the user
       // changed by hand (rename/merge/delete lock their links).
@@ -619,8 +634,8 @@ async function scanFolder(folderPath, {
             // that disappears after disconnect. Make a durable copy once.
             const durable = await getDurableFolderArtwork(folderArtwork)
             if (durable) {
-              db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
-                .run(durable, filePath)
+              db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?')
+                .run(durable, existing.id)
             }
           }
           // Local folder art is already its full original: never downgrade it.
@@ -632,8 +647,8 @@ async function scanFolder(folderPath, {
           // update; no audio file rescan or metadata rewrite is needed.
           if (!networkArtwork && hasCachedArtwork && folderArtwork &&
               isCachedFolderArtwork(existingArtwork)) {
-            db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
-              .run(folderArtwork, filePath)
+            db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?')
+              .run(folderArtwork, existing.id)
           } else if (networkArtwork && hasCachedArtwork && folderArtwork &&
               folderOriginalCandidates(existingArtwork).length &&
               !hasFolderOriginal(existingArtwork)) {
@@ -641,8 +656,8 @@ async function scanFolder(folderPath, {
             // companion; repair it once on a reachable share.
             const durable = await getDurableFolderArtwork(folderArtwork)
             if (durable && durable !== existing.artwork_path) {
-              db.prepare('UPDATE tracks SET artwork_path = ? WHERE file_path = ?')
-                .run(durable, filePath)
+              db.prepare('UPDATE tracks SET artwork_path = ? WHERE id = ?')
+                .run(durable, existing.id)
             }
           }
           scanStatus.done++; emitProgress(); continue
@@ -973,7 +988,7 @@ function possibleDuplicateMatch(left, right) {
   const artistScore = overlapScore(left.artistTokens, right.artistTokens)
   const durationScore = durationSimilarity(left.duration, right.duration)
   const exactNormalized = left.normalizedTitle === right.normalizedTitle && left.normalizedArtist === right.normalizedArtist
-  if (exactNormalized) return null
+  if (exactNormalized || (require('../recordingIdentity').sameRecording(left, right, Infinity) && require('../recordingIdentity').editionKey(left) === require('../recordingIdentity').editionKey(right))) return null
   const combined = titleScore * 0.45 + artistScore * 0.45 + durationScore * 0.1
   const isMatch = durationScore > 0 && artistScore >= 0.72 && (titleScore >= 0.58 || combined >= 0.74)
   if (!isMatch) return null
@@ -1058,7 +1073,7 @@ function buildPossibleDuplicateGroups(tracks = []) {
   return [...grouped.values()]
     .filter(group => group.length > 1)
     .map((group, index) => {
-      const sortedTracks = [...group].sort((left, right) => right.qualityScore - left.qualityScore)
+      const sortedTracks = [...group].sort((left, right) => require('../duplicateGroups').tierRank(right) - require('../duplicateGroups').tierRank(left) || (right.playlist_count || 0) - (left.playlist_count || 0) || right.qualityScore - left.qualityScore)
       const scores = []
       for (let i = 0; i < group.length; i += 1) {
         for (let j = i + 1; j < group.length; j += 1) {
@@ -1253,7 +1268,14 @@ async function writePlaylistCover(playlistId, imageData) {
   return coverPath
 }
 
-function exportAppData() { return buildBackup(getDB()) }
+function exportAppData(options = {}) {
+  const includeCredentials = options?.includeCredentials === true
+  const backup = buildBackup(getDB(), { includeCredentials })
+  if (includeCredentials) {
+    backup.addonCredentials = require('../mornye/packages').service(getDB()).storage.exportRecords()
+  }
+  return backup
+}
 
 function registerScannerHandlers(ipcMain) {
   const { BrowserWindow } = require('electron')
@@ -1823,24 +1845,35 @@ function registerScannerHandlers(ipcMain) {
       return { error: error.message }
     }
   })
-  ipcMain.handle('settings:exportAll', () => exportAppData())
+  ipcMain.handle('settings:exportAll', (_, options) => exportAppData(options))
   ipcMain.handle('settings:importAll', (_, payload) => {
-    const incoming = payload?.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
-      ? payload.settings
-      : {}
-    const current = getDB().prepare('SELECT key, value FROM settings').all()
-    const kept = current.filter(row => SECRET_SETTING_KEYS.has(row.key))
-    const result = importAppData(payload)
-    if (kept.length) {
-      const restore = getDB().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      for (const row of kept) {
-        const incomingValue = incoming[row.key]
-        if (!(row.key in incoming) || String(incomingValue) === SECRET_SETTING_PLACEHOLDER) {
-          restore.run(row.key, row.value)
+    // Validate portable addon records before replacing any database tables.
+    const { validateBackupRecords } = require('../mornye/storage')
+    const addonRecords = validateBackupRecords(payload?.addonCredentials)
+    const restoreBackup = getDB().transaction(() => {
+      const incoming = payload?.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
+        ? payload.settings
+        : {}
+      const current = getDB().prepare('SELECT key, value FROM settings').all()
+      const kept = current.filter(row => SECRET_SETTING_KEYS.has(row.key))
+      const result = importAppData(payload)
+      if (kept.length) {
+        const restore = getDB().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+        for (const row of kept) {
+          const incomingValue = incoming[row.key]
+          if (!(row.key in incoming) || String(incomingValue) === SECRET_SETTING_PLACEHOLDER) {
+            restore.run(row.key, row.value)
+          }
         }
       }
-    }
-    return result
+      if (addonRecords.length) {
+        const packages = require('../mornye/packages').service(getDB())
+        packages.shutdown()
+        packages.storage.importRecords(addonRecords)
+      }
+      return result
+    })
+    return restoreBackup()
   })
   ipcMain.handle('settings:factoryReset', () => resetAppData())
   
@@ -2044,11 +2077,12 @@ function updateTrackArtistLinks(db, trackId, artist) {
 }
 
 async function indexSingleFile(filePath, opts = {}) {
-  if (isPrivatePhoneUploadPath(filePath)) return null
+  if (isPrivatePhoneUploadPath(filePath) || (!opts.downloadPublication && downloadFiles.isHidden(filePath))) return null
   const db = getDB()
   const stat = fs.statSync(filePath)
-  const trackId = 't-' + hashFile(filePath, stat)
-  const existing = db.prepare('SELECT * FROM tracks WHERE file_hash = ? OR file_path = ?').get(trackId, filePath)
+  let trackId = 't-' + hashFile(filePath, stat)
+  const fileHash = trackId
+  const existing = libraryPaths.findByPath(db, filePath) || db.prepare('SELECT * FROM tracks WHERE file_hash = ?').get(trackId)
   if (existing) {
     const wanted = opts.metadata || {}
     const titleOverride = typeof wanted.title === 'string' && wanted.title.trim() ? wanted.title.trim() : null
@@ -2167,7 +2201,7 @@ async function indexSingleFile(filePath, opts = {}) {
   // imports where the scanner is invoked before the normal quality migration).
   quality.ensureColumns(db)
   const dupe = findAudioEditionDuplicate(db, {
-    title, artist, album, duration, atmosVerified: audioQuality.atmos_verified, codec: audioQuality.codec,
+    title, artist, album, duration, atmosVerified: audioQuality.atmos_verified, codec: audioQuality.codec, recordingMatch: opts.recordingMatch,
   })
   if (dupe) {
     // A previous download may have left its database row behind after the
@@ -2186,11 +2220,12 @@ async function indexSingleFile(filePath, opts = {}) {
     try { db.exec("ALTER TABLE tracks ADD COLUMN replaygain TEXT") } catch {}
     
 
-    const existingByPath = db.prepare('SELECT id FROM tracks WHERE file_path = ?').get(filePath)
+    const existingByPath = libraryPaths.findByPath(db, filePath)
+    if (existingByPath) trackId = existingByPath.id
     const params = trackParams({
       id: trackId,
       file_path: filePath,
-      file_hash: trackId,
+      file_hash: fileHash,
       title,
       artist,
       album,
@@ -2205,7 +2240,7 @@ async function indexSingleFile(filePath, opts = {}) {
       replaygain,
     }, trackId)
     if (existingByPath) {
-      db.prepare(`UPDATE tracks SET file_hash = @file_hash, title = @title, artist = @artist, album = @album, album_artist = @album_artist, track_num = @track_num, year = @year, genre = @genre, duration = @duration, artwork_path = @artwork_path, bitrate = @bitrate, last_modified = @last_modified, replaygain = @replaygain WHERE file_path = @file_path`)
+      db.prepare(`UPDATE tracks SET file_hash = @file_hash, title = @title, artist = @artist, album = @album, album_artist = @album_artist, track_num = @track_num, year = @year, genre = @genre, duration = @duration, artwork_path = @artwork_path, bitrate = @bitrate, last_modified = @last_modified, replaygain = @replaygain WHERE id = @id`)
         .run(params)
     } else {
       db.prepare(`INSERT INTO tracks (id, file_path, file_hash, title, artist, album, album_artist, track_num, year, genre, duration, artwork_path, bitrate, last_modified, replaygain) VALUES (@id, @file_path, @file_hash, @title, @artist, @album, @album_artist, @track_num, @year, @genre, @duration, @artwork_path, @bitrate, @last_modified, @replaygain)`)
@@ -2227,6 +2262,11 @@ async function indexSingleFile(filePath, opts = {}) {
     if (!opts.deferGhostResolution) resolveGhostsByIsrc(db, trackId)
   })
   
+  try {
+    const current = fs.statSync(filePath)
+    if (current.size !== stat.size || current.mtimeMs !== stat.mtimeMs) return { error: 'Audio file changed while being indexed; retry the scan' }
+  } catch { return { error: 'Audio file moved or disappeared while being indexed' } }
+  if (!opts.downloadPublication && downloadFiles.isHidden(filePath)) return null
   insertTransaction()
   if (added == null) {
     try { await addedDate.stampAddedDates(db, [filePath]) } catch (error) { console.warn('[indexSingleFile] Date-added tag skipped:', error.message) }
@@ -2281,7 +2321,7 @@ async function applyFileChanges(changes = [], activeRoots) {
     if (!rawPath) continue
     const filePath = path.resolve(String(rawPath))
     // Prepared stem clips are internal transition cache, not library songs.
-    if (isPreparedStemClipName(filePath) || isPrivatePhoneUploadPath(filePath)) continue
+    if (isPreparedStemClipName(filePath) || isPrivatePhoneUploadPath(filePath) || downloadFiles.isHidden(filePath)) continue
     const owner = rootFor(filePath)
     if (!owner || seen.has(filePath)) continue
     seen.add(filePath)
@@ -2365,9 +2405,9 @@ module.exports = { sourceFilter, genreFilter, userStats, registerScannerHandlers
 function registerExtraHandlers(ipcMain) {
   ipcMain.handle('artist:setImageUrl', async (_, artistId, url) => { const db = getDB(); const imgPath = path.join(getStorageDir(), 'artwork', `artist-${artistId}.jpg`); await downloadToFile(url, imgPath); db.prepare('UPDATE artists SET image_path = ?, image_source = ?, image_fetched_at = ? WHERE id = ?').run(imgPath, 'manual', Date.now(), artistId); return imgPath })
   ipcMain.handle('album:setImageUrl', async (_, albumTitle, url) => { const db = getDB(); const safeTitle = albumTitle.replace(/[^a-z0-9]+/gi, '-'); const imgPath = path.join(getStorageDir(), 'artwork', `album-${safeTitle}.jpg`); await downloadToFile(url, imgPath); db.prepare('UPDATE tracks SET artwork_path = ? WHERE album = ?').run(imgPath, albumTitle); return imgPath })
-  ipcMain.handle('scanner:checkDuplicates', () => getDB().prepare(`SELECT title, artist, COUNT(*) as count, GROUP_CONCAT(id) as ids, GROUP_CONCAT(file_path) as paths FROM tracks GROUP BY LOWER(title), LOWER(artist) HAVING count > 1`).all())
+  ipcMain.handle('scanner:checkDuplicates', () => require('../duplicateGroups').exactDuplicateGroups(getDB()))
   ipcMain.handle('scanner:checkPossibleDuplicates', () => {
-    const tracks = getDB().prepare("SELECT * FROM tracks WHERE file_path NOT LIKE 'ghost://%' ORDER BY artist, title").all()
+    const tracks = getDB().prepare("SELECT t.*, (SELECT COUNT(DISTINCT playlist_id) FROM playlist_tracks p WHERE p.track_id=t.id) AS playlist_count FROM tracks t WHERE file_path NOT LIKE 'ghost://%' ORDER BY artist, title").all()
     return buildPossibleDuplicateGroups(tracks)
   })
   ipcMain.handle('scanner:deleteTrack', async (_, trackId) => { const db = getDB(); const filePath = db.prepare('SELECT file_path FROM tracks WHERE id = ?').get(trackId)?.file_path; db.prepare('DELETE FROM artist_track_links WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM playlist_tracks WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM user_likes WHERE track_id = ?').run(trackId); db.prepare('DELETE FROM play_history WHERE track_id = ?').run(trackId); try { db.prepare('DELETE FROM listening_events WHERE track_id = ?').run(trackId) } catch {}; db.prepare('DELETE FROM lyrics_cache WHERE track_id = ?').run(trackId); try { db.prepare('DELETE FROM lyrics_translations WHERE track_id = ?').run(trackId) } catch {}; db.prepare('DELETE FROM tracks WHERE id = ?').run(trackId); forgetDownloads([trackId]); return { success: true, files: await removeTrackFiles(db, [filePath]) } })
@@ -2451,6 +2491,7 @@ function registerV4Handlers(ipcMain) {
   ipcMain.handle('scanner:incrementPlayTime', (_, trackId, userId, seconds) => {
     try {
       const db = getDB()
+      trackId = require('../trackAlias').trackById(db, trackId)?.id || trackId
       const uid = userId || 'guest'
       const thresholdSetting = db.prepare("SELECT value FROM settings WHERE key = 'scrobble_threshold'").get()
       const threshold = thresholdSetting ? parseInt(thresholdSetting.value) : 30

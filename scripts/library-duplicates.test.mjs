@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { test } from 'node:test'
 const require = createRequire(import.meta.url)
 const { initDB, getDB } = require('../electron/ipc/db')
-const { mergeDuplicates } = require('../electron/ipc/mergeDuplicates')
+const { mergeDuplicates, mergeAllDuplicates } = require('../electron/ipc/mergeDuplicates')
 const { scanFolder, registerV4Handlers } = require('../electron/ipc/scanner')
 const scanMetadata = require('../electron/ipc/scannerMetadata')
 
@@ -21,6 +21,9 @@ function fixture(t) {
   fs.mkdirSync(music)
   db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('music_folder', ?), ('delete_files_from_disk', '0')").run(music)
   t.after(() => {
+    // Windows directory watchers survive removal of their test directory.
+    // Close them before deleting fixtures or they keep the CI process alive.
+    require('../electron/libraryWatcher').stopWatching()
     db.close()
     if (previous === undefined) delete process.env.LOKAL_DATA_DIR
     else process.env.LOKAL_DATA_DIR = previous
@@ -103,6 +106,52 @@ test('a later file-move failure rolls back database and restores earlier moves',
   for (const file of [keep, a, b]) assert.ok(fs.existsSync(file))
 })
 
+for (const useCopy of [false, true]) {
+  test(`rollback never overwrites a newly occupied original path (${useCopy ? 'exclusive copy' : 'hard link'})`, async t => {
+    const { db, music, add } = fixture(t)
+    add('keep'); const a = add('a'), b = add('b')
+    const original = fs.readFileSync(a, 'utf8')
+    const rename = fs.renameSync, link = fs.linkSync, copy = fs.copyFileSync
+    t.mock.method(fs, 'renameSync', (from, to) => {
+      if (from === b) throw new Error('Later move failed')
+      return rename(from, to)
+    })
+    t.mock.method(fs, 'linkSync', (from, to) => {
+      if (useCopy) throw Object.assign(new Error('Hard links unsupported'), { code: 'ENOTSUP' })
+      fs.writeFileSync(to, 'new external file', { flag: 'wx' })
+      return link(from, to)
+    })
+    if (useCopy) t.mock.method(fs, 'copyFileSync', (from, to, flags) => {
+      assert.equal(flags, fs.constants.COPYFILE_EXCL)
+      fs.writeFileSync(to, 'new external file', { flag: 'wx' })
+      return copy(from, to, flags)
+    })
+    const result = await mergeDuplicates(db, 'keep', ['a', 'b'])
+    assert.match(result.error, /Some files could not be restored/)
+    assert.equal(fs.readFileSync(a, 'utf8'), 'new external file')
+    const staged = fs.readdirSync(music).filter(name => name.endsWith('.lokal-duplicate'))
+    assert.equal(staged.length, 1)
+    assert.equal(fs.readFileSync(path.join(music, staged[0]), 'utf8'), original)
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM tracks').get().n, 3)
+  })
+}
+
+test('rollback restores audio on volumes without hard-link support', async t => {
+  const { db, music, add } = fixture(t)
+  add('keep'); const a = add('a'), b = add('b')
+  const original = fs.readFileSync(a, 'utf8'), rename = fs.renameSync
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (from === b) throw new Error('Later move failed')
+    return rename(from, to)
+  })
+  t.mock.method(fs, 'linkSync', () => { throw Object.assign(new Error('Hard links unsupported'), { code: 'ENOTSUP' }) })
+  const result = await mergeDuplicates(db, 'keep', ['a', 'b'])
+  assert.match(result.error, /Later move failed/)
+  assert.doesNotMatch(result.error, /could not be restored/)
+  assert.equal(fs.readFileSync(a, 'utf8'), original)
+  assert.equal(fs.readdirSync(music).some(name => name.endsWith('.lokal-duplicate')), false)
+})
+
 test('a database failure leaves all audio and references intact', async t => {
   const { db, add } = fixture(t)
   const keep = add('keep'); const remove = add('remove')
@@ -141,6 +190,120 @@ test('already missing loser files can still be merged', async t => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n, 1)
 })
 
+test('multiple path aliases of one loser file are staged only once', async t => {
+  const { db, music, add } = fixture(t)
+  const keep = add('keep'), remove = add('remove')
+  fs.mkdirSync(path.join(music, 'alias'))
+  const alias = `${music}${path.sep}alias${path.sep}..${path.sep}remove.mp3`
+  db.prepare('INSERT INTO tracks (id,file_path,file_hash,title,artist) VALUES (?,?,?,?,?)').run('alias', alias, 'alias', 'Song', 'Artist')
+  db.exec("INSERT INTO playlists (id,name) VALUES ('p','Playlist'); INSERT INTO playlist_tracks (playlist_id,track_id,position) VALUES ('p','alias',0); INSERT INTO play_history (user_id,track_id) VALUES ('guest','remove')")
+  const result = await mergeDuplicates(db, 'keep', ['remove', 'alias'])
+  assert.equal(result.error, undefined)
+  assert.equal(result.merged, 2)
+  assert.ok(fs.existsSync(keep))
+  assert.equal(fs.existsSync(remove), false)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM tracks').get().n, 1)
+  assert.equal(db.prepare('SELECT track_id FROM playlist_tracks').get().track_id, 'keep')
+  assert.equal(db.prepare('SELECT track_id FROM play_history').get().track_id, 'keep')
+})
+
+test('path aliases of the keeper merge records without deleting its audio', async t => {
+  const { db, music, add } = fixture(t)
+  const keep = add('keep')
+  const alias = `${music}${path.sep}.${path.sep}keep.mp3`
+  db.prepare('INSERT INTO tracks (id,file_path,file_hash,title,artist) VALUES (?,?,?,?,?)').run('alias', alias, 'alias', 'Song', 'Artist')
+  const result = await mergeDuplicates(db, 'keep', ['alias'])
+  assert.equal(result.error, undefined)
+  assert.equal(result.merged, 1)
+  assert.ok(fs.existsSync(keep))
+  assert.deepEqual(fs.readdirSync(music), ['keep.mp3'])
+})
+
+test('Windows case aliases preserve the keeper audio', { skip: process.platform !== 'win32' }, async t => {
+  const { db, add } = fixture(t)
+  const keep = add('keep')
+  db.prepare('INSERT INTO tracks (id,file_path,file_hash,title,artist) VALUES (?,?,?,?,?)').run('alias', keep.toUpperCase(), 'alias', 'Song', 'Artist')
+  const result = await mergeDuplicates(db, 'keep', ['alias'])
+  assert.equal(result.error, undefined)
+  assert.equal(result.merged, 1)
+  assert.ok(fs.existsSync(keep))
+})
+
+test('a directory cannot be selected as the keeper of real audio', async t => {
+  const { db, music, add } = fixture(t)
+  const keep = add('keep'), remove = add('remove')
+  fs.unlinkSync(keep)
+  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(music, 'keep')
+  assert.match((await mergeDuplicates(db, 'keep', ['remove'])).error, /no local audio file/)
+  assert.ok(fs.existsSync(remove))
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM tracks').get().n, 2)
+})
+
+test('duplicates in a second configured music root can be merged safely', async t => {
+  const { db, dir, music, add } = fixture(t)
+  const keep = add('keep'), original = add('remove')
+  const second = path.join(dir, 'second-music')
+  fs.mkdirSync(second)
+  const remove = path.join(second, 'remove.mp3')
+  fs.renameSync(original, remove)
+  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(remove, 'remove')
+  db.prepare("INSERT INTO settings (key,value) VALUES ('music_folders',?)").run(JSON.stringify([music, second]))
+  const result = await mergeDuplicates(db, 'keep', ['remove'])
+  assert.equal(result.error, undefined)
+  assert.ok(fs.existsSync(keep))
+  assert.equal(fs.existsSync(remove), false)
+})
+
+test('long duplicate filenames do not overflow the staging filename', async t => {
+  const { db, music, add } = fixture(t)
+  const keep = add('keep'), original = add('remove')
+  const remove = path.join(music, `${'x'.repeat(220)}.mp3`)
+  fs.renameSync(original, remove)
+  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(remove, 'remove')
+  assert.equal((await mergeDuplicates(db, 'keep', ['remove'])).ok, true)
+  assert.ok(fs.existsSync(keep))
+  assert.equal(fs.existsSync(remove), false)
+})
+
+test('a loser disappearing before staging does not abort an otherwise safe merge', async t => {
+  const { db, add } = fixture(t)
+  const keep = add('keep'), remove = add('remove')
+  const rename = fs.renameSync
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (from === remove) fs.unlinkSync(remove)
+    return rename(from, to)
+  })
+  const result = await mergeDuplicates(db, 'keep', ['remove'])
+  assert.equal(result.error, undefined)
+  assert.ok(fs.existsSync(keep))
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM tracks').get().n, 1)
+})
+
+test('Smart Merge keeps an available copy ahead of a missing higher-quality record', async t => {
+  const { db, add } = fixture(t)
+  const keep = add('keep', 'Song', 128)
+  fs.unlinkSync(add('missing', 'Song', 999))
+  const result = await mergeAllDuplicates(db, track => track.bitrate)
+  assert.equal(result.error, undefined)
+  assert.equal(result.merged, 1)
+  assert.ok(fs.existsSync(keep))
+  assert.equal(db.prepare('SELECT id FROM tracks').get().id, 'keep')
+})
+
+test('loser audio and database references are restored if the keeper disappears during staging', async t => {
+  const { db, add } = fixture(t)
+  const keep = add('keep'), remove = add('remove')
+  const rename = fs.renameSync
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (from === remove) fs.unlinkSync(keep)
+    return rename(from, to)
+  })
+  const result = await mergeDuplicates(db, 'keep', ['remove'])
+  assert.match(result.error, /copy to keep disappeared/)
+  assert.ok(fs.existsSync(remove))
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM tracks').get().n, 2)
+})
+
 test('desktop Trash failure is reported and staged audio stays excluded on a real rescan', async t => {
   const { db, music, add } = fixture(t)
   add('keep'); add('remove')
@@ -149,7 +312,7 @@ test('desktop Trash failure is reported and staged audio stays excluded on a rea
   const module = { exports: {} }
   const calls = []
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
-    module,
+    module, process,
     require: id => id === './trackFiles' ? {
       ...localRequire(id),
       moveToTrash: async filename => { calls.push(filename); throw new Error('Trash unavailable') },

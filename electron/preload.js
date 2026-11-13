@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('electron', {
   getMissingTracks: () => invoke('scanner:getMissingTracks'),
   searchTracks: (q) => invoke('scanner:search', q),
   libraryKeys: () => invoke('library:keys'),
+  findOwnedTracks: candidates => invoke('library:owned', candidates),
   searchLyrics: (q) => invoke('scanner:searchLyrics', q),
   getArtists: () => invoke('scanner:getArtists'),
   getArtistsPage: (opts) => invoke('scanner:getArtistsPage', opts),
@@ -361,7 +362,7 @@ contextBridge.exposeInMainWorld('electron', {
   
   getSettings: () => invoke('settings:get'),
   saveSettings: (s) => invoke('settings:save', s),
-  exportAllData: () => invoke('settings:exportAll'),
+  exportAllData: (options) => invoke('settings:exportAll', options),
   automaticBackupStatus: () => invoke('backup:status'),
   automaticBackupConfigure: (options) => invoke('backup:configure', options),
   automaticBackupChooseFolder: () => invoke('backup:chooseFolder'),
@@ -393,6 +394,7 @@ contextBridge.exposeInMainWorld('electron', {
   
   register: (d) => invoke('user:register', d),
   login: (d) => invoke('user:login', d),
+  resetLocalPassword: (d) => invoke('user:resetLocalPassword', d),
   listUsers: () => invoke('user:list'),
   deleteUser: (userId) => invoke('user:delete', userId),
   updateProfile: (d) => invoke('user:updateProfile', d),
