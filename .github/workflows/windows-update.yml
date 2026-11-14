@@ -1,6 +1,9 @@
 name: Build Windows Update
 
 on:
+  push:
+    branches:
+      - 4k-fork-new
   workflow_dispatch:
     inputs:
       ref:
@@ -12,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-update-${{ inputs.ref }}
+  group: windows-update-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +28,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -35,7 +38,7 @@ jobs:
           cache: 'npm'
 
       - name: Set upstream patch version for fork branch
-        if: inputs.ref == '4k-fork-new'
+        if: inputs.ref == '4k-fork-new' || (github.event_name == 'push' && github.ref == 'refs/heads/4k-fork-new')
         shell: bash
         run: |
           set -euo pipefail
