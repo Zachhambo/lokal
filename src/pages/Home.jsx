@@ -301,6 +301,8 @@ function HomeContent({ user }) {
   const [suggestions, setSuggestions] = useCachedState(`home:suggestions:${uidKey}`, [])
   const [localHistory, setLocalHistory] = useCachedState(`home:history:${uidKey}`, [])
   const [mixes, setMixes] = useCachedState(`home:mixes:${uidKey}`, [])
+  const [homeFolders, setHomeFolders] = useState([])
+  const [folderRefreshLoading, setFolderRefreshLoading] = useState(false)
   const session = recommendationSession(uidKey)
   const sessionState = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const { data: discovery, source: recommendationSource, loading: discoveryLoading, error: discoveryError } = sessionState
