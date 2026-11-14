@@ -9,6 +9,8 @@ const caf = `(() => {
  const callbacks = [], audio = () => window.castAudio;
  const player = {
    setMediaElement() {}, addEventListener(types, callback) { callbacks.push({types: Array.isArray(types) ? types : [types], callback}) },
+   setMessageInterceptor(type, callback) { (window.messageInterceptors ||= {})[type] = callback },
+   getQueueManager() { return { getItems: () => window.cafQueueItems || [{ itemId: 1 }], getCurrentItemIndex: () => window.cafQueueIndex || 0 } },
    getMediaInformation: () => ({ metadata: { title:'Receiver regression',artist:'Lokal',images:[{url:'/cover.svg'}] }, customData:{trackId:window.receiverTrack||'track-1'},duration:30 }),
    getPlayerState: () => audio()?.ended ? 'IDLE' : audio()?.paused ? 'PAUSED' : 'PLAYING',
    getDurationSec: () => audio()?.duration || 30,
@@ -29,7 +31,7 @@ const caf = `(() => {
  window.sent=[];
  window.cast={framework:{CastReceiverContext:{getInstance:()=>context},CastReceiverOptions:class {},
    events:{EventType:{PLAYER_LOAD_COMPLETE:'loadedmetadata',PLAYING:'playing',PAUSE:'pause',BUFFERING:'waiting',SEEKED:'seeked',MEDIA_STATUS:'timeupdate',ENDED:'ended',MEDIA_FINISHED:'mediafinished'}},system:{EventType:{SENDER_CONNECTED:'connected'},MessageType:{JSON:'json'}},
-   messages:{Command:{ALL_BASIC_MEDIA:1,QUEUE_NEXT:2,QUEUE_PREV:4}},
+   messages:{Command:{ALL_BASIC_MEDIA:1,QUEUE_NEXT:2,QUEUE_PREV:4},MessageType:{QUEUE_UPDATE:'QUEUE_UPDATE'}},
  }};
 })();`
 function tone() {
@@ -64,6 +66,37 @@ test(failScriptOnce ? 'receiver retries video loading after a transient API fail
  assert.equal(await page.evaluate(()=>castAudio.id),'audio');
  assert.equal(await page.evaluate(()=>receiverOptions.mediaElement===document.getElementById('audio')),true);
  assert.equal(await page.evaluate(()=>castAudio.muted),false);
+ // With only the active item loaded (Android/iOS), queue buttons must
+ // request Lokal's next/previous instead of seeking/restarting this item.
+ const transport = await page.evaluate(() => {
+   const intercept = window.messageInterceptors.QUEUE_UPDATE;
+   const absentNext = intercept({ jump: 1, requestId: 43 });
+   const absentPrev = intercept({ jump: -1, requestId: 44 });
+   const otherUpdate = { currentItemId: 1 };
+   const unchanged = intercept(otherUpdate) === otherUpdate;
+   window.cafQueueItems = [{ itemId: 1 }, { itemId: 2 }];
+   window.cafQueueIndex = 0;
+   const adjacent = { jump: 1, requestId: 45 };
+   const cafOwnsNext = intercept(adjacent) === adjacent;
+   window.cafQueueIndex = 1;
+   const cafOwnsPrevious = intercept({ jump: -1, requestId: 46 }) !== null;
+   const stillMissingNext = intercept({ jump: 1, requestId: 47 }) === null;
+   return {
+     absentNext, absentPrev, unchanged, cafOwnsNext, cafOwnsPrevious,
+     stillMissingNext,
+     commands: window.sent.filter(message => message.type === 'transport'),
+   };
+ });
+ assert.equal(transport.absentNext, null);
+ assert.equal(transport.absentPrev, null);
+ assert.equal(transport.unchanged, true);
+ assert.equal(transport.cafOwnsNext, true);
+ assert.equal(transport.cafOwnsPrevious, true);
+ assert.equal(transport.stillMissingNext, true);
+ assert.deepEqual(transport.commands.map(command => command.action),
+   ['next', 'previous', 'next']);
+ assert.deepEqual(transport.commands.map(command => command.trackId),
+   ['track-1', 'track-1', 'track-1']);
  await page.waitForFunction(()=>document.getElementById('cover').classList.contains('on'));
  const rms=await page.evaluate(async()=>{
    const context=new AudioContext();await context.resume();const source=context.createMediaElementSource(castAudio);const analyser=context.createAnalyser();source.connect(analyser);analyser.connect(context.destination);

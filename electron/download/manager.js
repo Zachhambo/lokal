@@ -306,15 +306,56 @@ class DownloadManager {
       }
       this.jobs.set(job.id, job)
     }
-    try {
-      if (require('../libraryPathIdentity').repairSameFileRows(this.db())) this.deps.onLibraryUpdated?.({ repaired: true })
-    } catch (error) { console.warn('[downloads] Same-file repair:', error.message) }
-    this.repairMovedDownloads().catch(error => console.warn('[downloads] Moved-file repair:', error.message))
+    // Do NOT automatically run legacy same-file/alias reconciliation at
+    // startup. PR #789 moved it to a worker after the black-screen regression,
+    // but its SQLite write transaction still blocks foreground IPC, freezing
+    // the *already visible* Home window (and failing unrelated lyrics writes
+    // with SQLITE_BUSY). An automatic repair is neither required to read/play
+    // an existing library nor safe on every launch.
+    //
+    // Keep repairSameFileRowsInWorker / repairStartupLibraryInBackground for
+    // explicit maintenance and existing migration tests. Normal track alias
+    // resolution, playlist references and in-flight download recovery continue.
     this.trimHistory()
     this.repairGhostIndexed()
     if (resumed) setTimeout(() => this.pump(), 4000)
-    setTimeout(() => this.backfillSources(), 7000)
-    setTimeout(() => this.indexLeftovers(), 6000)
+    // Work on historical download jobs must not run as one uninterrupted
+    // SQLite/filesystem loop when the Home view has only just become visible.
+    setTimeout(() => { void this.backfillSources() }, 7000).unref?.()
+    setTimeout(() => { void this.indexLeftovers() }, 6000).unref?.()
+  }
+
+  /** Run the legacy same-file repair in a separate thread, not the UI thread. */
+  repairSameFileRowsInWorker() {
+    return new Promise(resolve => {
+      let worker
+      try {
+        const { Worker } = require('node:worker_threads')
+        worker = new Worker(path.join(__dirname, 'libraryRepairWorker.js'), {
+          workerData: { databasePath: path.join(this.deps.getStorageDir(), 'lokal.db') },
+        })
+      } catch (error) {
+        console.warn('[downloads] Could not start same-file repair worker:', error.message)
+        return resolve()
+      }
+      let result
+      worker.once('message', message => { result = message })
+      worker.once('error', error => console.warn('[downloads] Same-file repair worker:', error.message))
+      worker.once('exit', code => {
+        if (code !== 0) console.warn('[downloads] Same-file repair worker exited:', code)
+        else if (result?.error) console.warn('[downloads] Same-file repair:', result.error)
+        else if (result?.repaired) {
+          console.log(`[downloads] Repaired ${result.repaired} same-file library row(s)`)
+          try { this.deps.onLibraryUpdated?.({ repaired: true }) } catch {}
+        }
+        resolve()
+      })
+    })
+  }
+
+  async repairStartupLibraryInBackground() {
+    await this.repairSameFileRowsInWorker()
+    await this.repairMovedDownloads()
   }
 
   /** The library track downloaded from the online song `ref`, or null. */
@@ -329,6 +370,9 @@ class DownloadManager {
     const db = this.db()
     const { mergeDuplicates } = require('../ipc/mergeDuplicates')
     for (const job of [...this.jobs.values()]) {
+      // Release the Electron event loop between jobs, especially when the
+      // saved queue includes many paths on slow or disconnected drives.
+      await new Promise(resolve => setImmediate(resolve))
       if (ACTIVE.has(job.status) || job.pendingIndex?.length) continue
       if (job.kind !== 'single' && job.kind !== 'soulseek') continue
       const ids = [...new Set((job.indexedTracks || []).map(track => track.id))]
@@ -388,29 +432,49 @@ class DownloadManager {
   }
 
   /** Songs downloaded before sources were kept: their source, from the download history. */
-  backfillSources() {
+  async backfillSources() {
     try {
       const tag = this.db().prepare("UPDATE tracks SET download_source = ?, source_ref = COALESCE(source_ref, ?) WHERE id = ? AND download_source IS NULL")
+      let processed = 0
       for (const job of this.jobs.values()) {
         if (job.status !== 'done' || !job.indexedTracks?.length) continue
         const label = jobSourceLabel(job)
-        for (const track of job.indexedTracks) tag.run(label, job.sourceRef || null, track.id)
+        for (const track of job.indexedTracks) {
+          tag.run(label, job.sourceRef || null, track.id)
+          // Other IPC and Chromium input/paint work must run between batches.
+          if (++processed % 20 === 0) await new Promise(resolve => setImmediate(resolve))
+        }
       }
-    } catch {}
+    } catch (error) {
+      console.warn('[downloads] Backfill sources postponed:', error.message)
+    }
   }
 
   /** Files a previous session downloaded but never got to add to the library. */
   async indexLeftovers() {
     for (const job of [...this.jobs.values()]) {
       if (ACTIVE.has(job.status) || !job.pendingIndex?.length || !this.deps.index) continue
-      const files = job.pendingIndex.filter(fp => { try { return fs.existsSync(fp) } catch { return false } })
-      job.pendingIndex = []
+      // Checking many saved paths synchronously (especially a sleeping NAS)
+      // used to block the Electron UI thread several seconds after startup.
+      const files = []
+      for (const fp of job.pendingIndex) {
+        try {
+          if ((await require('../ipc/networkLibrary').withTimeout(require('node:fs/promises').stat)(fp)).isFile()) {
+            files.push(fp)
+          }
+        } catch {
+          // An offline root is not proof of deletion. Keep it pending so a
+          // later session may index it rather than silently dropping it.
+        }
+      }
+      job.pendingIndex = job.pendingIndex.filter(fp => !files.includes(fp))
       // A file stays pending until it's in the library, so a failed attempt
       // is tried again next time.
       for (const fp of files) {
         const before = job.indexedTracks.length
         await this.indexOne(job, fp)
         if (job.indexedTracks.length === before) job.pendingIndex.push(fp)
+        await new Promise(resolve => setImmediate(resolve))
       }
       this.persist(job)
     }

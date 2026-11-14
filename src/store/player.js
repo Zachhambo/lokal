@@ -576,7 +576,7 @@ export const usePlayerStore = create((set, get) => ({
     })
   },
 
-  prev: () => {
+  prev: ({ allowRestart = true } = {}) => {
     const {
       shuffle, shuffleQueue, shuffleIndex, queue, queueIndex,
       progress, audioRef, cfAudioRef, activeAudioElement, playHistory, futureHistory
@@ -585,8 +585,8 @@ export const usePlayerStore = create((set, get) => ({
     // A radio station is live: back means the previous station, never "restart".
     const live = isStationTrack(get().currentTrack)
 
-    if (progress > 3 && !live && outputRoute) { outputRoute.seek(0); set({ progress: 0 }); return }
-    if (progress > 3 && !live && activeRef?.current) {
+    if (allowRestart && progress > 3 && !live && outputRoute) { outputRoute.seek(0); set({ progress: 0 }); return }
+    if (allowRestart && progress > 3 && !live && activeRef?.current) {
       activeRef.current.currentTime = 0
       return
     }

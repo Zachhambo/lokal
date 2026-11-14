@@ -498,6 +498,35 @@
 
     tell = function (data) { data.protocol = PROTOCOL; try { context.sendCustomMessage(NS, undefined, data) } catch (e) {} }
 
+    // Sender-owned playlists can be longer than CAF's short playback queue.
+    // Android/iOS currently load one recording at a time; desktop only holds
+    // the next few and has no previous item in CAF after it advances.
+    // Cast remotes send QUEUE_NEXT/PREV as QUEUE_UPDATE + jump (+1/-1).
+    // Let CAF handle jumps it can satisfy locally. Otherwise ask Lokal's
+    // authoritative queue to select the recording; don't restart the same
+    // media item or let an empty CAF queue silently swallow the key.
+    player.setMessageInterceptor(framework.messages.MessageType.QUEUE_UPDATE, function (request) {
+      var direction = Number(request && request.jump)
+      if (direction !== 1 && direction !== -1) return request
+      var queue = player.getQueueManager && player.getQueueManager()
+      var items = queue && queue.getItems ? queue.getItems() || [] : []
+      var index = queue && queue.getCurrentItemIndex ? queue.getCurrentItemIndex() : -1
+      var neighbour = index >= 0 && index + direction >= 0 && index + direction < items.length
+      if (neighbour) return request
+      var info = player.getMediaInformation()
+      var custom = info && info.customData || {}
+      if (!info || !custom.trackId) return request
+      tell({
+        type: 'transport',
+        action: direction === 1 ? 'next' : 'previous',
+        trackId: String(custom.trackId),
+        ...(custom.loadId ? { loadId: String(custom.loadId) } : {}),
+        ...(request.requestId != null ? { requestId: request.requestId } : {}),
+      })
+      // A LOAD from Lokal will follow after its logical queue advances.
+      return null
+    })
+
     var refresh = function () {
       var info = player.getMediaInformation()
       var playerState = player.getPlayerState()

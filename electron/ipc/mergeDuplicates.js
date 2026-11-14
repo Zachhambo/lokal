@@ -23,6 +23,7 @@ const availableFile = track => {
 async function mergeDuplicates(db, keepId, removeIds) {
   const staged = []
   const unchangedFileIds = []
+  const preservedOutsideFiles = []
   let losers
   try {
     if (!Array.isArray(removeIds) || removeIds.includes(keepId)) throw new Error('Choose a different copy to remove.')
@@ -46,7 +47,12 @@ async function mergeDuplicates(db, keepId, removeIds) {
       // stage their shared audio, including Windows case/separator aliases.
       if (pathKey(real) === pathKey(winnerFile)) continue
       if (!roots.some(folder => isInside(file, folder) && isInside(real, realPath(folder)))) {
-        throw new Error('A duplicate is outside your music folders. Add its folder in Settings → Library before merging.')
+        // A library can have only one configured folder but still retain old
+        // track rows from a prior folder, an imported file, or an external
+        // download destination. Merging their library references is safe;
+        // deleting audio outside the user's selected root is not.
+        preservedOutsideFiles.push(real)
+        continue
       }
       files.set(pathKey(real), real)
     }
@@ -110,10 +116,17 @@ async function mergeDuplicates(db, keepId, removeIds) {
   for (const { temporary } of staged) {
     try { await moveToTrash(temporary) } catch { failed.push(temporary) }
   }
+  const warnings = []
+  if (preservedOutsideFiles.length) warnings.push(
+    `Merged the duplicate library records, but kept ${preservedOutsideFiles.length} file(s) outside your configured music folder on disk. No additional music folder needs to be configured. These files were not deleted: ${[...new Set(preservedOutsideFiles)].join(', ')}`
+  )
+  if (failed.length) warnings.push(
+    `Duplicates were removed from the library, but some files could not be moved to Trash. They will not be rescanned. Remove these files manually: ${failed.join(', ')}`
+  )
   return {
     ok: true, merged: losers.length,
     replacements: [{ removedIds: losers.map(track => track.id), unchangedFileIds, track: db.prepare('SELECT * FROM tracks WHERE id=?').get(keepId) }],
-    ...(failed.length ? { warning: `Duplicates were removed from the library, but some files could not be moved to Trash. They will not be rescanned. Remove these files manually: ${failed.join(', ')}` } : {}),
+    ...(warnings.length ? { warning: warnings.join(' ') } : {}),
   }
 }
 

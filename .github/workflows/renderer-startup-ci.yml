@@ -4,7 +4,14 @@ on:
   pull_request:
     paths:
       - 'src/App.jsx'
+      - 'src/components/DownloadManager.jsx'
       - 'src/main.jsx'
+      - 'src/pages/Home.jsx'
+      - 'src/components/RightSidebar.jsx'
+      - 'src/performanceStalls.mjs'
+      - 'electron/ipc/scanner.js'
+      - 'electron/download/manager.js'
+      - 'scripts/startup-responsiveness.test.mjs'
       - 'src/RenderErrorBoundary.jsx'
       - 'src/mergedTracks.js'
       - 'src/store/player.js'
@@ -38,6 +45,8 @@ jobs:
       - name: Install isolated browser test dependency
         shell: bash
         run: npm install --prefix "$RUNNER_TEMP/startup-browser" --no-package-lock --ignore-scripts playwright@1.62.1
+      - name: Validate post-render stalls, bounded Home requests and route splitting
+        run: node --test scripts/startup-responsiveness.test.mjs
       - run: npm run gen:icons
       - name: Check the production renderer with fresh, empty and restored queues
         env:

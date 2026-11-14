@@ -184,13 +184,13 @@ export default function RightSidebar() {
   const [trackPlays, setTrackPlays] = useState({ id: null, plays: null })
   useEffect(() => {
     const id = currentTrack?.id
-    if (!id) return undefined
+    if (!id || !showRightSidebar) return undefined
     let current = true
     Promise.resolve(api.getTrackPlays?.(user?.id || 'guest', id))
       .then(result => { if (current && Number.isFinite(result?.plays)) setTrackPlays({ id, plays: result.plays }) })
       .catch(() => {})
     return () => { current = false }
-  }, [currentTrack?.id, user?.id])
+  }, [currentTrack?.id, user?.id, showRightSidebar])
   const plays = trackPlays.id === currentTrack?.id && trackPlays.plays !== null ? trackPlays.plays : Number(currentTrack?.play_count) || 0
   // A streamed song rarely comes with a genre: looked up (and kept) for it.
   const [foundGenre, setFoundGenre] = useState({ id: null, genre: null })
@@ -351,8 +351,10 @@ export default function RightSidebar() {
   // For each new track, automatically choose Lyrics if available unless the
   // standalone visualizer was selected; no-lyrics results settle back on Info.
   useEffect(() => {
-    if (currentTrack?.id) void lookUpLyrics(currentTrack, infoCardViewRef.current !== 'visualization')
-  }, [currentTrack?.id, lookUpLyrics])
+    if (showRightSidebar && currentTrack?.id) {
+      void lookUpLyrics(currentTrack, infoCardViewRef.current !== 'visualization')
+    }
+  }, [currentTrack?.id, lookUpLyrics, showRightSidebar])
 
   // Comma-preserving artist names (e.g. "Tyler, The Creator") configured in
   // Settings -- without this, navigateToTrackArtist falls back to its
@@ -414,15 +416,19 @@ export default function RightSidebar() {
   const [coverClip, setCoverClip] = useState({ id: null, clip: null })
   useEffect(() => {
     const id = currentTrack?.id
-    if (!id) return undefined
+    // The side panel remains mounted even when it is CLOSED. Loading a
+    // Canvas here opened an entire hidden Spotify Chromium window at boot
+    // solely to size artwork the user cannot see. Never start provider
+    // requests for a hidden panel; the player/lyrics still work normally.
+    if (!id || !showRightSidebar || sidePanelView !== 'info') return undefined
     let current = true
     loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, clip: clip?.src ? clip : null }) })
     return () => { current = false }
-  }, [currentTrack?.id])
+  }, [currentTrack?.id, showRightSidebar, sidePanelView])
   const clipNow = coverClip.id === currentTrack?.id ? coverClip.clip : null
   // AutoMix turns the cover over into the next song's (when it's a still one).
   // The official music video, once found and checked (musicVideo.js).
-  const { video: musicVideo } = useMusicVideo(currentTrack)
+  const { video: musicVideo } = useMusicVideo(showRightSidebar ? currentTrack : null)
   const showMusicVideo = useMusicVideoView(s => s.show)
   const clipName = clipNow && (clipNow.tall || clipNow.source === 'spotify') ? 'Canvas' : 'Moving Cover'
   const infoRef = useRef(null)

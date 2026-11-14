@@ -5,6 +5,7 @@ import RenderErrorBoundary from './RenderErrorBoundary'
 import { LanguageProvider } from './i18n'
 import './index.css'
 import { applyTheme, THEMES } from './theme'
+import { startRendererStallMonitor } from './performanceStalls.mjs'
 
 async function initTheme() {
   try {
@@ -38,3 +39,4 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<RenderErrorBoundary><LanguageProvider><App /></LanguageProvider></RenderErrorBoundary>)
+if (window.electron?.log) startRendererStallMonitor()

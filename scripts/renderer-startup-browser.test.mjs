@@ -16,7 +16,7 @@ let browser, server, origin
 before(async () => {
   await build({ plugins: [{ name: 'startup-store-probe', transform(code, id) {
     if (id.replace(/\\/g, '/').endsWith('/src/main.jsx')) return {
-      code: code + "\nimport { usePlayerStore as startupPlayer } from './store/player.js'; window.__startupPlayer = startupPlayer;", map: null,
+      code: code + "\nimport { usePlayerStore as startupPlayer } from './store/player.js'; window.__startupPlayer = startupPlayer; import { useDownloads as startupDownloads } from './store/downloads.js'; window.__startupDownloads = startupDownloads;", map: null,
     }
   } }], build: { outDir: dir, emptyOutDir: true } })
   server = createServer((req, res) => {
@@ -70,3 +70,50 @@ for (const mode of ['fresh profile', 'saved empty queue', 'restored track', 'cle
     assert.deepEqual(errors, [])
   })
 }
+
+test('download popover keeps Addons and queue actions apart at normal and narrow widths', async t => {
+  const context = await browser.newContext({ viewport: { width: 900, height: 720 }, serviceWorkers: 'block' })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url())
+    if (url.origin !== origin) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) })
+  })
+  await page.goto(origin, { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => !!window.__startupDownloads?.getState().loaded && !!document.querySelector('[data-downloads-toggle]'))
+  await page.evaluate(() => window.__startupDownloads.setState({ jobs: [
+    { id: 'busy', kind: 'single', title: 'Loading track', status: 'downloading', progress: 67, seen: false },
+    { id: 'done', kind: 'single', title: 'Saved track', status: 'done', seen: false },
+  ] }))
+  // Fresh profiles show an onboarding overlay that intercepts pointer input.
+  // Open the real popover through its store so this test isolates header geometry.
+  await page.evaluate(() => window.__startupDownloads.setState({ panelOpen: true }))
+  const header = page.locator('[data-download-panel-header]')
+  const tab = page.getByRole('tab', { name: /Addons/ })
+  const cancel = page.getByRole('button', { name: 'Cancel all' })
+  const clear = page.getByRole('button', { name: 'Clear', exact: true })
+  await header.waitFor()
+  await cancel.waitFor()
+  await clear.waitFor()
+
+  for (const width of [900, 380, 320]) {
+    await page.setViewportSize({ width, height: 720 })
+    await page.waitForTimeout(100)
+    const [tabBox, cancelBox, clearBox, headerBox] = await Promise.all([
+      tab.boundingBox(), cancel.boundingBox(), clear.boundingBox(), header.boundingBox(),
+    ])
+    assert.ok(tabBox && cancelBox && clearBox && headerBox, 'all header controls are present')
+    assert.ok(tabBox.y + tabBox.height <= Math.min(cancelBox.y, clearBox.y),
+      'Addons tab never overlaps Cancel all / Clear')
+    assert.ok(cancelBox.x + cancelBox.width <= clearBox.x ||
+              cancelBox.y + cancelBox.height <= clearBox.y,
+      'the two queue actions never overlap, including when wrapped')
+    assert.ok(cancelBox.x >= headerBox.x - 1 && clearBox.x + clearBox.width <= headerBox.x + headerBox.width + 1,
+      'queue action buttons stay inside the popover')
+  }
+  assert.deepEqual(errors, [])
+})

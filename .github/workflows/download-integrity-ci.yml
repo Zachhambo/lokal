@@ -6,6 +6,7 @@ on:
       - 'electron/download/**'
       - 'electron/downloadFolder.js'
       - 'electron/ipc/scanner.js'
+      - 'electron/ipc/mergeDuplicates.js'
       - 'electron/ipc/walkMusicFiles.js'
       - 'electron/libraryWatcher.js'
       - 'electron/quality/**'
@@ -19,6 +20,9 @@ on:
       - 'src/ghostDownloads.js'
       - 'scripts/ghost-downloads.test.mjs'
       - 'scripts/download-integrity.test.mjs'
+      - 'scripts/library-duplicates.test.mjs'
+      - 'scripts/startup-library-repair.test.mjs'
+      - 'scripts/library-watch.test.mjs'
       - '.github/workflows/download-integrity-ci.yml'
   workflow_dispatch:
 
@@ -40,10 +44,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      # The third-party setup-ffmpeg action broke on Ubuntu by parsing an
+      # upstream README as a version ("Failed to read version from readme").
+      # Use runner-native package managers rather than an external parser.
+      - name: Install FFmpeg (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+          }
+      - name: Verify FFmpeg
+        run: ffmpeg -version
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm rebuild better-sqlite3
       - name: Test real audio, watcher races, deduplication, conversion and reference repair
         env:
           ELECTRON_OVERRIDE_DIST_PATH: ${{ runner.temp }}/unused-electron
-        run: node --test scripts/download-integrity.test.mjs scripts/download-library-sync.test.mjs scripts/library-duplicates.test.mjs scripts/alac-codec.test.mjs scripts/atmos-library-quality.test.mjs scripts/http-addon-downloads.test.mjs scripts/lastwave-download-artwork.test.mjs scripts/ghost-downloads.test.mjs
+        run: node --test scripts/download-integrity.test.mjs scripts/download-library-sync.test.mjs scripts/library-duplicates.test.mjs scripts/alac-codec.test.mjs scripts/atmos-library-quality.test.mjs scripts/http-addon-downloads.test.mjs scripts/lastwave-download-artwork.test.mjs scripts/ghost-downloads.test.mjs scripts/startup-library-repair.test.mjs scripts/library-watch.test.mjs

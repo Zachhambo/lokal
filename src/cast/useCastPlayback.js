@@ -302,6 +302,27 @@ export function useCastPlayback(helpers) {
       if (player().currentTrack === before) usePlayerStore.setState({ isPlaying: false })
     }
 
+    // A receiver with no adjacent CAF item asks Lokal to navigate its real
+    // queue. This is especially important for Previous: the receiver only
+    // preloads future items, while playback history lives on the desktop.
+    const onReceiverTransport = data => {
+      if (!live || !lokalReceiver() || live.syncPending || live.syncs > 0 || live.songPending) return
+      if (data?.action !== 'next' && data?.action !== 'previous') return
+      const currentId = String(player().currentTrack?.id || '')
+      if (!currentId || String(data.trackId || '') !== currentId ||
+          (live.tvTrackId && live.tvTrackId !== currentId)) return
+      // The receiver and Cast SDK can resend a request during a state change.
+      // Never turn one remote click into two queue advances.
+      const requestKey = data.requestId == null ? null : `${data.action}:${currentId}:${data.requestId}`
+      if (requestKey && live.lastTransportKey === requestKey) return
+      if (live.lastTransportTrack === currentId && Date.now() - (live.lastTransportAt || 0) < 400) return
+      live.lastTransportKey = requestKey
+      live.lastTransportAt = Date.now()
+      live.lastTransportTrack = currentId
+      if (data.action === 'next') player().next()
+      else player().prev({ allowRestart: false })
+    }
+
     // ------------------------------------------------------------ starting and ending
 
     const route = {
@@ -434,6 +455,7 @@ export function useCastPlayback(helpers) {
         if (data?.type === 'hello') sendExtras()
         // The view changed with the TV's remote.
         else if (data?.type === 'view' && data.view) cast().setTvView(data.view)
+        else if (data?.type === 'transport') onReceiverTransport(data)
       }),
     ]
 

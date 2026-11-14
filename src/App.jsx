@@ -16,7 +16,7 @@ const AUTOMIX_FALLBACK = Object.freeze({ fallback: true })
 const AUTOMIX_FALLBACK_S = 6
 const AUTOMIX_PLAN_BUDGET_MS = 40
 import { prefetchUpcoming } from './queuePrefetch'
-import React, { Activity, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
+import React, { Activity, Suspense, lazy, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import { MemoryRouter as Router, Routes, Route, Navigate, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import Sidebar from './components/Sidebar'
@@ -37,24 +37,30 @@ import MiniPlayer from './components/MiniPlayer'
 import RecapStories from './components/RecapStories'
 import Onboarding, { useOnboarding } from './components/Onboarding'
 import PostOnboardingTour from './components/PostOnboardingTour'
+// Home is the default first paint. Every other route was previously evaluated
+// before the window could display Home: search, artists, Settings, playlists,
+// videos and their entire import trees all shared one 2.84 MB startup bundle.
+// Load those views on navigation, without delaying playback or the app shell.
+// React.lazy caches both the module and its component after the first visit.
 import Home from './pages/Home'
-import Albums from './pages/Albums'
-import Genres, { GenreTracks } from './pages/Genres'
-import Stations from './pages/Stations'
-import CacheAnalysis from './pages/CacheAnalysis'
-import OnlineAlbum from './pages/OnlineAlbum'
-import Artists from './pages/Artists'
-import Videos from './pages/Videos'
-import Library from './pages/Library'
-import Search from './pages/Search'
-import Artist from './pages/Artist'
-import Playlist from './pages/Playlist'
-import SpotifyPlaylist from './pages/SpotifyPlaylist'
-import Settings from './pages/Settings'
-import Profile from './pages/Profile'
-import Recap from './pages/Recap'
-import Quality from './pages/Quality'
-import Radio from './pages/Radio'
+const Albums = lazy(() => import('./pages/Albums'))
+const Genres = lazy(() => import('./pages/Genres'))
+const GenreTracks = lazy(() => import('./pages/Genres').then(module => ({ default: module.GenreTracks })))
+const Stations = lazy(() => import('./pages/Stations'))
+const CacheAnalysis = lazy(() => import('./pages/CacheAnalysis'))
+const OnlineAlbum = lazy(() => import('./pages/OnlineAlbum'))
+const Artists = lazy(() => import('./pages/Artists'))
+const Videos = lazy(() => import('./pages/Videos'))
+const Library = lazy(() => import('./pages/Library'))
+const Search = lazy(() => import('./pages/Search'))
+const Artist = lazy(() => import('./pages/Artist'))
+const Playlist = lazy(() => import('./pages/Playlist'))
+const SpotifyPlaylist = lazy(() => import('./pages/SpotifyPlaylist'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Profile = lazy(() => import('./pages/Profile'))
+const Recap = lazy(() => import('./pages/Recap'))
+const Quality = lazy(() => import('./pages/Quality'))
+const Radio = lazy(() => import('./pages/Radio'))
 import LosslessModal from './components/LosslessModal'
 import BulkLosslessModal from './components/BulkLosslessModal'
 import SmartPlaylistModal from './components/SmartPlaylistModal'
@@ -306,7 +312,9 @@ function PageTransition({ gated = false, children }) {
         exit={{ opacity: 0, transition: { duration: 0.12, ease: 'easeIn' } }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
       >
-        {children}
+        <Suspense fallback={<div role="status" className="px-6 py-8 text-sm text-muted">Loading view…</div>}>
+          {children}
+        </Suspense>
       </motion.div>
       </PageShownContext.Provider>
     </PageReadyContext.Provider>

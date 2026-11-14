@@ -328,9 +328,6 @@ function HomeContent({ user }) {
   }
   const [saving, setSaving] = useState(null)
   const [localArtists, setLocalArtists] = useState([])
-  const [artistsLoaded, setArtistsLoaded] = useState(false)
-  const [homeFolders, setHomeFolders] = useState([])
-  const [folderRefreshLoading, setFolderRefreshLoading] = useState(false)
   const hiddenArtists = useDiscoveryArtists(s => s.hidden)
   const followedArtists = useDiscoveryArtists(s => s.followed)
   // Follow / Unfollow for an artist's menu: an artist neither followed nor
@@ -503,14 +500,15 @@ function HomeContent({ user }) {
       soft(api.getSuggestions(uid)),
       soft(api.getHistory(uid, 100)),
       soft(api.getMixes(uid)),
-      soft(api.getArtists()),
+      // Home needs a small set of artist cards, never an unbounded library
+      // IPC payload followed by one extra artwork SQL query per artist.
+      soft(api.getArtistsPage({ limit: 100, sort: 'tracks' }).then(page => page?.items)),
     ]).then(([tracks, suggested, history, userMixes, artists]) => {
       const nonGhost = items => (Array.isArray(items) ? items.filter(item => !String(item?.file_path || '').startsWith('ghost://')) : [])
       if (Array.isArray(tracks)) setRecentTracks(nonGhost(tracks))
       if (Array.isArray(suggested)) setSuggestions(nonGhost(suggested))
       if (Array.isArray(history)) setLocalHistory(history.map(entry => ({ ...entry, scrobbledAt: entry.played_at })))
       if (Array.isArray(userMixes)) setMixes(userMixes.map(mix => ({ ...mix, tracks: nonGhost(mix.tracks) })).filter(mix => mix.tracks.length > 0))
-      if (Array.isArray(artists)) setArtistsLoaded(true)
       if (Array.isArray(artists)) setLocalArtists(artists.map(artist => ({ ...artist, image: artist.image || (artist.image_path ? (api.isElectron ? `file://${artist.image_path}` : `/api/artist-image/${encodeURIComponent(artist.id)}`) : ''), source: 'library' })))
       if ([tracks, suggested, history, userMixes, artists].every(Array.isArray)) setLoaded(true)
     })
@@ -518,8 +516,44 @@ function HomeContent({ user }) {
 
   useEffect(() => { load(); loadHomeFolders().catch(error => showToast(error?.message || t('Could not load music folders'))) }, [user?.id])
   useEffect(() => { loadDiscoveryArtists().catch(() => {}) }, [])
-  // Once, with the library loaded: follow everyone already in it (not hidden).
-  useEffect(() => { if (artistsLoaded) initFollowedArtists(localArtists).catch(() => {}) }, [artistsLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
+  // On an existing installation this is already done. On first use, seed all
+  // library artists (not just Home's 100 preview cards) using lightweight
+  // bounded name-only IPC pages. The first Home paint never waits for it, and
+  // every batch yields to navigation, pointer and paint events.
+  useEffect(() => {
+    let cancelled = false
+    const whenIdle = () => new Promise(resolve => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(resolve, { timeout: 1500 })
+      } else {
+        setTimeout(resolve, 35)
+      }
+    })
+    const seed = async () => {
+      try {
+        await loadDiscoveryArtists()
+        if (cancelled || useDiscoveryArtists.getState().followReady) return
+        let names = []
+        if (api.isElectron) {
+          const limit = 200
+          for (let offset = 0; !cancelled; offset += limit) {
+            const page = await api.getDiscoveryArtistNamesPage({ limit, offset })
+            if (!Array.isArray(page)) return
+            names.push(...page)
+            if (page.length < limit) break
+            await whenIdle()
+          }
+        } else {
+          names = await api.getArtists()
+        }
+        if (!cancelled) await initFollowedArtists(names)
+      } catch (error) {
+        console.warn('[discovery] Could not initialize followed artists:', error?.message)
+      }
+    }
+    const timer = setTimeout(() => { void whenIdle().then(() => !cancelled && seed()) }, 4000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [])
   useEffect(() => { session.ensure() }, [session])
   useEffect(() => {
     const refresh = () => {

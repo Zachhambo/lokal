@@ -463,6 +463,7 @@ function setPreferredMediaKeys(enabled) {
 }
 
 function createWindow() {
+  const windowCreatedAt = Date.now()
   const saved = loadWindowState()
   mainWindow = new BrowserWindow({
     icon: path.join(__dirname, process.platform === 'win32' ? '../public/lokal-icon.ico' : '../public/lokal-icon-rounded.png'),
@@ -480,7 +481,15 @@ function createWindow() {
       backgroundThrottling: false,
     },
   })
-  mainWindow.webContents.on('render-process-gone', closeNativeOutput)
+  mainWindow.webContents.on('render-process-gone', (_, details) => {
+    console.error('[startup] Renderer exited:', details?.reason || 'unknown')
+    closeNativeOutput()
+  })
+  mainWindow.webContents.on('did-fail-load', (_, errorCode, description, url, isMainFrame) => {
+    if (isMainFrame && errorCode !== -3) {
+      console.error('[startup] Main renderer failed to load:', errorCode, description)
+    }
+  })
   mainWindow.webContents.on('did-start-loading', closeNativeOutput)
   mainWindow.on('closed', () => {
     closeNativeOutput()
@@ -523,6 +532,11 @@ function createWindow() {
   })
   
   mainWindow.webContents.on('did-finish-load', () => {
+    console.log(`[startup] Renderer document loaded ${Date.now() - windowCreatedAt}ms after window creation`)
+    // Don't start file-index reconciliation during the first visible layout
+    // frames. Continue watching immediately; buffered changes are applied
+    // after the page has settled, never discarded.
+    try { require('./libraryWatcher').deferStartupWork(4500) } catch {}
     mainWindow.webContents.send('perf-settings', loadPerformanceSettings())
     if (pendingLastfmAuthToken) {
       mainWindow.webContents.send('lastfm:auth-token', pendingLastfmAuthToken)
@@ -564,6 +578,7 @@ function createWindow() {
 app.name = 'Lokal'
 app.whenReady().then(async () => {
   if (!gotTheLock) return;
+  const startupStarted = Date.now()
   try { require('../server/index.js') } catch (e) { console.error('Server already running or port blocked:', e.message) }
   app.name = 'Lokal'
   if (app.isPackaged) {
@@ -587,7 +602,9 @@ app.whenReady().then(async () => {
       const legacy = db.prepare("SELECT value FROM settings WHERE key = 'music_folder'").get()?.value
       if (legacy) folders = [legacy]
     }
-    require('./libraryWatcher').watchLibraryRoots(folders)
+    const watcher = require('./libraryWatcher')
+    watcher.deferStartupWork(8000)
+    watcher.watchLibraryRoots(folders)
   } catch (e) { console.error('Library watcher:', e.message) }
   try { markInterruptedPlaylistsIncomplete() } catch (e) { console.error('Downloads:', e.message) }
   try { initPlugins() } catch (e) { console.error('Plugins:', e.message) }
@@ -607,7 +624,12 @@ app.whenReady().then(async () => {
     registerToolsHandlers, registerPlaylistHandlers, registerMixesHandlers, registerPluginHandlers, registerRecapHandlers,
     registerQualityHandlers, registerLibraryKeysHandlers, registerRadioHandlers
   ]) {
+    const started = Date.now()
     try { fn(ipcMain) } catch (e) { console.error(fn.name + ':', e.message) }
+    finally {
+      const duration = Date.now() - started
+      if (duration >= 250) console.warn(`[startup] ${fn.name} blocked initialization for ${duration}ms`)
+    }
   }
   try { registerNetworkLibraryHandlers(ipcMain) }
   catch (e) { console.error('registerNetworkLibraryHandlers:', e.message) }
@@ -945,6 +967,22 @@ ipcMain.handle('window:refreshHitRegions', () => {
 })
 
 createWindow()
+console.log(`[startup] Window created ${Date.now() - startupStarted}ms after Electron ready`)
+// A main-process synchronous SQLite call can make an already-visible window
+// appear completely frozen. Record any event-loop blockage independently of
+// the renderer so the next Windows log identifies which thread is stuck.
+let mainEventLoopBeat = require('node:perf_hooks').performance.now()
+let mainEventLoopLastWarning = -Infinity
+const mainEventLoopWatchdog = setInterval(() => {
+  const now = require('node:perf_hooks').performance.now()
+  const blockedMs = now - mainEventLoopBeat - 500
+  mainEventLoopBeat = now
+  if (blockedMs >= 220 && blockedMs <= 30000 && now - mainEventLoopLastWarning >= 4000) {
+    mainEventLoopLastWarning = now
+    console.warn(`[performance] Main process event loop unresponsive for ${Math.round(blockedMs)}ms`)
+  }
+}, 500)
+mainEventLoopWatchdog.unref?.()
 
 const bootProtocolUrl = process.argv.find(arg => typeof arg === 'string' && arg.startsWith(`${APP_PROTOCOL}://`))
 const bootToken = extractLastfmAuthToken(bootProtocolUrl || '')

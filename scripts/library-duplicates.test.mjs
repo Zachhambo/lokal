@@ -161,17 +161,34 @@ test('a database failure leaves all audio and references intact', async t => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n, 2)
 })
 
-test('outside files and symlinks are refused without changing the library', async t => {
+test('a single configured music root can merge stale external track rows without deleting outside audio', async t => {
+  const { db, dir, music, add } = fixture(t)
+  const keep = add('keep'); const remove = add('remove')
+  const outside = path.join(dir, 'outside.mp3')
+  fs.renameSync(remove, outside)
+  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(outside, 'remove')
+  db.exec("INSERT INTO playlists (id,name) VALUES ('p','Playlist'); INSERT INTO playlist_tracks (playlist_id,track_id,position) VALUES ('p','remove',0)")
+  assert.equal(db.prepare("SELECT value FROM settings WHERE key='music_folder'").get().value, music)
+  const result = await mergeDuplicates(db, 'keep', ['remove'])
+  assert.equal(result.ok, true)
+  assert.equal(result.merged, 1)
+  assert.match(result.warning, /outside your configured music folder/i)
+  assert.match(result.warning, /no additional music folder needs to be configured/i)
+  assert.ok(fs.existsSync(keep))
+  assert.ok(fs.existsSync(outside), 'audio outside configured roots must never be deleted')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n, 1)
+  assert.equal(db.prepare('SELECT track_id FROM playlist_tracks').get().track_id, 'keep')
+})
+
+test('symlinked duplicates remain rejected without touching external files or library records', async t => {
   const { db, dir, add } = fixture(t)
   add('keep'); const remove = add('remove')
   const outside = path.join(dir, 'outside.mp3')
   fs.renameSync(remove, outside)
-  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(outside, 'remove')
-  assert.match((await mergeDuplicates(db, 'keep', ['remove'])).error, /outside your music folder/)
   fs.symlinkSync(outside, remove)
-  db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run(remove, 'remove')
   assert.ok((await mergeDuplicates(db, 'keep', ['remove'])).error)
   assert.ok(fs.existsSync(outside))
+  assert.ok(fs.existsSync(remove))
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM tracks').get().n, 2)
 })
 

@@ -35,6 +35,26 @@ const pending = new Map() // path -> whether it appeared/went (vs changed)
 const catchUpRoots = new Set()
 const catchUpAttempts = new Map()
 const MAX_CATCH_UP_RETRIES = 3
+// SQLite's default busy wait is synchronous on the Electron main thread.
+// Do not add a second full-library scan or repeatedly retry a locked DB
+// while Chromium is still mounting the initial window.
+let deferUntil = 0
+let retryAfter = 0
+let busyFailures = 0
+
+function deferStartupWork(durationMs = 8000) {
+  deferUntil = Math.max(deferUntil, Date.now() + Math.max(0, durationMs))
+  if (timer) schedule()
+}
+
+function busyRetryDelay(failures) {
+  return Math.min(30000, 2000 * 2 ** Math.min(4, Math.max(0, failures - 1)))
+}
+
+function databaseBusy(error) {
+  return error?.code === 'SQLITE_BUSY' ||
+    /database is locked|database table is locked/i.test(String(error?.message || ''))
+}
 
 function broadcast(channel, payload) {
   // During application shutdown (and in headless scan tests), Electron may
@@ -53,7 +73,7 @@ function broadcast(channel, payload) {
 
 function schedule(ms = QUIET_MS) {
   clearTimeout(timer)
-  timer = setTimeout(flush, ms)
+  timer = setTimeout(flush, Math.max(ms, deferUntil - Date.now(), retryAfter - Date.now()))
 }
 
 function queue(filePath, renamed) {
@@ -100,11 +120,26 @@ async function flush() {
   }
   running = require('./ipc/scanner').applyFileChanges(ready, [...roots])
     .then(({ added, updated, removed }) => {
+      busyFailures = 0
+      retryAfter = 0
       if (!added.length && !updated.length && !removed.length) return
       console.log(`[libraryWatcher] ${added.length} added, ${updated.length} updated, ${removed.length} removed`)
       broadcast('library:changed', { added, updated, removed })
     })
-    .catch(e => console.warn('[libraryWatcher] Applying changes failed:', e.message))
+    .catch(e => {
+      if (!databaseBusy(e)) {
+        console.warn('[libraryWatcher] Applying changes failed:', e.message)
+        return
+      }
+      // The event has NOT been committed. Retain it for a bounded backoff,
+      // including rename/delete flags, instead of losing the change forever.
+      for (const change of ready) {
+        pending.set(change.path, pending.get(change.path) || change.renamed)
+      }
+      retryAfter = Date.now() + busyRetryDelay(++busyFailures)
+      console.warn('[libraryWatcher] Database busy; retrying file changes after backoff')
+      schedule()
+    })
     .finally(() => { running = null })
 }
 
@@ -230,7 +265,7 @@ function scheduleCatchUp(delay = CATCH_UP_MS) {
     }
     // An incoming watcher event may already have scheduled a newer catch-up.
     if (catchUpRoots.size && !catchUp) scheduleCatchUp(retryDelay)
-  }, delay)
+  }, Math.max(delay, deferUntil - Date.now(), retryAfter - Date.now()))
 }
 
 function discardPendingForRoot(events, target, ownerFor) {
@@ -363,7 +398,14 @@ function stopWatching() {
   for (const timeout of recovering.values()) clearTimeout(timeout)
   recovering.clear()
   pending.clear()
+  busyFailures = 0
+  retryAfter = 0
+  // Reconfiguring watchers must not accidentally cancel the boot grace
+  // period; the process retains this deadline until it naturally expires.
 }
 
-
-module.exports = { watchLibrary, watchLibraryRoots, stopWatching, scanRootForCatchUp: scan, discardPendingForRoot }
+module.exports = {
+  watchLibrary, watchLibraryRoots, stopWatching,
+  scanRootForCatchUp: scan, discardPendingForRoot,
+  deferStartupWork, busyRetryDelay, databaseBusy,
+}
