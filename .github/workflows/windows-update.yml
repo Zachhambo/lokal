@@ -139,19 +139,22 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
           TARGET_SHA: ${{ steps.version.outputs.sha }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
+          if ! gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "Release $TAG" \
               --notes "Windows update build for $TAG." \
-              --target "$TARGET_SHA"
+              --target "$TARGET_SHA" \
+              --repo "$REPOSITORY"
           fi
           gh release upload "$TAG" \
             "release/Lokal-Setup-${VERSION}.exe" \
             "release/Lokal-Setup-${VERSION}.exe.blockmap" \
             release/latest.yml \
+            --repo "$REPOSITORY" \
             --clobber
-          gh release edit "$TAG" --draft=false
+          gh release edit "$TAG" --draft=false --repo "$REPOSITORY"
