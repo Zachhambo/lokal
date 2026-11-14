@@ -2303,6 +2303,8 @@ async function applyFileChanges(changes = [], activeRoots) {
     if (isPreparedStemClipName(filePath) || isPrivatePhoneUploadPath(filePath) || downloadFiles.isHidden(filePath)) continue
     const owner = rootFor(filePath)
     if (!owner || seen.has(filePath)) continue
+    const relative = path.relative(owner, filePath)
+    if (relative.split(path.sep).slice(0, -1).some(part => part.startsWith('.'))) continue
     seen.add(filePath)
     changedRoots.add(owner)
 

@@ -29,7 +29,7 @@ async function walkDir(dir, files = [], failures = null) {
     }
     for (const entry of entries) {
       const full = path.join(current, entry.name)
-      if (entry.isDirectory()) pending.push(full)
+      if (entry.isDirectory() && !entry.name.startsWith('.')) pending.push(full)
       else if (entry.isFile() && !downloadFiles.isHidden(full) && !isPreparedStemClipName(entry.name) &&
           AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(full)
     }

@@ -83,6 +83,25 @@ test('Windows path lookup matches an existing non-ASCII path', async t => {
   const libraryPaths = require('../electron/libraryPathIdentity')
   assert.equal(libraryPaths.findByPath(db, file)?.id, row(file).id)
 })
+
+test('library scans and watcher changes ignore dot-prefixed folders', async t => {
+  const { music, reads, write, row } = fixture(t)
+  const visible = write('visible.mp3')
+  const hiddenFolder = path.join(music, '.hidden', 'nested')
+  fs.mkdirSync(hiddenFolder, { recursive: true })
+  const hidden = path.join(hiddenFolder, 'hidden.mp3')
+  fs.writeFileSync(hidden, 'synthetic audio hidden')
+
+  await scanFolder(music, { watch: false })
+  assert.ok(row(visible))
+  assert.equal(row(hidden), undefined)
+  assert.deepEqual(reads, ['visible.mp3'])
+
+  const hiddenChange = await applyFileChanges([{ path: hidden }])
+  assert.deepEqual(hiddenChange, { added: [], updated: [], removed: [] })
+  assert.equal(row(hidden), undefined)
+})
+
 test('a file Lokal wrote into itself is not read again', async t => {
   const { db, reads, write, row } = fixture(t)
   const a = write('a.mp3')
