@@ -138,7 +138,8 @@ jobs:
       - name: Create or update the GitHub release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Set this secret when repository/org policy blocks GITHUB_TOKEN from creating releases.
+          GH_TOKEN: ${{ secrets.WINDOWS_UPDATE_RELEASE_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
           TARGET_SHA: ${{ steps.version.outputs.sha }}
