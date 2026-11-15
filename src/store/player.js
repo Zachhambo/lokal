@@ -226,6 +226,7 @@ export function getOutputRoute() { return outputRoute }
 
 export const usePlayerStore = create((set, get) => ({
   queue: [], queueIndex: -1, currentTrack: null,
+  manualPlayRequest: null,
   // Songs added with Play Next that haven't started yet (Queue > Clear Play Next).
   playNextIds: [],
   playbackContext: null,
@@ -426,6 +427,9 @@ export const usePlayerStore = create((set, get) => ({
     
     set(s => ({ 
       currentTrack: playableTrack, 
+      manualPlayRequest: s.isPlaying && s.currentTrack?.id !== playableTrack.id
+        ? { from: s.currentTrack, toId: playableTrack.id }
+        : null,
       playbackGeneration: (s.playbackGeneration || 0) + 1,
       queue: q, 
       queueIndex: idx, 
@@ -450,6 +454,7 @@ export const usePlayerStore = create((set, get) => ({
     
     set(s => ({ 
       queue: sanitizedTracks, 
+      manualPlayRequest: null,
       playbackGeneration: (s.playbackGeneration || 0) + 1,
       queueIndex: safeIndex, 
       currentTrack: startTrack, 

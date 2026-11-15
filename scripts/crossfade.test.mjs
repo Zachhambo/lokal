@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import { CROSSFADE_DEFAULTS, crossfadeDurations, fadeCurve, readCrossfadeSettings } from '../src/audio/crossfade.js'
 
 const increasing = values => values.every((v, i) => i === 0 || v >= values[i - 1])
@@ -61,4 +62,14 @@ test('the old song never fades for longer than it has left', () => {
   assert.deepEqual(crossfadeDurations({ fadeIn: 1.5, fadeOut: 5 }, 10), { fadeIn: 1.5, fadeOut: 5 })
   assert.deepEqual(crossfadeDurations({ fadeIn: 1.5, fadeOut: 5 }, 3), { fadeIn: 1.5, fadeOut: 3 })
   assert.deepEqual(crossfadeDurations({ fadeIn: 0, fadeOut: 5 }, NaN), { fadeIn: 0.05, fadeOut: 5 })
+})
+
+test('manually selecting a track during Crossfade uses the two-deck handoff', () => {
+  const store = readFileSync(new URL('../src/store/player.js', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8')
+  assert.match(store, /manualPlayRequest: s\.isPlaying && s\.currentTrack\?\.id !== playableTrack\.id/)
+  assert.match(app, /player\.crossfade\?\.mode !== 'crossfade'/)
+  assert.match(app, /const request = \{ \.\.\.manualPlayRequest, from: outgoingTrack \}\s*triggerCrossfade\(player\.currentTrack, null, request\)/)
+  assert.match(app, /if \(manualRequest\) \{\s*currentTrackRef\.current = nextTrack\s*setPlaybackRetryNonce/)
+  assert.match(app, /if \(!manualRequest\) \{\s*const state = usePlayerStore\.getState\(\)/)
 })

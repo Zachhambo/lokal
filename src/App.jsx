@@ -772,6 +772,7 @@ export default function App() {
   const playPauseGainRef = useRef({ primary: null, cf: null })
   const playPauseTimerRef = useRef(null)
   const playPauseTokenRef = useRef(0)
+  const audioOutputPauseTimerRef = useRef(null)
   const crossfadeTokenRef = useRef(0)
   const crossfadeTimeoutRef = useRef(null)
   const expectedCrossfadeTrackIdRef = useRef(null)
@@ -860,6 +861,7 @@ export default function App() {
   })))
   const miniSwitching = usePlayerStore(s => s.miniSwitching)
   const castActive = usePlayerStore(s => s.castActive)
+  const manualPlayRequest = usePlayerStore(s => s.manualPlayRequest)
   // One output policy for search, albums, playlists, flows, queue skips and
   // direct plays. A saved spatial tier routes the queued addon ghost through
   // the existing native codec path, never through Chromium's PCM decoder.
@@ -1469,9 +1471,40 @@ export default function App() {
 
   useEffect(() => {
     const bridge = nativeAudioRef.current
-    if (bridge) bridge.setPlaying(isPlaying).catch(error => api.log('warn', `[audio-output] ${error.message}`))
-    else if (audioCtxRef.current) {
-      audioCtxRef.current[isPlaying ? 'resume' : 'suspend']().catch(() => {})
+    const context = audioCtxRef.current
+    if (isPlaying) {
+      if (bridge) bridge.setPlaying(true).catch(error => api.log('warn', `[audio-output] ${error.message}`))
+      else if (context) context.resume().catch(() => {})
+      return
+    }
+
+    const player = usePlayerStore.getState()
+    const activeSide = player.activeAudioElement
+    const fadeSeconds = readPlayPauseFadeSeconds(peekSettings())
+    const fadeApplies = !isCrossfadingRef.current &&
+      !isStationTrack(player.currentTrack) &&
+      !player.currentTrack?.atmosNative &&
+      !player.castActive &&
+      !!playPauseGainRef.current[activeSide]
+    const shouldWaitForFade = fadeApplies && fadeSeconds > 0 &&
+      (bridge?.playing || context?.state === 'running')
+    const stopOutput = () => {
+      if (usePlayerStore.getState().isPlaying) return
+      if (bridge) bridge.setPlaying(false).catch(error => api.log('warn', `[audio-output] ${error.message}`))
+      else if (context) context.suspend().catch(() => {})
+    }
+
+    if (shouldWaitForFade) {
+      audioOutputPauseTimerRef.current = setTimeout(() => {
+        audioOutputPauseTimerRef.current = null
+        stopOutput()
+      }, fadeSeconds * 1000 + 50)
+    } else {
+      stopOutput()
+    }
+    return () => {
+      clearTimeout(audioOutputPauseTimerRef.current)
+      audioOutputPauseTimerRef.current = null
     }
   }, [isPlaying, audioOutputReady])
 
@@ -2623,7 +2656,7 @@ export default function App() {
     return plan
   }, [])
 
-  const triggerCrossfade = useCallback((nextTrack, plan = null) => {
+  const triggerCrossfade = useCallback((nextTrack, plan = null, manualRequest = null) => {
     if (isCrossfadingRef.current) return
     if (!cfAudioRef.current || !audioRef.current || !nextTrack || !audioCtxRef.current) return
     if (!gainNodeRef.current || !cfGainNodeRef.current) return
@@ -2648,7 +2681,7 @@ export default function App() {
     // ordinary incoming source is loading. If its content/plan mismatches or
     // it misses the window, the existing two-deck AutoMix path wins.
     let preparedStemClip = null
-    const outgoingTrack = currentTrackRef.current
+    const outgoingTrack = manualRequest?.from || currentTrackRef.current
     const enableStem = !!(plan && options.stemClips && outgoingTrack &&
       !outgoingTrack.atmosNative && !nextTrack.atmosNative &&
       !outgoingTrack.atmosEncoded && !nextTrack.atmosEncoded &&
@@ -2712,7 +2745,12 @@ export default function App() {
         try { fadeInEl.removeAttribute('src'); fadeInEl.load() } catch {}
         fadeInEl.dataset.lokalTrackPending = ''
         fadeInEl.dataset.lokalTrackId = ''
+        if (manualRequest) {
+          currentTrackRef.current = nextTrack
+          setPlaybackRetryNonce(value => value + 1)
+        }
         if (outcome === 'ended') {
+          if (manualRequest) return
           // Its "ended" was ignored while the crossfade was pending: do what
           // it would have done (repeat one plays the track again).
           stopTimer()
@@ -2788,17 +2826,19 @@ export default function App() {
       prevTrackIdRef.current = currentTrackRef.current?.id || null
       currentTrackRef.current = nextTrack
 
-      const state = usePlayerStore.getState()
-      const nextIdx = state.shuffle ? state.shuffleIndex + 1 : state.queueIndex + 1
-      const nextHistory = [...(state.playHistory || []), nextTrack.id]
-      usePlayerStore.setState({
-        currentTrack: nextTrack,
-        queueIndex: !state.shuffle ? nextIdx : state.queueIndex,
-        shuffleIndex: state.shuffle ? nextIdx : state.shuffleIndex,
-        isPlaying: true,
-        playHistory: nextHistory,
-        futureHistory: [],
-      })
+      if (!manualRequest) {
+        const state = usePlayerStore.getState()
+        const nextIdx = state.shuffle ? state.shuffleIndex + 1 : state.queueIndex + 1
+        const nextHistory = [...(state.playHistory || []), nextTrack.id]
+        usePlayerStore.setState({
+          currentTrack: nextTrack,
+          queueIndex: !state.shuffle ? nextIdx : state.queueIndex,
+          shuffleIndex: state.shuffle ? nextIdx : state.shuffleIndex,
+          isPlaying: true,
+          playHistory: nextHistory,
+          futureHistory: [],
+        })
+      }
       beginLastfmPlayback(nextTrack)
 
       fadeInEl.play().catch(() => {})
@@ -2937,7 +2977,33 @@ export default function App() {
 
       crossfadeTimeoutRef.current = setTimeout(finishTransition, Math.max(fadeIn, fadeOut) * 1000)
     }
-  }, [flushTime, setActiveAudioElement, beginLastfmPlayback, cancelCrossfade, stopTimer, autoNext, openMixFilters, applyReplayGainToElement, preparedStemFor])
+  }, [flushTime, setActiveAudioElement, beginLastfmPlayback, cancelCrossfade, stopTimer, autoNext, openMixFilters, applyReplayGainToElement, preparedStemFor, setPlaybackRetryNonce])
+
+  useEffect(() => {
+    if (!manualPlayRequest) return
+    const player = usePlayerStore.getState()
+    usePlayerStore.setState({ manualPlayRequest: null })
+    const outgoingTrack = isCrossfadingRef.current
+      ? currentTrackRef.current
+      : manualPlayRequest.from
+    if (player.currentTrack?.id !== manualPlayRequest.toId ||
+        !player.isPlaying ||
+        player.crossfade?.mode !== 'crossfade' ||
+        player.castActive ||
+        isStationTrack(outgoingTrack) ||
+        isStationTrack(player.currentTrack) ||
+        outgoingTrack?.atmosNative ||
+        player.currentTrack?.atmosNative ||
+        !audioSrcFor(outgoingTrack)) return
+
+    if (isCrossfadingRef.current &&
+        expectedCrossfadeTrackIdRef.current !== player.currentTrack.id) cancelCrossfade()
+    const request = { ...manualPlayRequest, from: outgoingTrack }
+    triggerCrossfade(player.currentTrack, null, request)
+    if (isCrossfadingRef.current && expectedCrossfadeTrackIdRef.current === player.currentTrack.id) {
+      currentTrackRef.current = outgoingTrack
+    }
+  }, [manualPlayRequest, currentTrack, triggerCrossfade, cancelCrossfade])
 
   useEffect(() => {
     const mergedPlayback = mergedPlaybackRef.current
