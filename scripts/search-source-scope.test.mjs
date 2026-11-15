@@ -104,8 +104,8 @@ test('the desktop has one artist/album presentation and one responsive category 
   assert.match(store, /resultCategory: readCategory\(\)/)
   assert.match(results, /mergeSearchArtists\(localArtists/)
   assert.match(results, /mergeSearchAlbums\(localAlbums/)
-  assert.match(results, /showAlbums && \(enableOnline \|\| albums\.length > 0\)/)
-  assert.match(results, /showArtists && \(enableOnline \|\| artists\.length > 0\)/)
+  assert.match(results, /showAlbums && albums\.length > 0/)
+  assert.match(results, /showArtists && artists\.length > 0/)
   assert.match(results, /enableOnline && showSongs/)
   assert.match(page, /showOnline && showSongs && <OnlineResults/)
   assert.doesNotMatch(page, /\{showLibrary && artists\.length > 0/)
@@ -130,15 +130,14 @@ test('in-flight searches invalidate synchronously on source change', () => {
 })
 
 
-test('online categories each show a consistent heading and catalogue-specific subtitle', () => {
+test('online categories keep correct accessible labels in the current unified Search layout', () => {
   const results = readFileSync(new URL('../src/components/GlobalCatalogueResults.jsx', import.meta.url), 'utf8')
-  assert.match(results, /Online ' \+ categoryName/)
-  assert.match(results, /catalogueName = catalogue === 'spotify' \? 'Spotify' : 'Apple Music'/)
-  assert.match(results, /catalogue · plays through your configured sources/)
-  assert.match(results, /heading\('Songs', 'songs'\)/)
-  assert.match(results, /heading\('Albums', 'albums'\)/)
-  assert.match(results, /heading\('Artists', 'artists'\)/)
-  assert.doesNotMatch(results, />Global<\/h2>/)
+  assert.match(results, /aria-label="Online songs"/)
+  assert.match(results, /aria-label=\{enableOnline \? 'Online albums' : 'Albums'\}/)
+  assert.match(results, /aria-label=\{enableOnline \? 'Online artists' : 'Artists'\}/)
+  assert.match(results, /showSongs && results\.tracks\.length > 0/)
+  assert.match(results, /showAlbums && albums\.length > 0/)
+  assert.match(results, /showArtists && artists\.length > 0/)
 })
 
 test('normal Online Songs shows provider and addon results', () => {
@@ -149,9 +148,11 @@ test('normal Online Songs shows provider and addon results', () => {
 
 test('artist portrait lookup avoids album covers and only accepts matching artist identities', () => {
   const source = readFileSync(new URL('../src/components/SearchArtistPortrait.jsx', import.meta.url), 'utf8')
-  assert.match(source, /artistSearchMetadata\(name, \{ source: 'deezer' \}\)/)
-  assert.match(source, /normalize\(row\?\.title\) === key/)
-  assert.match(source, /if \(!known && \(!localPath \|\| !api\.isElectron \|\| brokenLocal\)\)/)
+  const sharedLookup = readFileSync(new URL('../src/artistPortraitLookup.js', import.meta.url), 'utf8')
+  assert.match(sharedLookup, /artistSearchMetadata\(name, \{ source: 'deezer' \}\)/)
+  assert.match(sharedLookup, /normalize\(row\?\.title\) === key/)
+  assert.match(source, /resolveSearchArtistPortrait\(name\)/)
+  assert.match(source, /preferNameLookup/)
   const results = readFileSync(new URL('../src/components/GlobalCatalogueResults.jsx', import.meta.url), 'utf8')
   assert.match(results, /<SearchArtistPortrait/)
 })
@@ -199,7 +200,7 @@ test('provider and addon search menus keep their exact source for queue, likes, 
   assert.match(source, /withTrack\(item, row => playNextMany\(\[row\]\)\)/)
   assert.match(source, /withTrack\(item, row => addToQueueMany\(\[row\]\)\)/)
   assert.match(source, /toggleResultLike\(item\)/)
-  assert.match(source, /withTrack\(item, saveToLibrary\)/)
+  assert.match(source, /lokal:open-save-source-menu/)
   assert.match(source, /trackAlbumPath\(\{ \.\.\.item, provider: anchor\.provider \}\)/)
   assert.match(source, /artistPath\(item\.artist\)/)
   assert.match(source, /openRadio\(nav, item,/)

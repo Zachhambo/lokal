@@ -19,11 +19,12 @@ import { libraryAlbumCounts, releaseOwnership, artistCacheKey, keepOnline, peekO
 import { downloadOnline, playOnline } from '../onlineActions'
 import { playNextMany } from '../trackActions'
 import { openRadio } from '../radioActions'
-import { recommendationKey } from '../recommendations'
+import { recommendationKey, timed } from '../recommendations'
 import { showToast } from './Toaster'
 import { useAppStore } from '../store/player'
 import { api } from '../api'
 import FollowArtistButton from './FollowArtistButton'
+import { peekSearchArtistPortrait, resolveSearchArtistPortrait } from '../artistPortraitLookup'
 import { useTranslation } from '../i18n'
 import { useArtistVisuals } from '../artistVisuals'
 import { ArtistTitle, ArtistMotionPortrait } from './ArtistEditorialMedia'
@@ -96,6 +97,34 @@ export function useOnlineArtist(fallbackName, enabled = true, { anchor = null, h
       if (nextSongs.tracks.length || nextAlbums.items.length) keepOnline(cacheKey, { songs: nextSongs, albums: nextAlbums })
     }
     ;(async () => {
+      // Every library and search artist page uses one catalogue metadata
+      // resolver. Global Search may supply an exact Apple artist ID; library
+      // pages supply their titles as evidence to disambiguate namesakes.
+      const exactCatalogue = ['catalogue:apple', 'catalogue:spotify'].includes(anchor?.provider)
+        && !!String(anchor.artistId || '').trim()
+      const selectedCatalogue = exactCatalogue ? anchor.provider.slice('catalogue:'.length) : ''
+      if (!String(anchor?.provider || '').startsWith('a-')) {
+        const catalogue = await timed(() => api.catalogueArtistDetails?.({
+          artist: fallbackName,
+          ...(exactCatalogue ? { catalogue: selectedCatalogue, artistId: anchor.artistId } : {}),
+          hints: hints.slice(0, 100),
+        }), 25000).catch(() => null)
+        if (!isCurrent()) return
+        if (catalogue?.albums?.length || catalogue?.tracks?.length) {
+          done({
+            loading: false, tracks: catalogue.tracks || [], error: '',
+            name: catalogue.name || fallbackName, image: catalogue.image || '',
+          }, { loading: false, items: catalogue.albums || [] })
+          return
+        }
+        // Ambiguous library identities and explicit catalogue IDs must not
+        // fall back to a name-only result from a potentially different artist.
+        if (exactCatalogue || /Cannot verify which same-named artist/.test(catalogue?.error || '')) {
+          done({ loading: false, tracks: [], error: catalogue?.error || 'This catalogue artist is unavailable.',
+            name: fallbackName }, { loading: false, items: [] })
+          return
+        }
+      }
       // A click from an add-on's Artists tab already identifies the source and
       // artist ID. Load that exact artist before any name-based lookup, which
       // could otherwise open a namesake from YouTube Music or another source.
@@ -142,7 +171,12 @@ export function useOnlineArtist(fallbackName, enabled = true, { anchor = null, h
       setSongs(nextSongs)
       const items = await loadOnlineArtistAlbums(found, result.tracks)
       done(nextSongs, { loading: false, items })
-    })()
+    })().catch(error => {
+      // Every refresh must settle even if a catalogue, addon or metadata
+      // resolver throws unexpectedly. Otherwise Refresh stays disabled.
+      done({ loading: false, tracks: [], error: error?.message || 'Could not load this artist.',
+        name: fallbackName }, { loading: false, items: [] })
+    })
     return () => { request.current++ }
   }, [fallbackName, enabled, reload, anchor?.provider, anchor?.artistId, anchor?.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -187,10 +221,10 @@ export function OnlineArtistSections({ data, path, libraryTracks = null, library
   const albumTypes = useMemo(() => releaseTypeCounts(albumItems), [albumItems])
 
   const play = (selected, list = popularTracks) => playOnline(list, { selected, name, path })
-  const albumPath = album => onlineAlbumPath({ artist: album.artist || name, album: album.title, albumId: album.albumId, provider: album.provider, sourceAlbumId: album.sourceAlbumId })
+  const albumPath = album => onlineAlbumPath({ artist: album.artist || name, album: album.title, albumId: album.albumId, provider: album.provider, sourceAlbumId: album.sourceAlbumId, catalogue: album.catalogue, catalogueId: album.catalogueId })
   const openAlbum = album => nav(albumPath(album), { state: { artwork: album.artwork_url || null } })
   const albumTracks = async album => {
-    const result = await loadOnlineAlbumCached({ artist: album.artist || name, album: album.title, albumId: album.albumId, artwork: album.artwork_url, provider: album.provider, sourceAlbumId: album.sourceAlbumId })
+    const result = await loadOnlineAlbumCached({ artist: album.artist || name, album: album.title, albumId: album.albumId, artwork: album.artwork_url, provider: album.provider, sourceAlbumId: album.sourceAlbumId, catalogue: album.catalogue, catalogueId: album.catalogueId })
     if (!result.tracks.length) showToast(result.error || `No songs were found for “${album.title}”.`)
     return result.tracks
   }
@@ -267,11 +301,27 @@ export function OnlineArtistSections({ data, path, libraryTracks = null, library
   )
 }
 
-export default function OnlineArtist({ id, name: givenName, anchor = null, catalogueIdentity = null }) {
+export default function OnlineArtist({ id, name: givenName, anchor = null, catalogueIdentity = null, portrait = '', portraitSource = '' }) {
   const { t } = useTranslation()
   const nav = useNavigate()
   const userId = useAppStore(state => state.user?.id)
-  const data = useOnlineArtist(givenName || nameFromSlug(id), true, { anchor })
+  const lookupName = givenName || nameFromSlug(id)
+  const data = useOnlineArtist(lookupName, true, { anchor })
+  const isAppleCatalogue = catalogueIdentity?.catalogue === 'apple' || anchor?.provider === 'catalogue:apple'
+  const [searchPortrait, setSearchPortrait] = useState(() => peekSearchArtistPortrait(lookupName))
+  useEffect(() => {
+    let active = true
+    const hit = peekSearchArtistPortrait(lookupName)
+    setSearchPortrait(hit)
+    // The exact same fallback resolver powers Online Search and the Artists
+    // grid. Do not replace that portrait with another provider's artwork.
+    if (isAppleCatalogue || !portrait) {
+      resolveSearchArtistPortrait(lookupName).then(image => {
+        if (active) setSearchPortrait(image)
+      })
+    }
+    return () => { active = false }
+  }, [lookupName, isAppleCatalogue, portrait])
   // Songs of theirs in the library (downloaded since this page opened, say):
   // marked "In library" here; the page itself stays as it is.
   const [libraryTracks, setLibraryTracks] = useState([])
@@ -297,7 +347,19 @@ export default function OnlineArtist({ id, name: givenName, anchor = null, catal
     setBusy(true)
     try { await downloadOnline(songs.tracks, { label: `${name}'s popular songs` }) } finally { setBusy(false) }
   }
-  const image = songs.image || songs.tracks.find(track => track.artwork_url)?.artwork_url || albums.items.find(album => album.artwork_url)?.artwork_url || ''
+  // A Search result with an explicit portrait remains authoritative.
+  // Other Apple portraits (including pre-fix saved follows) are upgraded to
+  // the same Deezer image Online Search shows, when one is available.
+  const directSearchPortrait = portraitSource === 'search' ? portrait : ''
+  const verifiedPortrait = directSearchPortrait ||
+    (isAppleCatalogue
+      ? (searchPortrait || portrait || songs.image || '')
+      : (portrait || searchPortrait || songs.image || ''))
+  // Do not use a song/album cover as a catalogue artist portrait.
+  const image = verifiedPortrait || (!catalogueIdentity
+    ? (songs.tracks.find(track => track.artwork_url)?.artwork_url ||
+       albums.items.find(album => album.artwork_url)?.artwork_url || '')
+    : '')
 
   return (
     <div className="pb-8">
@@ -309,7 +371,7 @@ export default function OnlineArtist({ id, name: givenName, anchor = null, catal
         <div className="absolute inset-0 bg-gradient-to-t from-base via-base/20" />
         <div className="absolute bottom-5 left-8 right-8 flex items-end gap-5">
           <button type="button" onClick={image ? () => setZoom(true) : undefined} disabled={!image} title={image ? t('View the picture') : undefined} className={`relative flex h-24 w-24 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-border bg-elevated ${image ? 'cursor-zoom-in' : 'cursor-default'}`}>
-            {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <Music size={36} className="text-muted" />}
+            {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-3xl text-white/80">{name?.trim()?.[0]?.toUpperCase() || <Music size={36} />}</span>}
             <ArtistMotionPortrait src={artistVisuals.motionSrc} />
           </button>
           <ImageZoom src={image} alt={name} open={zoom} onClose={() => setZoom(false)} />
@@ -323,7 +385,7 @@ export default function OnlineArtist({ id, name: givenName, anchor = null, catal
               <button onClick={() => openRadio(nav, { artist: name, type: 'artist' }, userId)} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm text-white backdrop-blur-sm transition-colors hover:border-accent/50"><Radio size={15} /> {t('Artist radio')}</button>
               <button onClick={downloadPopular} disabled={!songs.tracks.length || busy} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm text-white backdrop-blur-sm transition-colors hover:border-accent/50 disabled:opacity-40"><Download size={15} /> {busy ? t('Finding songs…') : t('Download popular songs')}</button>
               <RefreshButton onClick={data.refresh} loading={data.loading} loadedAt={data.loadedAt} className="border-white/15 bg-black/30 backdrop-blur-sm" />
-              <FollowArtistButton name={name} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm text-white" />
+              <FollowArtistButton name={name} catalogueIdentity={catalogueIdentity} imageUrl={verifiedPortrait} imageFromSearch={portraitSource === 'search' && !!portrait} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm text-white" />
             </div>
           </div>
         </div>

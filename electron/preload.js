@@ -187,6 +187,8 @@ contextBridge.exposeInMainWorld('electron', {
   downloadYT: (url, opts) => invoke('downloader:download', url, opts),
   onlineSearch: (query, provider, options) => invoke('online:search', query, provider, { automatic: options?.automatic === true }),
   globalCatalogueSearch: (query, options) => invoke('online:globalSearch', query, options),
+  catalogueArtistDetails: options => invoke('online:catalogueArtistDetails', options),
+  catalogueAlbumDetails: options => invoke('online:catalogueAlbumDetails', options),
   onlineSave: (items) => invoke('online:save', items),
   onlinePrepare: (provider, id, force, options) => invoke('online:prepare', provider, id, force, { automatic: options?.automatic === true }),
   onlineProviders: () => invoke('online:providers'),

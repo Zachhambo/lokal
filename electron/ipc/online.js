@@ -189,6 +189,8 @@ function registerOnlineHandlers(ipcMain) {
       ...options, source, rawCookie: saved.spotify_sp_dc || '',
     })
   })
+  ipcMain.handle('online:catalogueArtistDetails', (_, options) => require('../online/catalogueDetails').artistCatalogue(options).catch(error => ({ error: error.message })))
+  ipcMain.handle('online:catalogueAlbumDetails', (_, options) => require('../online/catalogueDetails').albumCatalogue(options).catch(error => ({ error: error.message, tracks: [] })))
   ipcMain.handle('online:save', (_, items) => {
     try {
       const rows = sources.saveOnlineTracks(getDB(), items)

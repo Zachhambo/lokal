@@ -22,6 +22,7 @@ import { groupReleases, releaseTypeCounts, useReleaseTypes } from '../releaseTyp
 import FollowArtistButton from '../components/FollowArtistButton'
 import { playNextMany } from '../trackActions'
 import { selectedGlobalArtist } from '../globalArtistNavigation.mjs'
+import { discoveryArtistKey, useDiscoveryArtists } from '../discoveryArtists'
 import { useArtistVisuals } from '../artistVisuals'
 import { ArtistTitle, ArtistMotionPortrait } from '../components/ArtistEditorialMedia'
 
@@ -208,9 +209,14 @@ export default function Artist() {
   useEffect(() => { setConnectedState(isConnected(`artist:${id}`)) }, [id])
   const toggleConnected = () => setConnectedState(on => { setConnected(`artist:${id}`, !on); return !on })
   const onlineHints = useMemo(() => [...(artist?.albums || []).map(album => album.title), ...(artist?.tracks || []).map(track => track.title)].filter(Boolean), [artist])
+  // Library pages must use the same exact ID as the artist followed from Search.
+  const followedIdentity = useDiscoveryArtists(s => s.identities.get(discoveryArtistKey(artist?.name)))
+  const followedAnchor = followedIdentity
+    ? { provider: `catalogue:${followedIdentity.catalogue}`, artistId: followedIdentity.artistId }
+    : null
   const [visualRefresh, setVisualRefresh] = useState(0)
   const artistVisuals = useArtistVisuals(artist?.id, artist?.name, onlineHints, visualRefresh)
-  const onlineData = useOnlineArtist(artist?.name || '', connected && !!artist?.id, { hints: onlineHints })
+  const onlineData = useOnlineArtist(artist?.name || '', connected && !!artist?.id, { hints: onlineHints, anchor: followedAnchor })
 
   // Releases in sections (Albums, EPs, Singles...), the types shown chosen per
   // artist; "More releases online" follows the same choice.
@@ -232,6 +238,8 @@ export default function Artist() {
       ? { provider: `catalogue:${catalogueArtist.catalogue}`, artistId: catalogueArtist.artistId }
       : onlineNames.current[onlineNameKey]?.anchor}
     catalogueIdentity={catalogueArtist}
+    portrait={location.state?.artistPortrait || ''}
+    portraitSource={location.state?.artistPortraitSource || ''}
   />
   if (!artist) return <div className="p-6 text-muted text-sm">{t("Loading...")}</div>
 
@@ -240,7 +248,7 @@ export default function Artist() {
   // getArtistImage in Artists.jsx for the same pattern already used there.
   const imgSrc = artist.image_path
     ? (api.isElectron ? `file://${artist.image_path}` : `/api/artist-image/${encodeURIComponent(artist.id)}`)
-    : null
+    : (connected ? (onlineData.songs.image || followedIdentity?.imageUrl || null) : null)
   const artSrc = (track) => track.artwork_path ? (api.isElectron ? `file://${track.artwork_path}` : api.artworkURL(track.id)) : null
   const releaseLayouts = releaseLayoutState.artistId === id ? releaseLayoutState.layouts : readReleaseLayouts(id)
   const releaseLayout = section => releaseLayouts[section] === 'list' ? 'list' : 'grid'

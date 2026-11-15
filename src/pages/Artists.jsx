@@ -7,11 +7,15 @@ import { usePlayerStore, useAppStore } from '../store/player'
 import { api } from '../api'
 import { peekCache, writeCache, usePageReady } from '../pageCache'
 import FadeImg from '../components/FadeImg'
+import SearchArtistPortrait from '../components/SearchArtistPortrait'
+import { peekSearchArtistPortrait } from '../artistPortraitLookup'
+import { globalArtistDestination } from '../globalArtistNavigation.mjs'
 import { PlayGlyph } from '../components/CoverPlay'
 import ArtistRefreshAllModal from '../components/ArtistRefreshAllModal'
 import ContextMenu, { useContextMenu } from '../components/ContextMenu'
 import { openRadio } from '../radioActions'
 import { showToast } from '../components/Toaster'
+import { artistPath } from '../releaseActions'
 import { discoveryArtistKey, loadDiscoveryArtists, setArtistFollowed, useDiscoveryArtists } from '../discoveryArtists'
 import { useTranslation } from '../i18n'
 
@@ -19,6 +23,7 @@ const PAGE_SIZE = 60
 const TOP_ARTISTS_LIMIT = 8
 
 function getArtistImage(artist) {
+  if (artist?.onlineFollowed) return /^https:\/\//.test(String(artist.imageUrl || '')) ? artist.imageUrl : null
   if (!artist?.image_path) return null
   return api.isElectron ? `file://${artist.image_path}` : `/api/artist-image/${encodeURIComponent(artist.id)}`
 }
@@ -77,13 +82,15 @@ function ArtistCard({ artist, onClick, onPlay, onContextMenu, rank, animateIn = 
         </div>
       )}
       <div className="relative aspect-square w-full overflow-hidden rounded-full ring-1 ring-white/10 shadow-lg shadow-black/40 transition-all duration-200 group-hover:ring-white/25">
-        {imgSrc ? (
+        {artist.onlineFollowed ? (
+          <SearchArtistPortrait name={artist.name} imageUrl={artist.imageUrl}
+            allowNameLookup preferNameLookup={artist.catalogue === 'apple'} fallback={<FallbackAvatar name={artist.name} />}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110" />
+        ) : imgSrc ? (
           <FadeImg src={imgSrc} alt={artist.name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110" />
-        ) : (
-          <FallbackAvatar name={artist.name} />
-        )}
-        {/* Same play glyph as the album covers; the rest of the card opens the artist. */}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-[:focus-visible]:opacity-100">
+        ) : <FallbackAvatar name={artist.name} />}
+        {/* Online-only follows have no indexed recordings to play here. */}
+        {!artist.onlineFollowed && <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-[:focus-visible]:opacity-100">
           <button
             type="button"
             aria-label={`Play ${artist.name}`}
@@ -93,11 +100,11 @@ function ArtistCard({ artist, onClick, onPlay, onContextMenu, rank, animateIn = 
           >
             <PlayGlyph className="h-11 w-11 drop-shadow-[0_4px_14px_rgba(0,0,0,0.6)]" />
           </button>
-        </div>
+        </div>}
       </div>
       <div className="min-w-0 w-full">
         <p className="truncate text-sm font-medium text-white">{artist.name}</p>
-        <p className="truncate text-xs text-white/55">{t(artist.track_count === 1 ? '{count} track' : '{count} tracks', { count: artist.track_count })}</p>
+        <p className="truncate text-xs text-white/55">{artist.onlineFollowed ? t('Followed online') : t(artist.track_count === 1 ? '{count} track' : '{count} tracks', { count: artist.track_count })}</p>
       </div>
     </motion.div>
   )
@@ -118,13 +125,17 @@ function ArtistRow({ artist, onClick, onPlay, onContextMenu }) {
       style={{ contentVisibility: 'auto', containIntrinsicSize: '52px' }}
     >
       <div className="relative h-10 w-10 overflow-hidden rounded-full bg-card">
-        {imgSrc ? <FadeImg src={imgSrc} className="h-full w-full object-cover" /> : <FallbackAvatar name={artist.name} />}
+        {artist.onlineFollowed
+          ? <SearchArtistPortrait name={artist.name} imageUrl={artist.imageUrl}
+              allowNameLookup preferNameLookup={artist.catalogue === 'apple'} fallback={<FallbackAvatar name={artist.name} />} />
+          : imgSrc ? <FadeImg src={imgSrc} className="h-full w-full object-cover" />
+          : <FallbackAvatar name={artist.name} />}
       </div>
       <div className="min-w-0">
         <p className="break-words text-sm font-medium leading-snug text-text" title={artist.name}>{artist.name}</p>
-        <p className="text-xs text-muted">{artist.track_count} {artist.track_count === 1 ? 'track' : 'tracks'}</p>
+        <p className="text-xs text-muted">{artist.onlineFollowed ? 'Followed online' : `${artist.track_count} ${artist.track_count === 1 ? 'track' : 'tracks'}`}</p>
       </div>
-      <button
+      {!artist.onlineFollowed && <button
         type="button"
         onClick={(event) => { event.stopPropagation(); onPlay?.() }}
         title={`Play ${artist.name}`}
@@ -132,7 +143,7 @@ function ArtistRow({ artist, onClick, onPlay, onContextMenu }) {
         className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-[rgb(var(--bg-rgb))] opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
       >
         <Play size={13} fill="currentColor" className="translate-x-px" />
-      </button>
+      </button>}
     </div>
   )
 }
@@ -164,6 +175,22 @@ export default function Artists() {
   // (count included) while it refreshes, instead of "Loading artists...".
   const cached = peekCache(listKey(sort, followedOnly, mainOnly))
   const [artists, setArtists] = useState(() => cached?.items || [])
+  const [localArtistNames, setLocalArtistNames] = useState(null)
+  useEffect(() => {
+    let active = true
+    const refresh = () => {
+      // The paged grid is only a subset of the downloaded library. Without
+      // checking all local names, other pages would appear as online ghosts.
+      api.getArtists().then(rows => {
+        if (active && Array.isArray(rows)) {
+          setLocalArtistNames(new Set(rows.map(row => discoveryArtistKey(row.name))))
+        }
+      }).catch(() => {})
+    }
+    refresh()
+    window.addEventListener('lokal:refresh', refresh)
+    return () => { active = false; window.removeEventListener('lokal:refresh', refresh) }
+  }, [])
   const [topArtists, setTopArtists] = useState(() => peekCache(`artists:top${mainOnly ? ':main-only' : ''}`) || [])
   const [total, setTotal] = useState(() => cached?.total || 0)
   const [hasMore, setHasMore] = useState(() => !!cached?.hasMore)
@@ -243,6 +270,39 @@ export default function Artists() {
   }, [query, sort, followedOnly, mainOnly])
   // Following or unfollowing someone changes the Followed list.
   const followed = useDiscoveryArtists(state => state.followed)
+  const followedIdentities = useDiscoveryArtists(state => state.identities)
+  // Scanner API pages contain only artists with downloaded tracks. Catalogue
+  // follows must also appear in the Artists collection, even with zero tracks.
+  const onlineFollowArtists = useMemo(() => {
+    if (!localArtistNames) return []
+    const localKeys = new Set([...localArtistNames, ...artists.map(artist => discoveryArtistKey(artist.name))])
+    const needle = query.trim().toLowerCase()
+    return [...followed.entries()]
+      .filter(([key, name]) => (!localKeys.has(key) || followedIdentities.has(key)) &&
+        (!needle || name.toLowerCase().includes(needle)))
+      .map(([key, name]) => {
+        const identity = followedIdentities.get(key)
+        return {
+          id: `online:${key}:${identity?.catalogue || ''}:${identity?.artistId || ''}`,
+          name, onlineFollowed: true, track_count: 0,
+          catalogue: identity?.catalogue, artistId: identity?.artistId,
+          imageUrl: identity?.imageUrl || '',
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [artists, followed, followedIdentities, localArtistNames, query])
+  const openArtist = artist => {
+    if (!artist.onlineFollowed) { navigate(`/artist/${artist.id}`); return }
+    const route = globalArtistDestination({
+      name: artist.name, catalogue: artist.catalogue,
+      catalogue_id: artist.artistId,
+      artwork_url: (artist.catalogue === 'apple' && peekSearchArtistPortrait(artist.name)) || artist.imageUrl,
+      portraitSource: 'followed',
+    })
+    if (!route) return
+    const { state, ...target } = route
+    navigate(target, { state })
+  }
   useEffect(() => { loadDiscoveryArtists().catch(() => {}) }, [])
   const followedSeen = useRef(followed)
   useEffect(() => {
@@ -326,6 +386,7 @@ export default function Artists() {
   }, [artists, density, sort])
 
   const playArtist = async (artist) => {
+    if (artist.onlineFollowed) { openArtist(artist); return }
     const data = await api.getArtist(artist.id)
     const tracks = Array.isArray(data?.tracks) && data.tracks.length ? data.tracks : (Array.isArray(data?.topTracks) ? data.topTracks : [])
     if (tracks.length) playQueue(tracks, 0)
@@ -335,9 +396,12 @@ export default function Artists() {
     const isFollowed = followed.has(discoveryArtistKey(artist.name))
     menu.open(event, [
       { label: 'Start artist radio', icon: Radio, onSelect: () => openRadio(navigate, { artist: artist.name, type: 'artist' }, user?.id) },
-      { label: 'Open artist', icon: Users, onSelect: () => navigate(`/artist/${artist.id}`) },
+      { label: 'Open artist', icon: Users, onSelect: () => openArtist(artist) },
       { separator: true },
-      { label: isFollowed ? 'Unfollow artist' : 'Follow artist', icon: isFollowed ? UserMinus : UserPlus, onSelect: () => setArtistFollowed(artist.name, !isFollowed).then(() => showToast(isFollowed ? `Unfollowed ${artist.name}` : `Following ${artist.name}`)).catch(error => showToast(error.message)) },
+      { label: isFollowed ? 'Unfollow artist' : 'Follow artist', icon: isFollowed ? UserMinus : UserPlus, onSelect: () => setArtistFollowed(artist.name, !isFollowed,
+        artist.onlineFollowed ? { catalogue: artist.catalogue, artistId: artist.artistId, imageUrl: artist.imageUrl } : null)
+        .then(() => showToast(isFollowed ? `Unfollowed ${artist.name}` : `Following ${artist.name}`))
+        .catch(error => showToast(error.message)) },
     ])
   }
 
@@ -457,6 +521,18 @@ export default function Artists() {
           </section>
         )}
 
+        {onlineFollowArtists.length > 0 && (
+          <section className="space-y-4">
+            <h2 className="text-xs font-display text-muted uppercase tracking-widest">{t('Followed online')}</h2>
+            <div className={gridClass}>
+              {onlineFollowArtists.map(item => (
+                <ArtistCard key={item.id} artist={item} animateIn={false}
+                  onClick={() => openArtist(item)}
+                  onContextMenu={openArtistMenu} />
+              ))}
+            </div>
+          </section>
+        )}
         <section className="space-y-4">
           {!query.trim() && !followedOnly && topArtists.length > 0 && density !== 'list' && (
             <h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("All Artists")}</h2>
@@ -465,7 +541,7 @@ export default function Artists() {
             <div className="flex items-center justify-center py-24">
               <Loader2 size={28} className="animate-spin text-muted" />
             </div>
-          ) : artists.length === 0 ? (
+          ) : artists.length === 0 && onlineFollowArtists.length === 0 ? (
             <div className="py-24 text-center">
               <Users size={42} className="mx-auto mb-4 text-muted/30" />
               <p className="text-sm text-muted">{emptyMessage}</p>

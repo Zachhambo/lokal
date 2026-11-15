@@ -11,9 +11,14 @@ import { isGhostTrack, streamRef } from './onlineTracks.js'
 import { playbackSources, recommendationKey, recommendationMatch, timed } from './recommendations.js'
 
 /** "/online/album?artist=...&album=..." */
-export function onlineAlbumPath({ artist, album, albumId, provider, sourceAlbumId } = {}) {
+export function onlineAlbumPath({ artist, album, albumId, provider, sourceAlbumId, catalogue, catalogueId } = {}) {
   const params = new URLSearchParams({ artist: String(artist || ''), album: String(album || '') })
   if (/^MPRE[\w-]+$/.test(String(albumId || ''))) params.set('albumId', albumId)
+  // An exact Apple collection from Global Search remains source-identified.
+  if (catalogue === 'apple' && /^\d{1,20}$/.test(String(catalogueId || ''))) {
+    params.set('catalogue', 'apple')
+    params.set('catalogueId', String(catalogueId))
+  }
   // An addon's album: from that addon ("source"), by its id when known.
   if (/^a-[0-9a-f]{10}$/.test(String(provider || ''))) {
     params.set('source', provider)
@@ -151,7 +156,20 @@ export async function libraryAlbum({ artist, album }, client = api) {
 }
 
 /** An album's songs, in order: { tracks, error } */
-export async function loadOnlineAlbum({ artist, album, albumId, artwork, provider, sourceAlbumId, anchor }, client = api, options = {}) {
+export async function loadOnlineAlbum({ artist, album, albumId, artwork, provider, sourceAlbumId, catalogue, catalogueId, anchor }, client = api, options = {}) {
+  // Library and search pages use this same catalogue resolver. A selected
+  // collection ID must never be replaced with a similarly titled namesake.
+  if (!provider && artist && album) {
+    const exactApple = catalogue === 'apple' && /^\d{1,20}$/.test(String(catalogueId || ''))
+    const result = await timed(() => client.catalogueAlbumDetails?.({
+      artist, album, ...(exactApple ? { catalogue: 'apple', catalogueId } : {}),
+    }), 15000).catch(() => null)
+    if (result?.tracks?.length) return {
+      tracks: result.tracks.map(track => ({ ...track, artwork_url: track.artwork_url || result.artwork || artwork || '' })),
+      error: '', title: result.title || album, artist: result.artist || artist, artwork: result.artwork || artwork || '',
+    }
+    if (exactApple) return { tracks: [], error: result?.error || 'This exact catalogue album is temporarily unavailable.' }
+  }
   // A player's direct add-on album link can have the exact source ID before
   // the search result has a display name. Resolve that ID first so the page
   // doesn't depend on a title-based catalogue lookup.
@@ -384,7 +402,8 @@ function saveCache() {
 const cacheKeyOf = (kind, parts) => `${kind}:${parts.map(part => recommendationKey(part) || String(part || '')).join('|')}`
 
 /** The key an online album is cached under. */
-export const albumCacheKey = ({ artist, album, albumId, provider, sourceAlbumId } = {}) => cacheKeyOf('album', [artist, album, albumId, provider, sourceAlbumId])
+export const albumCacheKey = ({ artist, album, albumId, provider, sourceAlbumId, catalogue, catalogueId } = {}) =>
+  cacheKeyOf('album', [artist, album, albumId, provider, sourceAlbumId, catalogue, catalogue === 'apple' ? catalogueId : ''])
 /** The key an online artist is cached under. */
 export const artistCacheKey = (name, anchor = null) => {
   const normalizedName = recommendationKey(name) || String(name || '')
