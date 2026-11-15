@@ -18,7 +18,14 @@ export function globalArtistDestination(artist) {
   const params = new URLSearchParams({
     catalogue: selected.catalogue, catalogueArtistId: selected.artistId, name,
   })
-  return { pathname, search: `?${params}`, state: { name, catalogueArtist: selected } }
+  const imageUrl = String(artist?.artwork_url || artist?.imageUrl || '')
+  return {
+    pathname, search: `?${params}`,
+    state: { name, catalogueArtist: selected,
+      ...(/^https:\/\//.test(imageUrl) ? { artistPortrait: imageUrl,
+        artistPortraitSource: artist?.portraitSource === 'followed' ? 'followed' : 'search' } : {}),
+    },
+  }
 }
 
 export function selectedGlobalArtist(location, routeId) {

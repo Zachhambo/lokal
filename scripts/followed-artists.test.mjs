@@ -42,6 +42,40 @@ test('follow and unfollow move an artist between the lists, in bulk too', async 
   delete globalThis.followTestApi
 })
 
+test('source-identifiable follows retain IDs and portrait across reload, namesakes and unfollow', async () => {
+  const settings = { current: { followed_artists: JSON.stringify(['Bones']), followed_artists_ready: '1' } }
+  const follows = await followModule(settings)
+  await follows.loadDiscoveryArtists()
+  assert.equal(follows.useDiscoveryArtists.getState().followed.get('bones'), 'Bones')
+  assert.equal(follows.useDiscoveryArtists.getState().identities.size, 0)
+  await follows.setArtistFollowed('Bones', true, {
+    catalogue: 'apple', artistId: '200',
+    imageUrl: 'https://is1-ssl.mzstatic.com/image/thumb/bones/600x600bb.jpg',
+  })
+  assert.deepEqual(JSON.parse(settings.current.followed_artist_identities).bones, {
+    catalogue: 'apple', artistId: '200',
+    imageUrl: 'https://is1-ssl.mzstatic.com/image/thumb/bones/600x600bb.jpg',
+  })
+  await follows.loadDiscoveryArtists()
+  assert.equal(follows.useDiscoveryArtists.getState().identities.get('bones').artistId, '200')
+  await follows.setArtistsFollowed(['Kroi'], true)
+  assert.equal(follows.useDiscoveryArtists.getState().identities.get('bones').artistId, '200')
+  await follows.setArtistFollowed('Bones', true, { catalogue: 'apple', artistId: '201' })
+  assert.equal(follows.useDiscoveryArtists.getState().identities.get('bones').artistId, '201')
+  await follows.setArtistFollowed('Bones', false)
+  assert.equal(follows.useDiscoveryArtists.getState().identities.has('bones'), false)
+  assert.deepEqual(JSON.parse(settings.current.followed_artist_identities), {})
+})
+
+test('invalid provider identities never enter saved follows', async () => {
+  const settings = { current: { followed_artists: '[]', followed_artists_ready: '1' } }
+  const follows = await followModule(settings)
+  assert.equal(follows.validFollowIdentity({ catalogue: 'apple', artistId: 'not-a-number' }), null)
+  assert.equal(follows.validFollowIdentity({ catalogue: 'spotify', artistId: '<script>' }), null)
+  assert.equal(follows.parseFollowedArtistIdentities('not json').size, 0)
+  await follows.setArtistFollowed('Bones', true, { catalogue: 'apple', artistId: 'nope' })
+  assert.equal(follows.useDiscoveryArtists.getState().identities.size, 0)
+})
 test('Spotify: every page of the library\'s artists, the way the web player asks', async () => {
   const { followedArtists } = require('../electron/artwork/spotify.js')
   const artist = name => ({ item: { __typename: 'ArtistResponseWrapper', data: { __typename: 'Artist', profile: { name } } } })

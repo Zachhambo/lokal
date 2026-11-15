@@ -1,0 +1,56 @@
+name: Catalogue detail identity
+
+on:
+  pull_request:
+    paths:
+      - 'electron/online/catalogueDetails.js'
+      - 'electron/ipc/online.js'
+      - 'electron/preload.js'
+      - 'server/routes/online.js'
+      - 'src/api.js'
+      - 'src/onlineBrowse.js'
+      - 'src/onlineLibrary.js'
+      - 'src/components/OnlineArtist.jsx'
+      - 'src/components/FollowArtistButton.jsx'
+      - 'src/components/SearchArtistPortrait.jsx'
+      - 'src/artistPortraitLookup.js'
+      - 'scripts/artist-portrait-parity.test.mjs'
+      - 'scripts/search-source-scope.test.mjs'
+      - 'src/discoveryArtists.js'
+      - 'src/globalArtistNavigation.mjs'
+      - 'src/pages/Artist.jsx'
+      - 'src/pages/Artists.jsx'
+      - 'scripts/followed-artists.test.mjs'
+      - 'scripts/global-catalogue.test.mjs'
+      - 'src/components/GlobalCatalogueResults.jsx'
+      - 'src/pages/OnlineAlbum.jsx'
+      - 'src/pages/Albums.jsx'
+      - 'scripts/catalogue-details.test.mjs'
+      - 'scripts/online-browse.test.mjs'
+      - 'package.json'
+      - '.github/workflows/catalogue-details-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - name: Verify syntax, identity selection and discography caches
+        run: |
+          node --check electron/online/catalogueDetails.js
+          node --check electron/ipc/online.js
+          node --check electron/preload.js
+          node --check server/routes/online.js
+          npm run test:catalogue-details
+          node --test scripts/followed-artists.test.mjs scripts/global-catalogue.test.mjs scripts/artist-portrait-parity.test.mjs scripts/search-source-scope.test.mjs
+      - name: Compile artist and album page changes
+        run: npx vite build

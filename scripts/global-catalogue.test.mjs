@@ -134,6 +134,16 @@ test('Global artist cards and Open artist context menu invoke the same real navi
   assert.doesNotMatch(component, /setQuery\(artist\.(?:title|name)/)
 })
 
+test('global artist search forwards its portrait without modifying the catalogue identity', () => {
+  const picked = globalArtistDestination({
+    catalogue: 'apple', catalogue_id: '200', title: 'Bones',
+    artwork_url: 'https://is1-ssl.mzstatic.com/image/thumb/bones/photo.jpg',
+  })
+  assert.equal(picked.state.artistPortrait, 'https://is1-ssl.mzstatic.com/image/thumb/bones/photo.jpg')
+  assert.deepEqual(picked.state.catalogueArtist, { catalogue: 'apple', artistId: '200', name: 'Bones' })
+  assert.equal(picked.search.includes('artistPortrait'), false)
+})
+
 test('selected Spotify/Apple artist IDs survive same-name and same-slug collisions', () => {
   const left = globalArtistDestination({ catalogue: 'spotify', catalogue_id: 'spotify-111', name: 'Same Artist' })
   const right = globalArtistDestination({ catalogue: 'spotify', catalogue_id: 'spotify-222', name: 'Same Artist' })

@@ -41,6 +41,7 @@
     "test:atmos": "node --test scripts/tidal-atmos-metadata.test.mjs scripts/atmos-output.test.mjs scripts/atmos-transfer-progress.test.mjs scripts/atmos-library-quality.test.mjs scripts/atmos-stereo-handoff.test.mjs scripts/atmos-downloads.test.mjs scripts/atmos-codec-help.test.mjs scripts/online-native-dolby.test.mjs scripts/http-addon-atmos.test.mjs",
     "test:loading-toasts": "node --test scripts/loading-toast-progress.test.mjs scripts/stream-buffer-progress.test.mjs scripts/recommendations.test.mjs scripts/recommendation-downloads.test.mjs scripts/ghost-downloads.test.mjs",
     "test:catalogue-quality": "node --test scripts/catalogue-quality.test.mjs",
+    "test:catalogue-details": "node --test scripts/catalogue-details.test.mjs scripts/online-browse.test.mjs",
     "test:mpris": "node --test scripts/mpris-config.test.mjs",
     "test:added-date": "node --test scripts/added-date.test.mjs",
     "test:download-folder": "node --test scripts/download-folder.test.mjs",

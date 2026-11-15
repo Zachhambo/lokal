@@ -146,7 +146,10 @@ export default function GlobalCatalogueResults({
   ])
   const openAlbum = (origin, album) => origin === 'library'
     ? onLocalAlbumClick?.(album)
-    : nav(onlineAlbumPath({ artist: album.artist, album: album.title }), { state: { artwork: album.artwork_url } })
+    : nav(onlineAlbumPath({
+        artist: album.artist, album: album.title,
+        catalogue: album.catalogue, catalogueId: album.catalogue_id,
+      }), { state: { artwork: album.artwork_url } })
   const openAlbumMenu = (event, origin, album) => menu.open(event, [
     { label: 'Open album', icon: ExternalLink, onSelect: () => openAlbum(origin, album) },
     (album.artist || album.album_artist) && { label: 'Go to artist', icon: User, onSelect: () => navigateGlobalArtist(album.artist || album.album_artist) },

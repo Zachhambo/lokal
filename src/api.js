@@ -439,6 +439,8 @@ export const api = {
     ? el().onlineSearch(q, provider, { automatic: options.automatic === true })
     : apiFetch(`/online/search?${new URLSearchParams({ q, provider })}`),
   globalCatalogueSearch: (q, options = {}) => isE() ? el().globalCatalogueSearch(q, options) : apiFetch(`/online/global?${new URLSearchParams({ q, ...options })}`),
+  catalogueArtistDetails: options => isE() ? el().catalogueArtistDetails(options) : apiFetch('/online/catalogue-artist-details', { method: 'POST', body: options }),
+  catalogueAlbumDetails: options => isE() ? el().catalogueAlbumDetails(options) : apiFetch('/online/catalogue-album-details', { method: 'POST', body: options }),
   onlineSave: (items) => isE() ? el().onlineSave(items) : apiFetch('/online/save', { method:'POST', body:{ items } }),
   onlinePrepare: async (provider, id, force = false, options = {}) => {
     const started = await (isE() ? el().onlinePrepare(provider, id, force, { automatic: options.automatic === true }) : apiFetch(`/online/prepare/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${force ? '?force=1' : ''}`, { method:'POST' }))

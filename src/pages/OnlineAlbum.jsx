@@ -6,7 +6,7 @@
 import { useTranslation } from '../i18n'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Clock, Disc3, Download, ListEnd, ListPlus, Play, Shuffle } from 'lucide-react'
+import { ArrowLeft, Clock, Disc3, Download, Heart, ListEnd, ListPlus, Play, Shuffle } from 'lucide-react'
 import DiscoveryImage from '../components/DiscoveryImage'
 import ImageZoom from '../components/ImageZoom'
 import OnlineSongList from '../components/OnlineSongList'
@@ -18,6 +18,7 @@ import { downloadOnline, playOnline, queueOnline, resolveOnline } from '../onlin
 import { saveAsPlaylist } from '../trackActions'
 import { artistPath } from '../releaseActions'
 import { showToast } from '../components/Toaster'
+import { loadSavedOnlineAlbums, onlineReleaseKey, setOnlineAlbumSaved, useSavedOnlineAlbums } from '../onlineLibrary'
 
 const shuffled = list => {
   const out = [...list]
@@ -39,11 +40,14 @@ export default function OnlineAlbum() {
   // An addon's album: that addon and its album id (see onlineAlbumPath).
   const provider = params.get('source') || ''
   const sourceAlbumId = params.get('sourceAlbum') || ''
+  const catalogue = params.get('catalogue') || ''
+  const catalogueId = params.get('catalogueId') || ''
+  const exactCatalogue = catalogue === 'apple' && /^\d{1,20}$/.test(catalogueId)
   const anchor = location.state?.anchor || null
   const artwork = location.state?.artwork || ''
   const highlightTitle = location.state?.highlightTitle || ''
   // Kept once loaded (see cachedOnline): coming back shows it at once.
-  const cacheKey = albumCacheKey({ artist, album, albumId, provider, sourceAlbumId })
+  const cacheKey = albumCacheKey({ artist, album, albumId, provider, sourceAlbumId, catalogue, catalogueId })
   const fromCache = () => {
     const hit = peekOnline(cacheKey)
     return hit ? { loading: false, tracks: hit.value.tracks, error: '', progress: '', artwork: hit.value.artwork || '', title: hit.value.title || '', artist: hit.value.artist || '', loadedAt: hit.at } : null
@@ -60,18 +64,18 @@ export default function OnlineAlbum() {
     setState(cached || { loading: true, tracks: [], error: '', progress: '', albumTitle: album })
     ;(async () => {
       // In the library after all (downloaded since, say): its own page.
-      const own = album ? await libraryAlbum({ artist, album }) : null
+      const own = album && !exactCatalogue ? await libraryAlbum({ artist, album }) : null
       if (!isCurrent()) return
       // Opened as an online album: show it whole there ("Full album online"),
       // not only the songs the library has.
       if (own) { nav('/albums', { replace: true, state: { album: own, connect: true } }); return }
       if (cached) return
-      const result = await loadOnlineAlbumCached({ artist, album, albumId, artwork, provider, sourceAlbumId, anchor }, undefined, {
+      const result = await loadOnlineAlbumCached({ artist, album, albumId, artwork, provider, sourceAlbumId, catalogue, catalogueId, anchor }, undefined, {
         isCurrent, onProgress: progress => { if (isCurrent()) setState(current => ({ ...current, progress })) },
       }, { refresh: reload > 0 })
       const resolvedAlbum = result.title || album
       const resolvedArtist = result.artist || artist
-      if (provider && sourceAlbumId && resolvedAlbum) {
+      if (provider && sourceAlbumId && resolvedAlbum && !exactCatalogue) {
         const resolvedOwn = await libraryAlbum({ artist: resolvedArtist, album: resolvedAlbum })
         if (!isCurrent()) return
         if (resolvedOwn) { nav('/albums', { replace: true, state: { album: resolvedOwn, connect: true } }); return }
@@ -79,7 +83,7 @@ export default function OnlineAlbum() {
       if (isCurrent()) setState({ loading: false, tracks: result.tracks, error: result.error || '', progress: '', artwork: result.artwork || '', title: result.title || '', artist: result.artist || '', loadedAt: Date.now() })
     })()
     return () => { request.current++ }
-  }, [artist, album, albumId, provider, sourceAlbumId, reload]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [artist, album, albumId, provider, sourceAlbumId, catalogue, catalogueId, reload]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The library's songs of this album (downloaded since the page opened, say):
   // marked "In library" in the list, played from the files; the page itself
@@ -89,13 +93,13 @@ export default function OnlineAlbum() {
   const libraryAlbumArtist = state.artist || artist
   useEffect(() => {
     let current = true
-    if (!libraryAlbumTitle) { setLibraryTracks([]); return () => { current = false } }
+    if (!libraryAlbumTitle || exactCatalogue) { setLibraryTracks([]); return () => { current = false } }
     const read = () => Promise.resolve(api.getAlbumTracks({ title: libraryAlbumTitle, album_artist: libraryAlbumArtist }))
       .then(found => { if (current) setLibraryTracks(Array.isArray(found) ? found : []) }).catch(() => {})
     read()
     window.addEventListener('lokal:refresh', read)
     return () => { current = false; window.removeEventListener('lokal:refresh', read) }
-  }, [libraryAlbumArtist, libraryAlbumTitle])
+  }, [libraryAlbumArtist, libraryAlbumTitle, exactCatalogue])
 
   usePageReady(true)
   const merged = useMemo(() => mergeWithLibrary(state.tracks, libraryTracks), [state.tracks, libraryTracks])
@@ -104,10 +108,12 @@ export default function OnlineAlbum() {
   // library's aren't added here: this is the album as published).
   const tracks = owned ? merged.tracks.slice(0, state.tracks.length) : state.tracks
   const cover = state.artwork || artwork || tracks.find(track => track.artwork_url)?.artwork_url || ''
-  const path = onlineAlbumPath({ artist, album, albumId, provider, sourceAlbumId })
+  const path = onlineAlbumPath({ artist, album, albumId, provider, sourceAlbumId, catalogue, catalogueId })
   const displayAlbum = state.title || album || anchor?.album || anchor?.title || t('Unknown album')
   const displayArtist = state.artist || artist
   const label = `“${displayAlbum}”`
+  const saved = useSavedOnlineAlbums(s => s.saved.has(onlineReleaseKey({ title: displayAlbum, artist: displayArtist, catalogue, catalogueId })))
+  useEffect(() => { loadSavedOnlineAlbums().catch(() => {}) }, [])
   const run = async (key, work) => {
     if (busy) return
     setBusy(key)
@@ -122,6 +128,15 @@ export default function OnlineAlbum() {
     if (!rows.length) return
     const playlist = await saveAsPlaylist(displayAlbum, rows, { description: `${displayAlbum} by ${displayArtist}`, coverURL: /^https:\/\//.test(cover) ? cover : undefined }).catch(() => null)
     showToast(playlist ? `Saved ${label} as a playlist.` : `Could not save ${label}.`)
+  })
+  const toggleSaved = () => run('save', async () => {
+    try {
+      await setOnlineAlbumSaved({
+        title: displayAlbum, artist: displayArtist, artwork_url: cover,
+        albumId, provider, sourceAlbumId, catalogue, catalogueId, track_count: tracks.length,
+      }, !saved)
+      showToast(saved ? `Removed ${label} from Albums.` : `Saved ${label} to Albums.`)
+    } catch (error) { showToast(error?.message || 'Could not save album.') }
   })
   const duration = useMemo(() => tracks.reduce((sum, track) => sum + (Number(track.duration) || 0), 0), [tracks])
   // The cover, big (click it).
@@ -147,6 +162,7 @@ export default function OnlineAlbum() {
             <button onClick={() => { const list = shuffled(tracks); play(list[0], list) }} disabled={!tracks.length} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Shuffle size={15} /> {t("Shuffle")}</button>
             <button onClick={() => run('next', () => queueOnline(tracks, { next: true }))} disabled={state.loading || !tracks.length || !!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Clock size={15} /> {t('Play next')}</button>
             <button onClick={() => run('queue', () => queueOnline(tracks))} disabled={state.loading || !tracks.length || !!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><ListEnd size={15} /> {t('Add to queue')}</button>
+            <button type="button" onClick={toggleSaved} aria-pressed={saved} disabled={!displayAlbum || !displayArtist || !!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Heart size={15} fill={saved ? 'currentColor' : 'none'} /> {busy === 'save' ? t('Saving…') : t(saved ? 'Saved to Albums' : 'Save to Albums')}</button>
             {missing.length > 0 && <button onClick={download} disabled={!!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><Download size={15} /> {busy === 'download' ? t('Finding songs…') : owned ? t('Download missing ({count})', { count: missing.length }) : t('Download album')}</button>}
             <button onClick={savePlaylist} disabled={!tracks.length || !!busy} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-white transition-colors hover:border-accent/50 disabled:opacity-40"><ListPlus size={15} /> {busy === 'playlist' ? t('Saving…') : t('Save as playlist')}</button>
             <RefreshButton onClick={() => setReload(n => n + 1)} loading={state.loading} loadedAt={state.loadedAt} />

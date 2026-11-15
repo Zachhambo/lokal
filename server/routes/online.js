@@ -61,6 +61,14 @@ router.get('/global', async (req, res) => {
   }
 })
 
+router.post('/catalogue-artist-details', async (req, res) => {
+  try { res.json(await require('../../electron/online/catalogueDetails').artistCatalogue(req.body || {})) }
+  catch (error) { res.status(502).json({ error: error.message }) }
+})
+router.post('/catalogue-album-details', async (req, res) => {
+  try { res.json(await require('../../electron/online/catalogueDetails').albumCatalogue(req.body || {})) }
+  catch (error) { res.status(502).json({ error: error.message, tracks: [] }) }
+})
 router.get('/search', async (req, res) => {
   const q = String(req.query.q || '').slice(0, 200)
   const provider = sources.providerOf(String(req.query.provider || '')) ? String(req.query.provider) : 'yt'
