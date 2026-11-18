@@ -1,0 +1,78 @@
+name: Desktop installer UI
+on:
+  pull_request:
+    paths:
+      - 'build/installer/**'
+      - 'scripts/build-setup-ui.cjs'
+      - 'scripts/setup-ui-smoke.ps1'
+      - 'scripts/generate-installer-assets.cjs'
+      - 'scripts/generate-brand-icons.cjs'
+      - 'scripts/installer-assets.test.cjs'
+      - 'scripts/installer-smoke-build.cjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/installer-ui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run gen:icons
+      - run: npm run gen:installer
+      - run: npm run test:installer
+      - name: Compile the production NSIS UI with an isolated fixture payload
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: node scripts/installer-smoke-build.cjs
+      - name: Exercise silent install, update and uninstall without touching Lokal
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath installer-test-output -Filter '*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Missing NSIS fixture installer' }
+          $installPath = Join-Path $env:RUNNER_TEMP 'LokalInstallerSmoke'
+          $first = Start-Process -FilePath $installer.FullName -ArgumentList "/S /currentuser /D=$installPath" -Wait -PassThru -WindowStyle Hidden
+          if ($first.ExitCode -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $installPath 'LokalInstallerSmoke.exe'))) { throw 'Silent install failed' }
+          $second = Start-Process -FilePath $installer.FullName -ArgumentList "/S --updated /currentuser /D=$installPath" -Wait -PassThru -WindowStyle Hidden
+          if ($second.ExitCode -ne 0) { throw 'Silent update failed' }
+          $uninstaller = Join-Path $installPath 'Uninstall LokalInstallerSmoke.exe'
+          $removed = Start-Process -FilePath $uninstaller -ArgumentList "/S _?=$installPath" -Wait -PassThru -WindowStyle Hidden
+          if ($removed.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installPath 'LokalInstallerSmoke.exe'))) { throw 'Silent uninstall failed' }
+      - name: Render all custom setup screens and exercise the UI against the real installer engine
+        shell: pwsh
+        run: ./scripts/setup-ui-smoke.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-design-assets
+          path: build/installer/generated/
+  macos-installer:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run gen:icons
+      - run: npm run gen:installer
+      - run: npm run test:installer
+      - name: Build the production DMG design with an isolated fixture payload
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: node scripts/installer-smoke-build.cjs
+      - name: Verify the generated disk image
+        run: hdiutil verify "$(find installer-test-output -maxdepth 1 -name '*.dmg' -print -quit)"

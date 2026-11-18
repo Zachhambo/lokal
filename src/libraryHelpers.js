@@ -1,11 +1,7 @@
+import { fewerRepeatsShuffle, shuffleHistory } from './fewerRepeatsShuffle.js'
 /** Shuffle without mutating the input array. */
 export function shuffledLibraryTracks(tracks) {
-  const shuffled = Array.isArray(tracks) ? [...tracks] : []
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
-  }
-  return shuffled
+  return fewerRepeatsShuffle(Array.isArray(tracks) ? tracks : [], shuffleHistory.recentIds)
 }
 
 /**

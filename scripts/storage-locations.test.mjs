@@ -128,8 +128,3 @@ test('phone-upload folder uses validated native selection and cannot be set thro
   assert.match(read('electron/ipc/scanner.js'), /phone_download_root/)
 })
 
-test('Windows installer still uses its old configuration', () => {
-  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)))
-  assert.equal(pkg.build.nsis?.allowToChangeInstallationDirectory, undefined)
-  assert.equal(pkg.build.nsis?.oneClick, undefined)
-})

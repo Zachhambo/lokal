@@ -457,12 +457,22 @@ function buildImportPreview(db, entries = []) {
 
 function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = null, options = {}) {
   const ghost = db.prepare("SELECT * FROM tracks WHERE id = ? AND file_path LIKE 'ghost://%'").get(ghostTrackId)
-  const target = db.prepare("SELECT * FROM tracks WHERE id = ? AND file_path NOT LIKE 'ghost://%'").get(targetTrackId)
-  if (!target) return { error: 'Target track not found' }
+  const target = db.prepare("SELECT * FROM tracks WHERE id = ?").get(targetTrackId)
+  if (!target || !String(target.file_path || '').trim() || ghostTrackId === targetTrackId) {
+    return { error: 'Target track not found' }
+  }
   if (!ghost) {
     // A rescan or a previous successful attempt may already have resolved it.
     const alias = db.prepare('SELECT track_id FROM track_aliases WHERE old_id = ?').get(ghostTrackId)
     return alias?.track_id === targetTrackId ? { ok: true, track: target } : { error: 'Ghost track not found' }
+  }
+  const mobileStream = options.resolveMobileStream === true &&
+    String(ghost.file_path || '').startsWith('ghost://link/') &&
+    !!require('../../electron/online/sources').streamRef(target)
+  // Only synced mobile metadata may be linked to a verified, persisted online
+  // recording. Ordinary imported ghosts must still resolve to real files.
+  if (String(target.file_path || '').startsWith('ghost://') && !mobileStream) {
+    return { error: 'Target track not found' }
   }
   if (sourceIdentity) {
     const { sourceIdentity: identityOf } = require('../../electron/online/sources')
@@ -473,8 +483,8 @@ function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = nul
   // Mass playlist downloads must never turn a wrong provider match into a
   // library file carrying the ghost's metadata. The indexed file has to agree
   // with the requested title/artist first; otherwise leave the ghost unresolved.
-  if (options.requireMetadataMatch) {
-    const durationMatches = options.allowDurationMismatch === true || !(Number(ghost.duration) > 0 && Number(target.duration) > 0) || Math.abs(Number(ghost.duration) - Number(target.duration)) <= 10
+  if (options.requireMetadataMatch || mobileStream) {
+    const durationMatches = (!mobileStream && options.allowDurationMismatch === true) || !(Number(ghost.duration) > 0 && Number(target.duration) > 0) || Math.abs(Number(ghost.duration) - Number(target.duration)) <= 10
     if (!require('../../electron/recordingIdentity').sameRecording(ghost, target, Infinity) || !durationMatches) {
       return {
         ok: false,
@@ -505,6 +515,13 @@ function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = nul
     // A streamed ghost can have been liked and played: keep that on the file.
     db.prepare('UPDATE OR IGNORE user_likes SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)
     db.prepare('UPDATE OR IGNORE play_history SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)
+    // Mobile sync identities and qualified listening events must follow the
+    // same recording, including a subsequent stream -> downloaded-file merge.
+    for (const table of ['track_aliases', 'link_track_aliases', 'listening_events']) {
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        db.prepare('UPDATE ' + table + ' SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)
+      }
+    }
     db.prepare('DELETE FROM user_likes WHERE track_id = ?').run(ghostTrackId)
     db.prepare('DELETE FROM play_history WHERE track_id = ?').run(ghostTrackId)
     db.prepare('DELETE FROM lyrics_cache WHERE track_id = ?').run(ghostTrackId)

@@ -1,3 +1,4 @@
+import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import { useTranslation } from '../i18n'
 import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
@@ -38,14 +39,7 @@ function readReleaseLayouts(artistId) {
   } catch { return {} }
 }
 
-const shuffledArtistTracks = list => {
-  const out = [...list]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[out[i], out[j]] = [out[j], out[i]]
-  }
-  return out
-}
+const shuffledArtistTracks = list => fewerRepeatsShuffle(list, shuffleHistory.recentIds)
 
 export default function Artist() {
   const { t } = useTranslation()

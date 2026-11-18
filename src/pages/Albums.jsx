@@ -1,3 +1,4 @@
+import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -29,14 +30,7 @@ import { showToast } from '../components/Toaster'
 import ContextMenu, { useContextMenu } from '../components/ContextMenu'
 import { useTranslation } from '../i18n'
 
-const shuffledList = list => {
-  const out = [...list]
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]]
-  }
-  return out
-}
+const shuffledList = list => fewerRepeatsShuffle(list, shuffleHistory.recentIds)
 
 function getAlbumArtwork(album) {
   return album?.savedOnline ? album.artwork_url : api.albumArtURL(album)

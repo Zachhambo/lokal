@@ -12,7 +12,7 @@
     "test:backup-recovery": "node --test scripts/backup-account-recovery.test.mjs scripts/backup-import-replaygain.test.mjs scripts/automatic-backups.test.mjs scripts/secret-settings.test.mjs scripts/link-discovery-account-startup.test.mjs scripts/link-lan-discovery.test.cjs",
     "dev": "npm run gen:icons && concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:web": "npm run gen:icons && concurrently \"vite\" \"node server/start.js\"",
-    "build": "npm run gen:icons && vite build && npm run native:prepare && electron-builder",
+    "build": "npm run gen:icons && npm run gen:installer && vite build && npm run native:prepare && electron-builder",
     "server": "node server/start.js",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "rebuild:electron": "electron-rebuild",
@@ -51,7 +51,9 @@
     "test:fullscreen-visualizer-settings": "node --test scripts/fullscreen-visualizer-settings.test.mjs",
     "test:fullscreen-appearance": "node --test scripts/fullscreen-appearance.test.mjs scripts/fullscreen-lyrics-layout.test.mjs",
     "gen:icons": "node scripts/generate-brand-icons.cjs",
-    "test:brand-icons": "node --test scripts/brand-icons.test.cjs"
+    "test:brand-icons": "node --test scripts/brand-icons.test.cjs",
+    "gen:installer": "node scripts/generate-installer-assets.cjs",
+    "test:installer": "node --test scripts/installer-assets.test.cjs"
   },
   "build": {
     "appId": "com.lokal.music",
@@ -184,6 +186,37 @@
       ],
       "category": "Music",
       "maintainer": "sipbuu <97703296+sipbuu@users.noreply.github.com>"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
+      "installerIcon": "public/lokal-icon.ico",
+      "uninstallerIcon": "public/lokal-icon.ico",
+      "include": "build/installer/installer.nsh"
+    },
+    "dmg": {
+      "background": "build/installer/generated/dmg.png",
+      "window": {
+        "width": 660,
+        "height": 440
+      },
+      "iconSize": 80,
+      "iconTextSize": 12,
+      "contents": [
+        {
+          "x": 175,
+          "y": 235
+        },
+        {
+          "x": 485,
+          "y": 235,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   },
   "dependencies": {

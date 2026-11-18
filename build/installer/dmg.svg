@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="440" viewBox="0 0 660 440">
+<defs><radialGradient id="ambient"><stop stop-color="#1a352c"/><stop offset="1" stop-color="#080b0c"/></radialGradient></defs>
+<path fill="#080b0c" d="M0 0h660v440H0z"/><circle cx="545" cy="200" r="345" fill="url(#ambient)"/>
+<g fill="none" stroke="#adf6d5" opacity=".07"><circle cx="545" cy="250" r="205"/><circle cx="545" cy="250" r="192"/><circle cx="545" cy="250" r="179"/><circle cx="545" cy="250" r="166"/><circle cx="545" cy="250" r="153"/></g>
+<text x="38" y="48" font-family="Helvetica, sans-serif" font-size="25" font-weight="700" letter-spacing="-1.5" fill="#f0f6f2">lokal<tspan fill="#adf6d5">.</tspan></text>
+<text x="622" y="42" text-anchor="end" font-family="monospace" font-size="9" letter-spacing="1.7" fill="#adf6d5">THE MUSIC IS YOURS</text>
+<text x="38" y="101" font-family="Helvetica, sans-serif" font-size="33" font-weight="700" letter-spacing="-1.2" fill="#f0f6f2">A new home for <tspan font-family="Georgia, serif" font-style="italic" font-weight="400" fill="#adf6d5">your music.</tspan></text>
+<text x="38" y="132" font-family="Helvetica, sans-serif" font-size="14" fill="#9aaba5">Drag Lokal into Applications to get started.</text>
+<rect x="98" y="171" width="154" height="149" rx="26" fill="#12191a" stroke="#adf6d5" stroke-opacity=".18"/>
+<rect x="408" y="171" width="154" height="149" rx="26" fill="#12191a" stroke="#adf6d5" stroke-opacity=".18"/>
+<path d="M294 233h68m-12-12 12 12-12 12" fill="none" stroke="#adf6d5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M38 368h584" stroke="#adf6d5" opacity=".15"/>
+<text x="38" y="398" font-family="monospace" font-size="9" letter-spacing="1.1" fill="#9aaba5">01 / INSTALL</text>
+<text x="622" y="398" text-anchor="end" font-family="Helvetica, sans-serif" font-size="12" fill="#9aaba5">Then open Lokal from Applications.</text>
+</svg>

@@ -1,0 +1,95 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="840" Height="570" WindowStyle="None" ResizeMode="NoResize" Background="{DynamicResource Base}" Foreground="#F0F6F2" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen">
+  <Window.Resources>
+    <SolidColorBrush x:Key="Accent" Color="#ADF6D5"/>
+    <SolidColorBrush x:Key="Muted" Color="#A5B5AF"/>
+    <SolidColorBrush x:Key="Base" Color="#080B0C"/>
+    <SolidColorBrush x:Key="Panel" Color="#101C19"/>
+    <SolidColorBrush x:Key="Card" Color="#121B18"/>
+    <SolidColorBrush x:Key="Edge" Color="#30413A"/>
+    <SolidColorBrush x:Key="Soft" Color="#24382E"/>
+    <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="#080B0C"/><Setter Property="Background" Value="{DynamicResource Accent}"/>
+      <Setter Property="FontSize" Value="14"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Padding" Value="22,13"/>
+      <Setter Property="Cursor" Value="Hand"/><Setter Property="MinHeight" Value="44"/><Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="2" CornerRadius="7" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.86"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="#FFFFFF"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.7"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.4"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+  </Window.Resources>
+  <Border BorderBrush="{DynamicResource Edge}" BorderThickness="1" CornerRadius="12" Background="{DynamicResource Base}">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Grid x:Name="DragRegion" Background="Transparent" Margin="18,0,10,0">
+        <TextBlock x:Name="WindowCaption" Text="Lokal Setup" VerticalAlignment="Center" Foreground="{DynamicResource Muted}" FontSize="12"/>
+        <Button x:Name="CloseWindow" Content="&#x2715;" HorizontalAlignment="Right" Background="Transparent" Foreground="#A5B5AF" Padding="12,0" MinHeight="32" Width="40" AutomationProperties.Name="Close setup"/>
+      </Grid>
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="270"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border Background="{DynamicResource Panel}" CornerRadius="0,0,0,12" ClipToBounds="True">
+          <Grid>
+            <Canvas Opacity="0.14" IsHitTestVisible="False">
+              <Ellipse Width="330" Height="330" Canvas.Left="-32" Canvas.Top="125" Stroke="{DynamicResource Accent}"/>
+              <Ellipse Width="300" Height="300" Canvas.Left="-17" Canvas.Top="140" Stroke="{DynamicResource Accent}"/>
+              <Ellipse Width="270" Height="270" Canvas.Left="-2" Canvas.Top="155" Stroke="{DynamicResource Accent}"/>
+              <Ellipse Width="240" Height="240" Canvas.Left="13" Canvas.Top="170" Stroke="{DynamicResource Accent}"/>
+              <Ellipse Width="210" Height="210" Canvas.Left="28" Canvas.Top="185" Stroke="{DynamicResource Accent}"/>
+            </Canvas>
+            <StackPanel Margin="30,20,30,0" VerticalAlignment="Top">
+              <TextBlock x:Name="Wordmark" Text="lokal." FontSize="36" FontWeight="Bold" Foreground="#F0F6F2"/>
+              <TextBlock x:Name="BrandLine" Text="THE MUSIC IS YOURS" FontFamily="Consolas" FontSize="10" Foreground="{DynamicResource Accent}" Margin="0,10,0,0"/>
+            </StackPanel>
+            <Grid Width="166" Height="166" VerticalAlignment="Center" Margin="0,30,0,0">
+              <Ellipse x:Name="DiscSurface" Fill="{DynamicResource Accent}"/>
+              <Ellipse x:Name="DiscHole" Width="30" Height="30" Fill="{DynamicResource Panel}"/>
+              <Border x:Name="VideoTile" Width="166" Height="124" CornerRadius="20" Background="{DynamicResource Accent}" Visibility="Collapsed"/>
+              <Path x:Name="PlayMark" Visibility="Collapsed" Data="M 0,0 L 0,42 L 34,21 Z" Fill="{DynamicResource Panel}" Width="34" Height="42" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            </Grid>
+            <StackPanel VerticalAlignment="Bottom" Margin="30,0,30,28">
+              <Border Height="1" Background="{DynamicResource Edge}" Margin="0,0,0,18"/>
+              <TextBlock x:Name="BrandFooter" Text="Your collection.&#x0a;Your sound. Your rules." Foreground="{DynamicResource Muted}" FontSize="12" LineHeight="21"/>
+            </StackPanel>
+          </Grid>
+        </Border>
+        <Grid Grid.Column="1" Margin="36,24,36,28">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <TextBlock x:Name="Step" Text="01 / MAKE YOURSELF AT HOME" Foreground="{DynamicResource Accent}" FontFamily="Consolas" FontSize="11"/>
+          <StackPanel Grid.Row="1" Margin="0,30,0,16">
+            <TextBlock x:Name="Heading" Text="A new home for" FontSize="32" FontWeight="SemiBold" LineHeight="39"/>
+            <TextBlock x:Name="AccentHeading" Text="your music." FontFamily="Georgia" FontStyle="Italic" Foreground="{DynamicResource Accent}" FontSize="34" Margin="0,2,0,0"/>
+            <TextBlock x:Name="Description" Text="Install Lokal, bring your collection, and make it yours." Foreground="{DynamicResource Muted}" FontSize="14" LineHeight="22" Margin="0,20,0,0"/>
+            <Border x:Name="FolderCard" Background="{DynamicResource Card}" BorderBrush="{DynamicResource Edge}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,24,0,0">
+              <StackPanel>
+                <TextBlock Text="INSTALL LOCATION" Foreground="{DynamicResource Accent}" FontFamily="Consolas" FontSize="10"/>
+                <TextBlock x:Name="FolderPath" Text="C:\Users\You\AppData\Local\Programs\Lokal" Foreground="#F0F6F2" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,10"/>
+                <Button x:Name="ChangeFolder" Content="Change location" HorizontalAlignment="Left" Background="{DynamicResource Soft}" Foreground="#F0F6F2" FontSize="12" Padding="12,7" MinHeight="32"/>
+              </StackPanel>
+            </Border>
+            <StackPanel x:Name="ProgressArea" Visibility="Collapsed" Margin="0,28,0,0">
+              <Border Height="5" Background="{DynamicResource Soft}" CornerRadius="2" ClipToBounds="True">
+                <Rectangle x:Name="ProgressLight" Fill="{DynamicResource Accent}" Width="130" HorizontalAlignment="Left"><Rectangle.RenderTransform><TranslateTransform X="-130"/></Rectangle.RenderTransform></Rectangle>
+              </Border>
+              <TextBlock x:Name="ProgressLabel" Text="Copying application files and setting up shortcuts…" Foreground="{DynamicResource Muted}" FontSize="12" LineHeight="20" Margin="0,16,0,0"/>
+            </StackPanel>
+          </StackPanel>
+          <Grid Grid.Row="2">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <TextBlock x:Name="Footnote" Text="For this Windows account. No restart required." Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,0,0,18"/>
+            <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Button x:Name="Secondary" Content="Cancel" Background="Transparent" Foreground="#BCC9C3" HorizontalAlignment="Left" Padding="4,12"/>
+              <Button x:Name="Primary" Grid.Column="1" Content="Install Lokal" MinWidth="156" IsDefault="True"/>
+            </Grid>
+          </Grid>
+        </Grid>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

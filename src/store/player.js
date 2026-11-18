@@ -1,3 +1,4 @@
+import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import { create } from 'zustand'
 import { packQueue, unpackQueue, QUEUE_KEYS } from '../queueStorage.js'
 import { isPlayable } from '../onlineTracks.js'
@@ -198,12 +199,7 @@ function loadUser() {
 
 
 function shuffleArray(array) {
-  const arr = [...array]
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]]
-  }
-  return arr
+  return fewerRepeatsShuffle(array, shuffleHistory.recentIds)
 }
 
 const savedQueueState = loadQueue()
@@ -492,10 +488,11 @@ export const usePlayerStore = create((set, get) => ({
         const reshuffled = shuffleArray(otherTracks)
         const current = shuffleQueue[shuffleIndex]
         const newShuffleQueue = [current, ...reshuffled]
-        const nextTrack = newShuffleQueue[0]
+        const nextIndex = newShuffleQueue.length > 1 ? 1 : 0
+        const nextTrack = newShuffleQueue[nextIndex]
         set({
           shuffleQueue: newShuffleQueue,
-          shuffleIndex: 0,
+          shuffleIndex: nextIndex,
           currentTrack: nextTrack,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
@@ -548,10 +545,11 @@ export const usePlayerStore = create((set, get) => ({
         const otherTracks = shuffleQueue.filter((_, i) => i !== shuffleIndex)
         const reshuffled = shuffleArray(otherTracks)
         const newShuffleQueue = [current, ...reshuffled]
-        const nextTrack = newShuffleQueue[0]
+        const nextIndex = newShuffleQueue.length > 1 ? 1 : 0
+        const nextTrack = newShuffleQueue[nextIndex]
         set({
           shuffleQueue: newShuffleQueue,
-          shuffleIndex: 0,
+          shuffleIndex: nextIndex,
           currentTrack: nextTrack,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
@@ -1272,7 +1270,9 @@ function saveQueueNow() {
   }
   console.error('Failed to save queue to localStorage')
 }
+shuffleHistory.currentId = usePlayerStore.getState().currentTrack?.id
 usePlayerStore.subscribe((state) => {
+  shuffleHistory.currentId = state.currentTrack?.id
   const current = QUEUE_KEYS.map(key => state[key])
   if (lastSavedQueue && current.every((value, i) => value === lastSavedQueue[i])) return
   lastSavedQueue = current

@@ -1,3 +1,4 @@
+import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -13,6 +14,8 @@ import { openShareCard, coversOf } from '../shareCard'
 import { makePlaylistContext } from '../playbackContext'
 import { downloadMissingCollectionTracks, ghostDownloadMessage } from '../ghostDownloads'
 import { isPlayable } from '../onlineTracks'
+import { isMobileLinkedTrack, resolveMobileLinkedTracks } from '../mobileLinkedTracks'
+import { playRecommendationPool } from '../recommendationPlayback'
 import { plural } from '../plural'
 import { useCachedState, usePageReady } from '../pageCache'
 import PlaylistSyncButton from '../components/PlaylistSyncButton'
@@ -96,7 +99,7 @@ export default function Playlist() {
   }, [location.pathname, location.state, nav])
 
   // Online songs are ghost tracks too, but they stream, so they play.
-  const playableTracks = useMemo(() => sortedTracks.filter(track => isPlayable(track)), [sortedTracks])
+  const playableTracks = useMemo(() => sortedTracks.filter(track => isPlayable(track) || isMobileLinkedTrack(track)), [sortedTracks])
   // Songs to resolve: entries with nothing to play (an import that found no
   // file). Streamed songs (a saved YouTube Music mix...) are ghost rows too,
   // but they play, so they aren't missing anything.
@@ -314,10 +317,27 @@ export default function Playlist() {
     ] : []),
   ])
 
+  const sourcePlayRequest = useRef(0)
+  useEffect(() => () => { sourcePlayRequest.current++ }, [])
+  const playCollection = async list => {
+    const request = ++sourcePlayRequest.current
+    const isCurrent = () => request === sourcePlayRequest.current
+    if (!list.some(isMobileLinkedTrack)) return playQueue(list, 0, playbackContext)
+    const toast = showLoadingToast('Finding songs on your desktop sources…')
+    try {
+      const started = await playRecommendationPool(list, {
+        firstPlayable: true, context: playbackContext, isCurrent,
+        resolve: (rows, options) => resolveMobileLinkedTracks(rows, api, options),
+        onProgress: message => toast.update(message),
+      })
+      toast.close(started === false ? 'No playable matches were found.' : '')
+    } catch { toast.close('Could not resolve the selected tracks.') }
+  }
+
   const shuffleTracks = () => {
     if (!playableTracks.length) return
-    const shuffled = [...playableTracks].sort(() => Math.random() - 0.5)
-    playQueue(shuffled, 0, playbackContext)
+    const shuffled = fewerRepeatsShuffle(playableTracks, shuffleHistory.recentIds)
+    playCollection(shuffled)
   }
 
   const uploadPlaylistPhoto = async () => {
@@ -414,7 +434,7 @@ export default function Playlist() {
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap py-1 [&>*]:shrink-0">
             <button
               type="button"
-              onClick={() => playQueue(playableTracks, 0, playbackContext)}
+              onClick={() => playCollection(playableTracks)}
               disabled={!playableTracks.length}
               aria-label={t("Play All")}
               title={t("Play All")}

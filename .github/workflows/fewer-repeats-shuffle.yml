@@ -1,0 +1,27 @@
+name: Fewer repeats shuffle checks
+on:
+  pull_request:
+    paths:
+      - 'src/fewerRepeatsShuffle.js'
+      - 'src/store/player.js'
+      - 'src/libraryHelpers.js'
+      - 'src/App.jsx'
+      - 'src/pages/**'
+      - 'scripts/*shuffle*.mjs'
+      - 'scripts/player-queue.test.mjs'
+      - '.github/workflows/fewer-repeats-shuffle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shuffle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --test scripts/fewer-repeats-shuffle.test.mjs scripts/player-queue.test.mjs scripts/play-next-clear.test.mjs scripts/library-folder-view.test.mjs
+      - run: npx vite build

@@ -31,6 +31,7 @@ import DiscoveryImage from './DiscoveryImage'
 import QualityImage from './QualityImage'
 import { playRecommendationPool } from '../recommendationPlayback'
 import { playbackFallbackMessage } from '../recommendations'
+import { isMobileLinkedTrack, resolveMobileLinkedTracks } from '../mobileLinkedTracks'
 import { navigateToTrackAlbum } from '../playbackContext'
 import { navigateToArtistName, trackArtistParts } from '../artistLink'
 import { keepCommaSet } from '../artistNames'
@@ -216,7 +217,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   // below for why the request key needs to be part of the state itself.
   const [flash, setFlash] = useState(null)
   const shouldAnimateRows = !reduceMotion && tracks.length <= 120
-  const anyStreamed = useMemo(() => tracks.some(t => isStreamed(t)), [tracks])
+  const anyStreamed = useMemo(() => tracks.some(t => isStreamed(t) || isMobileLinkedTrack(t)), [tracks])
   const anyLiked = useMemo(() => tracks.some(track => likedIds.has(track.id)), [tracks, likedIds])
   const actionSlots = (showPlayNext ? 1 : 0) + (anyStreamed || resolveTracks ? 1 : 0) + (showAddToQueue ? 1 : 0) + (onQuickAdd ? 1 : 0) + 4
   const layout = trackColumnLayout(listWidth, columns, { playlist: !!playlistId && !!onReorder, actionSlots, likedTrack: anyLiked, extraColumns, fullResolution: fullResolutionTags })
@@ -465,12 +466,16 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
 
   // A ghost that can't be played (no file, no stream): opens the resolve dialog.
   // Online songs are ghosts too, but they stream, so they play like any track.
-  const isGhostTrack = (track) => !track?.file_path || !isPlayable(track)
+  const isGhostTrack = (track) => !track?.file_path || (!isPlayable(track) && !isMobileLinkedTrack(track))
+  const sourceResolver = list => resolveTracks || (list.some(isMobileLinkedTrack)
+    ? (rows, options) => resolveMobileLinkedTracks(rows, api, options) : null)
   const needsResolution = track => !!resolveTracks && isGhostTrack(track)
   const runResolved = async (list, action, selectedTrack) => {
-    const toast = resolveTracks ? showLoadingToast('Finding the selected songs…') : null
+    const resolver = resolveTracks || (
+      action === playNextMany || action === addToQueueMany ? sourceResolver(list) : null)
+    const toast = resolver ? showLoadingToast('Finding the selected songs…') : null
     try {
-      const rows = resolveTracks ? await resolveTracks(list, { selectedTrack, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) }) : list
+      const rows = resolver ? await resolver(list, { selectedTrack, prepareStreams: false, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) }) : list
       if (!rows.length) { toast?.close('No playable matches were found.'); return }
       toast?.close()
       return await action(rows)
@@ -485,7 +490,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
     resolvedToastRef.current = toast
     let detail = ''
     return playRecommendationPool(list, {
-      selected, firstPlayable: !selected, context, resolve: resolveTracks, isCurrent,
+      selected, firstPlayable: !selected, context, resolve: sourceResolver(list), isCurrent,
       onProgress: message => { if (isCurrent()) toast.update(message) },
       onProviderFailure: failure => { if (isCurrent()) { detail = failure.detail || detail; toast.update(playbackFallbackMessage(failure)) } },
     }).then(started => {
@@ -526,7 +531,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
       setGhostTrack(track)
       return
     }
-    if (resolveTracks) {
+    if (resolveTracks || ((isPlayable(track) || isMobileLinkedTrack(track)) && mergedTracks.some(isMobileLinkedTrack))) {
       if (currentTrack?.id === track.id) togglePlay()
       else playResolved(mergedTracks, track)
       return
@@ -603,7 +608,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   }
 
   const playMany = (list) => {
-    if (resolveTracks) return playResolved(list)
+    if (sourceResolver(list)) return playResolved(list)
     const playable = list.filter(track => !isGhostTrack(track))
     if (!playable.length) return
     saveRecentTrack(playable[0])
@@ -613,7 +618,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   const resolveDownloadTrack = async track => {
     const toast = showLoadingToast(`Finding “${track.title}”…`)
     try {
-      const [row] = await resolveTracks([track], { prepareStreams: false, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) })
+      const [row] = await sourceResolver([track])([track], { prepareStreams: false, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) })
       toast.close(row ? '' : 'No matching source was found for this song.')
       return row
     } catch { toast.close('Could not resolve this song.'); return null }
@@ -623,7 +628,8 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
   const downloadSongs = async list => {
     const toast = showLoadingToast('Preparing downloads…')
     try {
-      const rows = resolveTracks ? await resolveTracks(list, { prepareStreams: false, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) }) : list
+      const resolver = sourceResolver(list)
+      const rows = resolver ? await resolver(list, { prepareStreams: false, onProgress: message => toast.update(message), onProviderFailure: failure => toast.update(playbackFallbackMessage(failure)) }) : list
       const result = await saveTracksToLibrary(rows, { onProgress: message => toast.update(message) })
       result.failed += list.length - rows.length
       toast.close(libraryDownloadMessage(result))
@@ -662,13 +668,13 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
        one && { label: 'Start radio', icon: Radio, onSelect: () => openRadio(navigate, one, useAppStore.getState().user?.id) },
       one && onQuickAdd && { label: 'Add to this playlist', icon: LibraryBig, onSelect: () => handleQuickAdd(one) },
       one && (!oneGhost || needsResolution(one)) && { label: liked ? 'Remove from Liked Songs' : 'Like', icon: Heart, onSelect: () => toggleLike(one, { stopPropagation() {} }) },
-       list.some(item => isStreamed(item) || needsResolution(item)) && { label: resolveTracks || !one ? `Download${one ? ' song' : count}` : 'Save to library', icon: Download, onSelect: () => downloadSongs(list) },
+       list.some(item => isStreamed(item) || needsResolution(item) || isMobileLinkedTrack(item)) && { label: resolveTracks || !one ? `Download${one ? ' song' : count}` : 'Save to library', icon: Download, onSelect: () => downloadSongs(list) },
        one && atmosDownloadRef(one) && { label: 'Download Dolby Atmos', icon: Download, onSelect: async () => {
          const response = await downloadAtmosVersion(one).catch(error => ({ error: error.message }))
          showToast(response?.error || 'Dolby Atmos download queued.')
        } },
        one?.missing && { label: missingTrackCanRedownload(one) ? 'Redownload missing file' : 'Find replacement for missing file', icon: Download, onSelect: () => setGhostTrack(one) },
-      one && !oneGhost && losslessMenuItem(one, Gem),
+      one && !oneGhost && !isMobileLinkedTrack(one) && losslessMenuItem(one, Gem),
       !one && losslessManyMenuItem(list, Gem),
       { separator: true },
       one?.album && { label: 'Go to album', icon: Disc3, onSelect: () => navigateToTrackAlbum(navigate, one) },
@@ -769,7 +775,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
 
   const handlePlayNext = (track, e) => {
     e.stopPropagation()
-    if (resolveTracks) return runResolved(rowTargets(track), playNextMany)
+    if (sourceResolver(rowTargets(track))) return runResolved(rowTargets(track), playNextMany)
     if (isGhostTrack(track)) {
       setGhostTrack(track)
       return
@@ -779,7 +785,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
 
   const handleAddToQueue = (track, e) => {
     e.stopPropagation()
-    if (resolveTracks) return runResolved(rowTargets(track), addToQueueMany)
+    if (sourceResolver(rowTargets(track))) return runResolved(rowTargets(track), addToQueueMany)
     if (isGhostTrack(track)) {
       setGhostTrack(track)
       return
@@ -1062,7 +1068,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
                     <Clock size={14} />
                   </button>
                 )}
-                {(streamed || needsResolution(track)) && <SaveToLibraryButton track={track} getTrack={needsResolution(track) ? () => resolveDownloadTrack(track) : undefined} meta={track} className="opacity-0 group-hover:opacity-100 focus:opacity-100" />}
+                {(streamed || needsResolution(track) || isMobileLinkedTrack(track)) && <SaveToLibraryButton track={track} getTrack={needsResolution(track) || isMobileLinkedTrack(track) ? () => resolveDownloadTrack(track) : undefined} meta={track} className="opacity-0 group-hover:opacity-100 focus:opacity-100" />}
                 {isMissing && <button onClick={e => { e.stopPropagation(); setGhostTrack(track) }} title={t("Redownload or find a replacement")} aria-label={t("Redownload or find a replacement")} className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-accent hover:text-white transition-all"><Download size={14} /></button>}
                 {showAddToQueue && !isGhost && (
                   <button onClick={e => handleAddToQueue(track, e)} title={t("Add to queue")} aria-label={t("Add to queue")}
@@ -1092,7 +1098,7 @@ export default function TrackList({ tracks = [], showQuality = false, onRemove =
                 )}
                 {(() => {
                   // On every row, so the columns line up; greyed out where it can't be used.
-                  const upgradable = !isGhost && canGetLossless(track)
+                  const upgradable = !isGhost && !isMobileLinkedTrack(track) && canGetLossless(track)
                   const unread = track.lossless === null || track.lossless === undefined
                   const why = upgradable ? `Get it in lossless${unread ? ' (quality not read yet)' : formatLabel(track) ? ` (now ${formatLabel(track)})` : ''}`
                     : track.missing ? 'Get it in lossless: the file is missing'

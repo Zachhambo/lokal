@@ -1,3 +1,4 @@
+import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Clapperboard, Play, Shuffle, Search, Plus, Check, MoreHorizontal, Clock, ListEnd, ListPlus, Download, Trash2, ScanSearch, X, Loader2, Gem } from 'lucide-react'
 import { api } from '../api'
@@ -146,10 +147,11 @@ export default function Videos() {
     const state = usePlayerStore.getState()
     // Opening the current video's card must not restart the song; playing a
     // selection (its own list) always makes it the queue.
-    if (pool !== visible || state.currentTrack?.id !== item.track.id) {
-      const rows = shuffled ? pool.slice().sort(() => Math.random() - 0.5) : pool
-      const tracks = rows.map(row => row.track)
-      state.playQueue(tracks, Math.max(0, tracks.findIndex(t => t.id === item.track.id)), { type: 'videos', name: 'Videos' })
+    if (shuffled || pool !== visible || state.currentTrack?.id !== item.track.id) {
+      const tracks = shuffled
+        ? fewerRepeatsShuffle(pool.map(row => row.track), shuffleHistory.recentIds)
+        : pool.map(row => row.track)
+      state.playQueue(tracks, shuffled ? 0 : Math.max(0, tracks.findIndex(t => t.id === item.track.id)), { type: 'videos', name: 'Videos' })
     } else if (!state.isPlaying) state.togglePlay()
     useMusicVideoView.getState().show()
   }

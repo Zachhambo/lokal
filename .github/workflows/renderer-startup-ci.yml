@@ -4,6 +4,13 @@ on:
   pull_request:
     paths:
       - 'src/App.jsx'
+      - 'src/audio/addonVerification.mjs'
+      - 'scripts/addon-verification-playback.test.mjs'
+      - 'src/mobileLinkedTracks.js'
+      - 'src/components/TrackList.jsx'
+      - 'src/pages/Playlist.jsx'
+      - 'server/routes/playlists.js'
+      - 'scripts/mobile-linked-playback.test.mjs'
       - 'src/components/DownloadManager.jsx'
       - 'src/main.jsx'
       - 'src/pages/Home.jsx'
@@ -47,6 +54,10 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/startup-browser" --no-package-lock --ignore-scripts playwright@1.62.1
       - name: Validate post-render stalls, bounded Home requests and route splitting
         run: node --test scripts/startup-responsiveness.test.mjs
+      - name: Verify synced mobile likes and desktop source downloads
+        run: node --experimental-sqlite --test scripts/mobile-linked-playback.test.mjs scripts/ghost-downloads.test.mjs scripts/recommendation-downloads.test.mjs
+      - name: Verify direct provider authentication and playback output stability
+        run: node --test scripts/addon-verification-playback.test.mjs
       - run: npm run gen:icons
       - name: Check the production renderer with fresh, empty and restored queues
         env:

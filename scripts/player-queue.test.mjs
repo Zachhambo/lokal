@@ -120,3 +120,26 @@ test('removing a duplicate in shuffle mode removes only that occurrence from all
   assert.equal(state.queueIndex, 0)
   assert.equal(state.currentTrack, samePlaying)
 })
+
+test('shuffle uses listening history and preserves playing song and original order', async () => {
+  const { shuffleHistory } = await import('../src/fewerRepeatsShuffle.js')
+  shuffleHistory.ids = ['recent']
+  const queue = ['current', 'recent', 'fresh'].map(id => track(id))
+  reset({ queue, queueIndex: 0, currentTrack: queue[0] })
+  store.getState().enableShuffle()
+  assert.deepEqual(store.getState().shuffleQueue.map(t => t.id), ['current', 'fresh', 'recent'])
+  store.getState().disableShuffle()
+  assert.deepEqual(store.getState().queue, queue)
+  shuffleHistory.ids = []
+})
+test('repeat all does not replay the last shuffled track at cycle boundary', () => {
+  for (const action of ['next', 'autoNext']) {
+    if (typeof store.getState()[action] !== 'function') continue
+    const queue = ['a', 'b'].map(id => track(id))
+    reset({ queue, originalQueue: queue, queueIndex: 1, currentTrack: queue[1],
+      shuffle: true, shuffleQueue: queue, shuffleIndex: 1, repeat: 'all' })
+    store.getState()[action]()
+    assert.equal(store.getState().currentTrack.id, 'a')
+    assert.equal(store.getState().shuffleIndex, 1)
+  }
+})

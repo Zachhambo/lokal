@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - 'electron/link/**'
+      - 'src/mobileLinkedTracks.js'
+      - 'src/components/TrackList.jsx'
+      - 'src/pages/Playlist.jsx'
+      - 'server/routes/playlists.js'
+      - 'scripts/mobile-linked-playback.test.mjs'
       - 'server/index.js'
       - 'scripts/link-persistence.test.mjs'
       - 'scripts/link-device-names.test.mjs'
@@ -42,6 +47,8 @@ jobs:
         run: node --test scripts/link-lan-discovery.test.cjs scripts/cast-discovery.test.mjs
       - name: Test desktop playlist synchronization
         run: npm run test:desktop-link-playlists
+      - name: Test desktop playback and downloads for synced mobile likes
+        run: node --experimental-sqlite --test scripts/mobile-linked-playback.test.mjs scripts/ghost-downloads.test.mjs scripts/recommendation-downloads.test.mjs
       - name: Test mobile history attribution and artwork guards
         run: npm run test:mobile-history-artwork
       - name: Test durable pairing and authenticated address discovery
