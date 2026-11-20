@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       version:
-        description: Application version in the draft (for example 14.3.2)
+        description: Application version in the draft (for example 16.1.1)
         required: true
         type: string
       channel:
