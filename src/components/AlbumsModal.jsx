@@ -15,7 +15,6 @@ function AlbumCard({ album, onClick }) {
   const { t } = useTranslation()
   const [imgLoaded, setImgLoaded] = useState(false)
   const artSrc = api.albumArtURL(album)
-    : null
 
   return (
     <motion.button

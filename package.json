@@ -53,7 +53,8 @@
     "gen:icons": "node scripts/generate-brand-icons.cjs",
     "test:brand-icons": "node --test scripts/brand-icons.test.cjs",
     "gen:installer": "node scripts/generate-installer-assets.cjs",
-    "test:installer": "node --test scripts/installer-assets.test.cjs"
+    "test:installer": "node --test scripts/installer-assets.test.cjs",
+    "test:jsx-bindings": "node --test scripts/jsx-bindings.test.mjs"
   },
   "build": {
     "appId": "com.lokal.music",
@@ -252,6 +253,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
+    "@babel/parser": "^7.29.9",
+    "@babel/traverse": "^7.29.10",
     "@electron/rebuild": "^4.2.0",
     "@rolldown/plugin-babel": "^0.2.4",
     "@tailwindcss/postcss": "^4.3.3",

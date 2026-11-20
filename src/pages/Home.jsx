@@ -111,6 +111,34 @@ function DiscoveryTrack({ track, onPlay, onRadio, onContextMenu, getDownloadTrac
   )
 }
 
+function MixCard({ mix, onClick, onOpen, onSave, saving, onContextMenu }) {
+  const { t } = useTranslation()
+  const title = mixTitle(mix)
+  const firstTrack = mix.tracks[0]
+  const artwork = firstTrack ? trackArtURL(firstTrack) || secureImage(firstTrack.artwork_url) : ''
+  return (
+    <div onContextMenu={onContextMenu} className="group min-w-0 overflow-hidden rounded-xl border border-border bg-elevated">
+      <div className="relative aspect-square overflow-hidden bg-card">
+        <button type="button" onClick={onClick} aria-label={t('Play {name}', { name: title })} className="absolute inset-0 h-full w-full">
+          {artwork ? <DiscoveryImage item={firstTrack} src={artwork} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+            : <div className="flex h-full items-center justify-center"><Disc3 size={38} className="text-muted" /></div>}
+          <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <Play size={22} fill="currentColor" />
+          </span>
+        </button>
+        <button type="button" onClick={onSave} disabled={saving} aria-label={t('Save {name} as a playlist', { name: title })}
+          className="absolute right-2 top-2 rounded-full bg-black/65 p-2 text-white opacity-0 transition-opacity hover:text-accent focus:opacity-100 group-hover:opacity-100 disabled:opacity-50">
+          <ListPlus size={15} />
+        </button>
+      </div>
+      <button type="button" onClick={onOpen} className="block w-full min-w-0 p-3 text-left">
+        <p className="truncate text-sm font-medium text-white">{title}</p>
+        <p className="mt-0.5 text-xs text-muted">{plural(mix.tracks.length, 'track')}</p>
+      </button>
+    </div>
+  )
+}
+
 function ArtistRecommendation({ artist, onClick, onContextMenu }) {
   const { t } = useTranslation()
   const image = secureImage(artist?.image)
@@ -813,7 +841,7 @@ function HomeContent({ user }) {
         ))}
       </div>
     </section>}
-    {mixes.length > 0 && <section><div className="flex items-center gap-2 mb-4"><Radio size={14} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Your Mixes")}</h2></div><div className="grid grid-cols-2 @md:grid-cols-3 gap-3">{mixes.slice(0, 6).map(mix => <MixCard key={mix.id} mix={mix} onClick={() => playQueue(mix.tracks, 0, localMixContext(mix))} onOpen={() => navigate(`/home/home/mix-${encodeURIComponent(mix.id)}`)} onSave={() => saveMix(mix)} saving={saving === `mix:${mix.id}`} onContextMenu={event => openMixMenu(event, mix)} />)}</div></section>}
+    {mixes.length > 0 && <section hidden><div className="flex items-center gap-2 mb-4"><Radio size={14} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Your Mixes")}</h2></div><div className="grid grid-cols-2 @md:grid-cols-3 gap-3">{mixes.slice(0, 6).map(mix => <MixCard key={mix.id} mix={mix} onClick={() => playQueue(mix.tracks, 0, localMixContext(mix))} onOpen={() => navigate(`/home/home/mix-${encodeURIComponent(mix.id)}`)} onSave={() => saveMix(mix)} saving={saving === `mix:${mix.id}`} onContextMenu={event => openMixMenu(event, mix)} />)}</div></section>}
     {suggestions.length > 0 && <section><div className="flex items-center gap-2 mb-4"><Sparkles size={14} className="text-accent" /><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Suggested for You")}</h2><button onClick={() => saveList('suggestions', `Suggested for You - ${today()}`, suggestions, 'Suggested for you on Home')} disabled={!!saving} className="ml-auto inline-flex items-center gap-1 text-xs text-accent disabled:opacity-50"><ListPlus size={13} />{t("Save as playlist")}</button></div><TrackList tracks={suggestions.slice(0, 8)} reduceMotion /></section>}
     {recentTracks.length > 0 && <section><div className="flex items-center justify-between mb-4"><h2 className="text-xs font-display text-muted uppercase tracking-widest">{t("Recently Added")}</h2><button onClick={() => playQueue(recentTracks, 0)} className="text-xs text-accent hover:text-accent/70">{t("Play All")}</button></div><TrackList tracks={recentTracks} reduceMotion /></section>}
     {loaded && !recentTracks.length && !suggestions.length && !homeFolders.length && !mixes.length && <p className="py-10 text-center text-sm text-muted">{t("No local tracks yet. Pick your music folder in Library.")}</p>}

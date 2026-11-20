@@ -23,6 +23,8 @@ on:
       - 'src/mergedTracks.js'
       - 'src/store/player.js'
       - 'src/queueStorage.js'
+      - 'src/**/*.jsx'
+      - 'scripts/jsx-bindings.test.mjs'
       - 'vite.config.mjs'
       - 'package.json'
       - 'package-lock.json'
@@ -54,6 +56,8 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/startup-browser" --no-package-lock --ignore-scripts playwright@1.62.1
       - name: Validate post-render stalls, bounded Home requests and route splitting
         run: node --test scripts/startup-responsiveness.test.mjs
+      - name: Check renderer JSX component bindings
+        run: npm run test:jsx-bindings
       - name: Verify synced mobile likes and desktop source downloads
         run: node --experimental-sqlite --test scripts/mobile-linked-playback.test.mjs scripts/ghost-downloads.test.mjs scripts/recommendation-downloads.test.mjs
       - name: Verify direct provider authentication and playback output stability
