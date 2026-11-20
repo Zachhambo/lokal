@@ -8,6 +8,7 @@
 //   colorBack / colorFront   #rrggbb ('accent': the accent colour)
 //   opacity          0-1
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useRef } from 'react'
 import { getAnalyser, pickColor, sliceLevel, spectrumSlices, useAnalyserVersion } from './audio'
 
@@ -63,10 +64,8 @@ export default function Waves({ isPlaying, width = 480, height = 50, strength = 
     const slices = analyser ? spectrumSlices(analyser, count * 2, { topHz: 12000 }) : []
     const levels = [new Float32Array(count), new Float32Array(count)]
 
-    let frame = null
     let last = 0
-    const draw = (now = performance.now()) => {
-      frame = requestAnimationFrame(draw)
+    return animateWhileVisible(now => {
       if (now - last < FRAME_MS - 1) return
       last = now
       const live = analyser && isPlaying
@@ -101,10 +100,8 @@ export default function Waves({ isPlaying, width = 480, height = 50, strength = 
       ctx.globalAlpha = 1
       ctx.shadowBlur = 0
       // Paused (or no audio yet): once the waves have settled, stop drawing.
-      if (!moving && !live) { cancelAnimationFrame(frame); frame = null }
-    }
-    draw()
-    return () => { if (frame) cancelAnimationFrame(frame) }
+      if (!moving && !live) return false
+    })
   }, [isPlaying, width, height, canvasHeight, strength, colorBack, colorFront, analyserVersion])
 
   return (

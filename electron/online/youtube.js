@@ -838,7 +838,7 @@ async function fetchAccountPlaylist(playlistId, cookies, fetchImpl = fetch) {
     const root = /^RD/.test(id)
       ? await accountRequest('next', { playlistId: id, enablePersistentPlaylistPanel: true, isAudioOnly: true, tunerSettingValue: 'AUTOMIX_SETTING_NORMAL' }, cookies, fetchImpl, config)
       : await accountBrowse(`VL${id}`, cookies, fetchImpl, config)
-    return { id, tracks: parseAccountTracks(root, 500) }
+    return { ...parseMusicPlaylistMetadata(root, id), tracks: parseAccountTracks(root, 500) }
   } catch (error) {
     return { error: error.message }
   }

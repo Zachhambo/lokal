@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, FolderOpen, AudioWaveform, Mic2, PanelRight, Maximize2, ListMusic, Plus, Moon, X, Radio, Gem, Cast, Clock, ListEnd, Disc3, Edit2, Camera, Download, SlidersHorizontal } from 'lucide-react'
-import { usePlayerStore, useAppStore } from '../store/player'
+import { usePlayerStore, useAppStore, volumeLimit } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { useNavigate } from 'react-router-dom'
 import { api, peekSettings } from '../api'
@@ -108,7 +108,8 @@ export default function PlayerBar() {
   const [showEqualizer, setShowEqualizer] = useState(false)
   const [editingTrack, setEditingTrack] = useState(null)
   const [keepCommaArtists, setKeepCommaArtists] = useState([])
-  const volumeWheelRef = useVolumeWheel(volume, setVolume)
+  const maxVolume = usePlayerStore(volumeLimit)
+  const volumeWheelRef = useVolumeWheel(Math.min(volume, maxVolume), setVolume, maxVolume)
   const scrubbing = useRef(false)
   const [localProg, setLocalProg] = useState(null)
   const [showSleepTimer, setShowSleepTimer] = useState(false)
@@ -545,7 +546,7 @@ export default function PlayerBar() {
             <button onClick={() => setVolume(volume > 0 ? 0 : 0.8)} className="text-text/90 hover:text-accent transition-[color,transform] hover:scale-110 focus-visible:text-accent">
               {volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
             </button>
-            <input ref={volumeWheelRef} type="range" min={0} max={1} step={0.01} value={volume}
+            <input ref={volumeWheelRef} aria-label={t('Volume')} aria-valuetext={`${Math.round(Math.min(volume, maxVolume) * 100)}%`} type="range" min={0} max={maxVolume} step={0.01} value={Math.min(volume, maxVolume)}
               onChange={e => setVolume(parseFloat(e.target.value))}
               className="w-18 accent-accent cursor-pointer h-1" style={{ width: 72 }} />
           </div>

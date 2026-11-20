@@ -354,15 +354,41 @@ function trimCache(dir, keep) {
 
 const inFlight = new Map()
 
+function clipPath(found, cacheDir, highResolution = false) {
+  if (!cacheDir || !found || typeof found.url !== 'string' || !/^https:\/\//i.test(found.url)) return null
+  const cacheKey = `${found.url}|${highResolution ? 'high' : 'default'}`
+  return path.join(cacheDir, crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 20) + '.mp4')
+}
+
+/**
+ * Return only an already completed file. Neither metadata TTLs nor absent
+ * network access can make a downloaded Canvas/motion cover unplayable.
+ * A changed resolution preference can use the previously saved rendition.
+ */
+function localClip(found, { cacheDir, highResolution = false, allowFallback = false } = {}) {
+  for (const resolution of allowFallback ? [highResolution, !highResolution] : [highResolution]) {
+    const file = clipPath(found, cacheDir, resolution)
+    if (!file) continue
+    try {
+      const stat = fs.statSync(file)
+      if (!stat.isFile() || stat.size < 1024) continue
+      const now = new Date()
+      try { fs.utimesSync(file, now, now) } catch {}
+      return file
+    } catch {}
+  }
+  return null
+}
+
 /** The clip as an MP4 file in the cache (fetched/remuxed once). */
 async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false }) {
   fs.mkdirSync(cacheDir, { recursive: true })
-  const cacheKey = `${found.url}|${highResolution ? 'high' : 'default'}`
-  const dest = path.join(cacheDir, crypto.createHash('sha1').update(cacheKey).digest('hex').slice(0, 20) + '.mp4')
-  if (fs.existsSync(dest)) {
-    try { const now = new Date(); fs.utimesSync(dest, now, now) } catch {}
-    return dest
-  }
+  const dest = clipPath(found, cacheDir, highResolution)
+  if (!dest) return null
+  const existing = localClip(found, { cacheDir, highResolution })
+  if (existing) return existing
+  // Discard an interrupted/invalid old file before atomically replacing it.
+  try { if (fs.existsSync(dest)) fs.unlinkSync(dest) } catch {}
   if (inFlight.has(dest)) return inFlight.get(dest)
   const job = (async () => {
     const temp = `${dest}.part.mp4`
@@ -374,7 +400,7 @@ async function cachedClip(found, { cacheDir, ffmpeg, highResolution = false }) {
         await download(found.url, temp)
       }
       fs.renameSync(temp, dest)
-      trimCache(cacheDir, dest)
+      try { trimCache(cacheDir, dest) } catch {}
       return dest
     } catch {
       try { fs.unlinkSync(temp) } catch {}
@@ -401,10 +427,7 @@ function enabledSources(settings) {
   const chosen = Array.isArray(list) ? list : DEFAULT_SOURCES
   // Always in the same order, whatever order they were switched on in --
   // except that Spotify can be asked first ("Prioritize Spotify Canvas").
-  // Spotify needs Electron (a hidden browser window mints its token), so a
-  // standalone web server skips it and keeps the other sources.
-  const spotifyOk = !!settings.spotify_sp_dc && !!process.versions.electron
-  const order = SOURCES.filter(s => chosen.includes(s) && (s !== 'spotify' || spotifyOk))
+  const order = SOURCES.filter(s => chosen.includes(s))
   if (settings.spotify_canvas_first === '1' && order.includes('spotify')) return ['spotify', ...order.filter(s => s !== 'spotify')]
   return order
 }
@@ -418,38 +441,100 @@ function enabledSources(settings) {
 // match when one is given, never found anything for these tracks.
 const NO_ALBUM = /^\s*(?:unknown album|unknown|untitled)?\s*$/i
 
-async function motionCoverFor(db, track, { settings = {}, cacheDir, ffmpeg } = {}) {
-  if (!track?.title || !track?.artist) return null
+/**
+ * Search all known lookup generations for this exact recording. The lookup
+ * keys used to include provider order and the lookup expiry, but the MP4 name
+ * is derived from the provider URL. Only offer complete clips from currently
+ * enabled sources; never refresh Spotify credentials or call a provider here.
+ */
+function cachedCoverFor(db, track, sources, { cacheDir, highResolution, currentKey }) {
+  const prefix = keyFor(track) + '|'
+  const rows = db.prepare('SELECT key, data, fetched_at FROM motion_covers WHERE key LIKE ?').all(prefix + '%')
+  const indexed = []
+  for (const row of rows) {
+    if (typeof row.key !== 'string' || !row.key.startsWith(prefix) || !row.data) continue
+    let found
+    try { found = JSON.parse(row.data) } catch { continue }
+    if (!found || !sources.includes(found.source)) continue
+    indexed.push({ row, found })
+  }
+  indexed.sort((a, b) =>
+    sources.indexOf(a.found.source) - sources.indexOf(b.found.source)
+    || Number(b.row.key === currentKey) - Number(a.row.key === currentKey)
+    || (Number(b.row.fetched_at) || 0) - (Number(a.row.fetched_at) || 0))
+  for (const { found } of indexed) {
+    const file = localClip(found, { cacheDir, highResolution, allowFallback: true })
+    if (file) return { file, source: found.source, tall: !!found.tall }
+  }
+  return null
+}
+
+const sourceLookups = new Map()
+
+async function motionCoverFor(db, track, { settings = {}, cacheDir, ffmpeg, offline = false } = {}) {
+  if (!track?.title || !track?.artist || settings.motion_covers === '0') return null
   if (NO_ALBUM.test(track.album || '')) track = { ...track, album: '' }
-  if (settings.motion_covers === '0') return null
   const sources = enabledSources(settings)
   if (!sources.length) return null
   ensureTable(db)
-  // "|s3": Spotify lookups from before the canvas-query switch are ignored.
-  // "|v2": lookups from before the provider-call fix above are ignored (they
-  // were cached as "no moving cover" for days).
-  // "|v3": lookups made before "Unknown Album" was ignored are looked up again.
-  const key = keyFor(track) + `|${sources.join(',')}|v3` + (sources.includes('spotify') ? '|s3' : '')
-  const row = db.prepare('SELECT data, fetched_at FROM motion_covers WHERE key = ?').get(key)
-  let found
-  if (row) {
-    const data = row.data ? JSON.parse(row.data) : null
-    const fresh = Date.now() - row.fetched_at < (data ? HIT_TTL : MISS_TTL)
-    if (fresh) found = data
-  }
-  if (found === undefined) {
-    found = null
-    let unsure = false // a source failed on its end: don't remember this as "none"
-    for (const id of sources) {
-      try { found = await PROVIDERS[id](track, settings) } catch (e) { found = null; if (e?.transient) unsure = true }
-      if (found) break
-    }
-    if (found || !unsure) db.prepare('INSERT OR REPLACE INTO motion_covers (key, data, fetched_at) VALUES (?, ?, ?)').run(key, found ? JSON.stringify(found) : null, Date.now())
-  }
-  if (!found) return null
+  const prefix = keyFor(track) + '|'
+  const read = db.prepare('SELECT data, fetched_at FROM motion_covers WHERE key = ?')
+  const write = db.prepare('INSERT OR REPLACE INTO motion_covers (key, data, fetched_at) VALUES (?, ?, ?)')
   const highResolution = settings.high_resolution_motion_covers === '1'
-  const file = await cachedClip(found, { cacheDir, ffmpeg, highResolution })
-  return file ? { file, source: found.source, tall: !!found.tall } : null
+  const result = (found, file) => ({ file, source: found.source, tall: !!found.tall })
+  const sourceKey = source => prefix + 'source-v1|' + source
+
+  async function resolveSource(source) {
+    const key = sourceKey(source)
+    const row = read.get(key)
+    const found = row?.data ? JSON.parse(row.data) : null
+    const jobKey = JSON.stringify([cacheDir, key, highResolution])
+    if (sourceLookups.has(jobKey)) return sourceLookups.get(jobKey)
+    const job = (async () => {
+      const fresh = row && Date.now() - row.fetched_at < (found ? HIT_TTL : MISS_TTL)
+      if (fresh && !found) return null
+      if (fresh) {
+        const file = await cachedClip(found, { cacheDir, ffmpeg, highResolution })
+        if (file) return result(found, file)
+      }
+      const match = await PROVIDERS[source](track, settings)
+      if (!match) {
+        if (!found) write.run(key, null, Date.now())
+      } else if (!fresh || match.url !== found.url) {
+        const file = await cachedClip(match, { cacheDir, ffmpeg, highResolution })
+        if (file) {
+          write.run(key, JSON.stringify(match), Date.now())
+          return result(match, file)
+        }
+      }
+      return null
+    })().finally(() => sourceLookups.delete(jobKey))
+    sourceLookups.set(jobKey, job)
+    return job
+  }
+
+  async function resolveGroup(group) {
+    if (!group.length) return null
+    const saved = cachedCoverFor(db, track, group, {
+      cacheDir, highResolution, currentKey: sourceKey(group[0]),
+    })
+    if (saved || offline) return saved
+    for (const source of group) {
+      // A saved Canvas still plays without a Spotify session. Only new
+      // Spotify lookups need Electron and a valid cookie.
+      if (offline || (source === 'spotify' && (!settings.spotify_sp_dc || !process.versions.electron))) continue
+      const clip = await resolveSource(source).catch(() => null)
+      if (clip) return clip
+    }
+    return null
+  }
+
+  // Save the alternate type in parallel so changing priority can use it
+  // offline, even if it has never been the selected cover.
+  const cover = resolveGroup(sources.filter(source => source !== 'spotify')).catch(() => null)
+  const canvas = resolveGroup(sources.filter(source => source === 'spotify')).catch(() => null)
+  const [preferred, alternate] = sources[0] === 'spotify' ? [canvas, cover] : [cover, canvas]
+  return (await preferred) || await alternate
 }
 
 module.exports = { motionCoverFor, fromApple, fromTidal, fromCommunity, fromM8tec, artistsMatch, cleanTitle, norm, chooseVariant, SOURCES, DEFAULT_SOURCES, cachedClip }

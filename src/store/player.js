@@ -202,6 +202,16 @@ function shuffleArray(array) {
   return fewerRepeatsShuffle(array, shuffleHistory.recentIds)
 }
 
+const volumeBoostKey = 'lokal-volume-booster'
+const volumeBoostEnabled = localStorage.getItem(volumeBoostKey) === '1'
+const localVolumeLimit = enabled => enabled ? 2 : 1
+export const volumeLimit = state => state.castActive || state.currentTrack?.atmosNative ? 1 : localVolumeLimit(state.volumeBoostEnabled)
+const clampVolume = (value, limit) => Math.max(0, Math.min(limit, Number(value) || 0))
+export function readLocalVolume(enabled, fallback = 0.8) {
+  const value = localStorage.getItem('lokal-volume')
+  return clampVolume(value == null ? fallback : value, localVolumeLimit(enabled))
+}
+
 const savedQueueState = loadQueue()
 
 // A track's details changed (edited, new artwork...): let anything that
@@ -229,7 +239,8 @@ export const usePlayerStore = create((set, get) => ({
   isPlaying: false, isBuffering: false, progress: 0, duration: 0,
   // Request-scoped startup progress; survives provider fallback within one queue entry.
   streamLoading: null,
-  volume: parseFloat(localStorage.getItem('lokal-volume') || '0.8'),
+  volumeBoostEnabled,
+  volume: readLocalVolume(volumeBoostEnabled),
   shuffle: false, repeat: 'none',
   showLyrics: false, showLyricsFullscreen: false,
   showRightSidebar: false, showFullscreen: false, showFullscreenVisualizer: false, showMiniVisualizer: false, showQueue: false, showLyricsPanel: false,
@@ -967,9 +978,19 @@ export const usePlayerStore = create((set, get) => ({
   setDuration: (v) => set({ duration: v }),
   // While casting the slider is the TV's volume, and this computer's own is
   // left as it was (put back when casting ends).
-  setVolume: (v) => {
-    if (outputRoute) { outputRoute.setVolume(v); set({ volume: v }); return }
-    localStorage.setItem('lokal-volume', String(v)); set({ volume: v })
+  setVolume: (value) => {
+    const state = get()
+    const volume = clampVolume(value, outputRoute ? 1 : volumeLimit(state))
+    if (outputRoute) outputRoute.setVolume(volume)
+    else if (!state.castActive && !state.currentTrack?.atmosNative) localStorage.setItem('lokal-volume', String(volume))
+    set({ volume })
+  },
+  setVolumeBoostEnabled: enabled => {
+    const state = get()
+    const volume = readLocalVolume(enabled)
+    localStorage.setItem(volumeBoostKey, enabled ? '1' : '0')
+    localStorage.setItem('lokal-volume', String(volume))
+    set({ volumeBoostEnabled: enabled, ...(!outputRoute && !state.castActive && !state.currentTrack?.atmosNative ? { volume } : {}) })
   },
   toggleRepeat: () => set(s => ({ repeat: s.repeat === 'none' ? 'all' : s.repeat === 'all' ? 'one' : 'none' })),
   // Direct setter, unlike toggleRepeat above: needed for the Windows SMTC

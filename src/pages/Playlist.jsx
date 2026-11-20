@@ -2,9 +2,10 @@ import { fewerRepeatsShuffle, shuffleHistory } from '../fewerRepeatsShuffle.js'
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Heart, Music, Play, Shuffle, Trash2, Edit2, Check, X, RefreshCw, Image as ImageIcon, AlertCircle, Search, Sparkles, SlidersHorizontal, Share2, MoreHorizontal, Download } from 'lucide-react'
+import { Heart, Music, Play, Shuffle, Trash2, Edit2, Check, X, RefreshCw, Image as ImageIcon, AlertCircle, Sparkles, SlidersHorizontal, Share2, MoreHorizontal, Download } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import TrackList from '../components/TrackList'
+import PlaylistSearchControl from '../components/PlaylistSearchControl'
 import ContextMenu, { useContextMenu } from '../components/ContextMenu'
 import { showLoadingToast, showToast } from '../components/Toaster'
 import PlaylistCover from '../components/PlaylistCover'
@@ -62,7 +63,6 @@ export default function Playlist() {
   const [loadingRecs, setLoadingRecs] = useState(false)
   const [playlistSearchOpen, setPlaylistSearchOpen] = useState(false)
   const [playlistSearch, setPlaylistSearch] = useState('')
-  const playlistSearchRef = useRef(null)
   const visibleTracks = useMemo(() => filterPlaylistTracks(sortedTracks, playlistSearch), [sortedTracks, playlistSearch])
   const [showResolveGhosts, setShowResolveGhosts] = useState(false)
   const playQueue = usePlayerStore(s => s.playQueue)
@@ -136,10 +136,6 @@ export default function Playlist() {
   }, [id, user?.id, isLiked, setTracks, setPlaylist])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    if (playlistSearchOpen) playlistSearchRef.current?.focus()
-  }, [playlistSearchOpen])
 
   useEffect(() => {
     const handleChange = (e) => {
@@ -442,32 +438,8 @@ export default function Playlist() {
             >
               <Play size={17} fill="currentColor" className="translate-x-px" />
             </button>
-            {!!tracks.length && (playlistSearchOpen ? (
-              <div className="mx-1 flex w-64 items-center gap-2 rounded-full border border-accent/40 bg-elevated px-3.5 py-2 text-sm text-white focus-within:border-accent">
-                <Search size={15} className="flex-shrink-0 text-muted" />
-                <input
-                  ref={playlistSearchRef}
-                  value={playlistSearch}
-                  onChange={event => setPlaylistSearch(event.target.value)}
-                  onKeyDown={event => { if (event.key === 'Escape') { setPlaylistSearchOpen(false); setPlaylistSearch('') } }}
-                  placeholder={t("Search this playlist")}
-                  aria-label={t("Search this playlist")}
-                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
-                />
-                <button
-                  type="button"
-                  onClick={() => { setPlaylistSearchOpen(false); setPlaylistSearch('') }}
-                  aria-label={t("Close playlist search")}
-                  className="flex-shrink-0 text-muted transition-colors hover:text-white"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setPlaylistSearchOpen(true)} aria-label={t("Search this playlist")} title={t("Search this playlist")} className={ICON_BUTTON}>
-                <Search size={17} />
-              </button>
-            ))}
+            {!!tracks.length && <PlaylistSearchControl open={playlistSearchOpen} setOpen={setPlaylistSearchOpen}
+              query={playlistSearch} setQuery={setPlaylistSearch} buttonClassName={ICON_BUTTON} />}
             <button type="button" onClick={shuffleTracks} disabled={!playableTracks.length} aria-label={t("Shuffle")} title={t("Shuffle")} className={ICON_BUTTON}>
               <Shuffle size={17} />
             </button>

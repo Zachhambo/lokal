@@ -57,9 +57,9 @@ async function musicVideoResult(r) {
   // its own audio). Downloading it stays an option.
   const streamed = !r.file && !!r.needsDownload && /^[\w-]{11}$/.test(r.videoId)
   const base = streamed ? await streamBase() : null
-  const src = r.file ? electronFileURL(r.file)
+  const src = r.src || (r.file ? electronFileURL(r.file)
     : streamed ? (base ? `${base}/ytv/${encodeURIComponent(r.videoId)}` : `lokal-stream://ytv/${encodeURIComponent(r.videoId)}`)
-      : null
+      : null)
   return { ...r, src, streamed }
 }
 
@@ -586,6 +586,7 @@ export const api = {
   musicVideo: (trackId) => isE() && el().musicVideo
     ? el().musicVideo(trackId).then(musicVideoResult)
     : Promise.resolve(null),
+  musicVideoCurrentLink: (trackId) => isE() && el().musicVideoCurrentLink ? el().musicVideoCurrentLink(trackId) : Promise.resolve(null),
   // Download the discovered video into the shared cache for local playback.
   musicVideoDownload: (trackId) => isE() && el().musicVideoDownload
     ? el().musicVideoDownload(trackId).then(musicVideoResult)

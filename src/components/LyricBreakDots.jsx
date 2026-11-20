@@ -1,3 +1,4 @@
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useId, useRef } from 'react'
 import { createBreakDots, DOTS, R0, S0, PAD, WIDTH, HEIGHT } from '../lyrics/breakDots'
 
@@ -36,10 +37,8 @@ export default function LyricBreakDots({ start, end, getTime, active = true, siz
     model.reset()
     if (!active || !(end > start) || typeof getTime !== 'function') return undefined
     const calm = calmPreferred()
-    let raf = 0
     let last = performance.now()
-    const tick = () => {
-      raf = requestAnimationFrame(tick)
+    return animateWhileVisible(() => {
       const now = performance.now()
       const frame = model.step(getTime(), (now - last) / 1000, { start, end, pulses, calm })
       last = now
@@ -56,9 +55,7 @@ export default function LyricBreakDots({ start, end, getTime, active = true, siz
         if (goo) { goo.setAttribute('cx', d.x.toFixed(2)); goo.setAttribute('cy', d.y.toFixed(2)); goo.setAttribute('r', d.r.toFixed(2)) }
         if (field) { field.setAttribute('cx', d.x.toFixed(2)); field.setAttribute('cy', d.y.toFixed(2)); field.setAttribute('fill-opacity', d.b.toFixed(3)) }
       }
-    }
-    tick()
-    return () => cancelAnimationFrame(raf)
+    })
   }, [active, start, end, getTime, pulses])
 
   const scale = size / (R0 * 2)

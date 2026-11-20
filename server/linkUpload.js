@@ -28,7 +28,14 @@ function service() {
   return current
 }
 async function dispatch(method,req,res) {
-  try { await service()[method](req,res) }
+  try {
+    await service()[method](req,res)
+    if (method === 'receive' && res.statusCode < 300) {
+      const link = require('../electron/link').getLink()
+      const device = link?.auth(req.headers['x-remote-token'])
+      if (device && !device.legacy) link.applyPendingVideoClips(device.user_id)
+    }
+  }
   catch { if (!res.destroyed && !res.headersSent) res.status(503).json({error:'upload_unavailable'}) }
 }
 module.exports = {

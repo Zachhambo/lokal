@@ -10,6 +10,7 @@
 // It listens to the same analyser as the other visualizations. A new song
 // blends to another preset; the button in the corner skips to the next.
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { SkipForward } from 'lucide-react'
 import { getAnalyser, useAnalyserVersion } from './audio'
@@ -98,7 +99,7 @@ const MilkDrop = React.forwardRef(function MilkDrop({
     const canvas = canvasRef.current
     if (!analyser || !canvas) return undefined
     let cancelled = false
-    let frame = 0
+    let stopDrawing
     let lastDraw = 0
     let visible = true
     const seen = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting })
@@ -114,18 +115,16 @@ const MilkDrop = React.forwardRef(function MilkDrop({
       allPresetsRef.current = presets
       presetsRef.current = filterPresets(presets)
       showPreset(randomPreset(), 0)
-      const draw = (now) => {
-        frame = requestAnimationFrame(draw)
-        if (!visible || document.hidden || !playingRef.current || now - lastDraw < FRAME_MS) return
+      stopDrawing = animateWhileVisible(now => {
+        if (!visible || !playingRef.current || now - lastDraw < FRAME_MS) return
         lastDraw = now
         try { viz.render() } catch {}
-      }
-      frame = requestAnimationFrame(draw)
+      })
     }).catch((error) => { console.warn('[visualizer] MilkDrop could not start:', error); if (!cancelled) setFailed(true) })
 
     return () => {
       cancelled = true
-      cancelAnimationFrame(frame)
+      stopDrawing?.()
       seen.disconnect()
       const viz = vizRef.current
       vizRef.current = null

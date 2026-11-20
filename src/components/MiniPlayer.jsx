@@ -2,7 +2,7 @@ import { useTranslation } from '../i18n'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Play, Pause, SkipBack, SkipForward, X, Volume2, VolumeX, Heart, Clapperboard, Gamepad2, Minimize2, Maximize2, ChevronLeft, ChevronRight } from 'lucide-react'
-import { usePlayerStore, useAppStore } from '../store/player'
+import { usePlayerStore, useAppStore, volumeLimit } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { api, peekSettings, wordSyncEnabled as getWordSyncEnabled } from '../api'
 import Waveform from './Waveform'
@@ -13,6 +13,7 @@ import { useMusicVideo, useMusicVideoView } from '../musicVideo'
 import MusicVideoPlayer from './MusicVideoPlayer'
 import VideoOffsetControl from './VideoOffsetControl'
 import { useVolumeWheel } from '../volumeWheel'
+import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
 import MilkDrop from '../visualizers/MilkDrop'
 import { loadMilkDropPresetNames, normalizeEnabledMilkDropPresets } from '../visualizers/milkDropPresets.mjs'
 
@@ -38,7 +39,8 @@ export default function MiniPlayer({ windowed = false }) {
     showMiniVisualizer, setShowMiniVisualizer
   })))
   const { user } = useAppStore()
-  const volumeWheelRef = useVolumeWheel(volume, setVolume)
+  const maxVolume = usePlayerStore(volumeLimit)
+  const volumeWheelRef = useVolumeWheel(Math.min(volume, maxVolume), setVolume, maxVolume)
   const { video: musicVideo } = useMusicVideo(currentTrack)
   const videoMode = useMusicVideoView(s => s.mini)
   const toggleVideo = useMusicVideoView(s => s.toggleMini)
@@ -262,9 +264,16 @@ export default function MiniPlayer({ windowed = false }) {
         setBgVars({ image, blur, size, position, overlay })
       } catch {}
     }
-    syncBgVars()
-    const id = setInterval(syncBgVars, 1200)
-    return () => clearInterval(id)
+    let timer
+    const update = hidden => {
+      clearInterval(timer)
+      if (hidden) return
+      syncBgVars()
+      timer = setInterval(syncBgVars, 1200)
+    }
+    const unsubscribe = onWindowVisibility(update)
+    update(isWindowHidden())
+    return () => { unsubscribe(); clearInterval(timer) }
   }, [])
 
   const artSrc = trackArtURL(currentTrack)
@@ -512,11 +521,13 @@ export default function MiniPlayer({ windowed = false }) {
           )}
           <input
             ref={volumeWheelRef}
+            aria-label={t('Volume')}
+            aria-valuetext={`${Math.round(Math.min(volume, maxVolume) * 100)}%`}
             type="range"
             min={0}
-            max={1}
+            max={maxVolume}
             step={0.01}
-            value={volume}
+            value={Math.min(volume, maxVolume)}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
             className={windowed ? 'w-24 accent-accent cursor-pointer h-1' : 'w-16 accent-accent cursor-pointer h-1'}
           />

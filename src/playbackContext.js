@@ -8,11 +8,12 @@
 //   { type: 'album',    name, album: { title, album_artist, artwork_path } }
 //   { type: 'artist',   id, name }
 //   { type: 'library' | 'mix' | 'search' | 'recap', name }
-//   { type: 'discovery', name, path? }   online songs; path: their album or artist page
+//   { type: 'discovery' | 'mix', name, path? }
 //   { type: 'flow', id, name, mood, tuner, userId }   Flow (src/flow/session.js)
 
 import { isOnlineTrack, trackAlbumPath } from './onlineBrowse.js'
 import { streamRef } from './onlineTracks.js'
+import { songKey } from './recommendations.js'
 
 export function makePlaylistContext(playlist, fallbackId = null) {
   const id = playlist?.id ?? fallbackId
@@ -76,7 +77,7 @@ export function isContextNavigable(context) {
   if (context.type === 'playlist') return !!context.id
   if (context.type === 'artist') return !!context.id
   if (context.type === 'album') return !!context.album?.title
-  if (context.type === 'discovery') return /^\/(?:online|artist)\//.test(String(context.path || ''))
+  if (['discovery', 'mix', 'made-for-you'].includes(context.type)) return true
   if (context.type === 'flow') return true
   return false
 }
@@ -85,7 +86,7 @@ export function isContextNavigable(context) {
  * Navigate to the source of the current queue.
  * `highlightTrackId` lets the destination scroll to and flash the playing track.
  */
-export function navigateToContext(nav, context, highlightTrackId = null) {
+export function navigateToContext(nav, context, highlightTrackId = null, track = null) {
   if (!nav || !isContextNavigable(context)) return false
   const state = highlightTrackId ? { highlightTrackId } : {}
 
@@ -101,8 +102,15 @@ export function navigateToContext(nav, context, highlightTrackId = null) {
     nav('/albums', { state: { ...state, album: context.album } })
     return true
   }
-  if (context.type === 'discovery') {
-    nav(context.path, { state })
+  if (['discovery', 'mix', 'made-for-you'].includes(context.type)) {
+    const path = /^\/(?:home|online|artist|discovery|spotify|youtube)\//.test(String(context.path || ''))
+      ? context.path : context.type === 'discovery' ? '/home/discovery' : '/home/home'
+    nav(path, { state: {
+      ...state,
+      title: context.name,
+      ...(path.startsWith('/artist/') ? { name: context.name } : {}),
+      ...(track ? { highlightSongKey: songKey(track), highlightTitle: track.title } : {}),
+    } })
     return true
   }
   if (context.type === 'flow') {

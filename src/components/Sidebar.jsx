@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { readViewState, writeViewState } from '../statePersistence.mjs'
 import { usePanelWidths, usePanelWidth, PanelResizeHandle } from '../panelWidths.jsx'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic, Eye, EyeOff } from 'lucide-react'
-import { useAppStore } from '../store/player'
+import { Plus, Heart, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles, Import, MoreHorizontal, RefreshCw, ListMusic, Eye, EyeOff, Pin, PinOff, Search, X } from 'lucide-react'
+import { useAppStore, usePlayerStore } from '../store/player'
 import { api, peekSettings } from '../api'
 import { SIDEBAR_ITEMS, sidebarNavOrder, splitSidebarNav } from '../sidebarNav'
 import { latestPeriod, listenerTimeZone, nextPeriodBoundary, recapOpened, recapTree } from '../recapPeriods'
@@ -40,28 +40,64 @@ function NavItem({ icon: Icon, label, active, onClick, collapsed, badge, tour })
   )
 }
 
-/** Spotify and YouTube playlists share one compact, hideable sidebar shelf. */
-function ProviderPlaylistSection({ provider, title, playlists, accountId, loading, error, refresh, collapsed, nav, pathname }) {
+const pinStorageKey = userId => `lokal:playlist-pins:v1:${userId || 'guest'}`
+function readPlaylistPins(userId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(pinStorageKey(userId)) || '[]')
+    return Array.isArray(stored) ? stored.filter(key => typeof key === 'string') : []
+  } catch { return [] }
+}
+
+function PinButton({ pinned, name, onClick }) {
   const { t } = useTranslation()
-  const [hidden, setHidden] = useState([])
+  return <button type="button" onClick={onClick} aria-pressed={pinned}
+    aria-label={t(pinned ? 'Unpin {name}' : 'Pin {name}', { name })}
+    title={t(pinned ? 'Unpin playlist' : 'Pin playlist')}
+    className={`shrink-0 rounded p-1 hover:text-white focus:opacity-100 group-hover:opacity-100 ${pinned ? 'text-accent' : 'text-muted opacity-0'}`}>
+    {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+  </button>
+}
+
+function ProviderPlaylistRow({ pl, provider, collapsed, nav, pathname, pinned, onPin, off, onHide }) {
+  const { t } = useTranslation()
+  const name = pl.name || pl.title
+  const route = `/${provider}/playlist/${encodeURIComponent(pl.id)}`
+  return <div className="group flex items-center">
+    <button type="button" onClick={() => nav(route)} title={name}
+      aria-current={pathname === route ? 'page' : undefined}
+      className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 text-xs transition-all ${collapsed ? 'justify-center px-0' : 'px-2'} ${pathname === route ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-elevated hover:text-white'} ${off ? 'opacity-50' : ''}`}>
+      {pl.thumbnail
+        ? <img src={pl.thumbnail} alt="" className="h-7 w-7 shrink-0 rounded object-cover" loading="lazy" />
+        : <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-accent/15"><ListMusic size={13} /></span>}
+      {!collapsed && <span className="truncate">{name}</span>}
+    </button>
+    {!collapsed && <>
+      <PinButton pinned={pinned} name={name} onClick={onPin} />
+      <button type="button" onClick={onHide}
+        title={t(off ? 'Show playlist' : 'Hide playlist')}
+        aria-label={t(off ? 'Show {name}' : 'Hide {name}', { name })}
+        className="shrink-0 rounded p-1 text-muted opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100">
+        {off ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
+    </>}
+  </div>
+}
+
+/** Spotify and YouTube playlists share one compact, hideable sidebar shelf. */
+function ProviderPlaylistSection({ title, playlists, hidden, loading, error, refresh, collapsed, searching, renderRow }) {
+  const { t } = useTranslation()
   const [showHidden, setShowHidden] = useState(false)
-  useEffect(() => {
-    setHidden(hiddenPlaylistIds(provider, accountId))
-    setShowHidden(false)
-  }, [provider, accountId])
-  const hiddenSet = new Set(hidden)
-  const visible = playlists.filter(pl => showHidden || !hiddenSet.has(pl.id))
-  const changeHidden = (id, value) => setHidden(setPlaylistHidden(provider, accountId, id, value))
+  const visible = playlists.filter(pl => showHidden || !hidden.has(pl.id))
+  if (searching && !visible.length && !hidden.size) return null
   return (
     <section className="mt-4" aria-label={title}>
       <div className={`mb-1 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
         {!collapsed && <p className="text-xs font-display text-muted uppercase tracking-widest">{t(title)}</p>}
         <div className="flex gap-1">
-          {hidden.length > 0 && <button type="button"
+          {hidden.size > 0 && <button type="button"
             title={t(showHidden ? 'Hide disabled playlists' : 'Manage hidden playlists')}
             aria-label={t(showHidden ? 'Hide disabled playlists' : 'Manage hidden playlists')}
-            aria-pressed={showHidden}
-            onClick={() => setShowHidden(value => !value)}
+            aria-pressed={showHidden} onClick={() => setShowHidden(value => !value)}
             className="rounded p-1 text-muted hover:text-white">
             {showHidden ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>}
@@ -72,30 +108,12 @@ function ProviderPlaylistSection({ provider, title, playlists, accountId, loadin
           </button>
         </div>
       </div>
-      {visible.map(pl => {
-        const off = hiddenSet.has(pl.id)
-        const route = `/${provider}/playlist/${encodeURIComponent(pl.id)}`
-        return <div key={pl.id} className="group flex items-center">
-          <button type="button" onClick={() => nav(route)}
-            title={pl.name || pl.title}
-            aria-current={pathname === route ? 'page' : undefined}
-            className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2 text-xs transition-all ${collapsed ? 'justify-center px-0' : 'px-2'} ${pathname === route ? 'bg-accent/10 text-accent' : 'text-muted hover:bg-elevated hover:text-white'} ${off ? 'opacity-50' : ''}`}>
-            {pl.thumbnail
-              ? <img src={pl.thumbnail} alt="" className="h-7 w-7 flex-shrink-0 rounded object-cover" loading="lazy" />
-              : <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-accent/15"><ListMusic size={13} /></span>}
-            {!collapsed && <span className="truncate">{pl.name || pl.title}</span>}
-          </button>
-          {!collapsed && <button type="button" onClick={() => changeHidden(pl.id, !off)}
-            title={t(off ? 'Show playlist' : 'Hide playlist')}
-            aria-label={t(`${off ? 'Show' : 'Hide'} ${pl.name || pl.title}`)}
-            className="rounded p-1 text-muted opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100">
-            {off ? <Eye size={14} /> : <EyeOff size={14} />}
-          </button>}
-        </div>
-      })}
+      {visible.map(renderRow)}
       {!collapsed && error && <p className="px-2 py-2 text-xs text-muted" role="status">{t(error)}</p>}
-      {!collapsed && !loading && !error && visible.length === 0 &&
-        <p className="px-2 py-2 text-xs text-muted">{t(hidden.length ? 'All playlists are hidden. Use the eye button to manage them.' : 'No saved playlists.')}</p>}
+      {!collapsed && !searching && !loading && !error && visible.length === 0 && !playlists.length &&
+        <p className="px-2 py-2 text-xs text-muted">{t('No unpinned playlists.')}</p>}
+      {!collapsed && !searching && !loading && !error && visible.length === 0 && playlists.length > 0 &&
+        <p className="px-2 py-2 text-xs text-muted">{t('All playlists are hidden. Use the eye button to manage them.')}</p>}
     </section>
   )
 }
@@ -118,6 +136,9 @@ export default function Sidebar() {
   const [spotifyError, setSpotifyError] = useState('')
   const spotifyPlaylistLoad = useRef(null)
   const youtubePlaylistLoad = useRef(null)
+  const [playlistSearchOpen, setPlaylistSearchOpen] = useState(false)
+  const [playlistQuery, setPlaylistQuery] = useState('')
+  const [, updatePlaylistPreferences] = useState(0)
   const [showNewPlaylist, setShowNewPlaylist] = useState(false)
   const [newPlName, setNewPlName] = useState('')
   const [confirmSignOut, setConfirmSignOut] = useState(false)
@@ -127,11 +148,32 @@ export default function Sidebar() {
   const { visible: visibleNav, hidden: hiddenNav } = splitSidebarNav(sidebarNavOrder(sidebarNavValue))
   
   const { user, openAuth, logout } = useAppStore()
+  const hasLikedSongs = usePlayerStore(state => state.likedIds.size > 0)
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const pins = readPlaylistPins(user?.id)
+  const pinned = new Set(pins)
+  const togglePin = key => {
+    const next = new Set(readPlaylistPins(user?.id))
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    try { localStorage.setItem(pinStorageKey(user?.id), JSON.stringify([...next])) } catch { return }
+    updatePlaylistPreferences(value => value + 1)
+  }
+  const searchWords = collapsed ? [] : playlistQuery.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean)
+  const matches = playlist => {
+    const name = String(playlist.name || playlist.title || '').toLocaleLowerCase()
+    return searchWords.every(word => name.includes(word))
+  }
   const toggleCollapsed = () => setCollapsed(value => {
     writeViewState('sidebar:collapsed', value ? '0' : '1')
     return !value
   })
+  const togglePlaylistSearch = () => {
+    if (collapsed) toggleCollapsed()
+    const open = collapsed || !playlistSearchOpen
+    setPlaylistSearchOpen(open)
+    if (!open) setPlaylistQuery('')
+  }
   // "+" on the collapsed sidebar: open it, with the new playlist's name to type.
   const startNewPlaylist = () => {
     if (collapsed) toggleCollapsed()
@@ -174,13 +216,21 @@ export default function Sidebar() {
     spotifyPlaylistLoad.current = load
     void load()
     const refresh = () => { void load() } // settings edits are not forced resyncs
+    const accessChanged = () => {
+      setSpotifyAccountId('')
+      setSpotifyPlaylists([])
+      setSpotifyLoading(true)
+      void load()
+    }
     window.addEventListener('lokal:settings-saved', refresh)
+    window.addEventListener('lokal:recommendation-access-changed', accessChanged)
     window.addEventListener('lokal:spotify-playlists-update', refresh)
     return () => {
       alive = false
       spotifyPlaylistLoad.current = null
       window.removeEventListener('lokal:settings-saved', refresh)
       window.removeEventListener('lokal:spotify-playlists-update', refresh)
+      window.removeEventListener('lokal:recommendation-access-changed', accessChanged)
     }
   }, [])
 
@@ -211,8 +261,20 @@ export default function Sidebar() {
     youtubePlaylistLoad.current = load
     void load()
     const refresh = () => { void load() }
+    const accessChanged = () => {
+      setYoutubeAccountId('')
+      setYoutubePlaylists([])
+      setYoutubeLoading(true)
+      void load()
+    }
     window.addEventListener('lokal:settings-saved', refresh)
-    return () => { alive = false; youtubePlaylistLoad.current = null; window.removeEventListener('lokal:settings-saved', refresh) }
+    window.addEventListener('lokal:recommendation-access-changed', accessChanged)
+    return () => {
+      alive = false
+      youtubePlaylistLoad.current = null
+      window.removeEventListener('lokal:settings-saved', refresh)
+      window.removeEventListener('lokal:recommendation-access-changed', accessChanged)
+    }
   }, [])
 
   const refreshYoutubePlaylists = () => {
@@ -220,11 +282,19 @@ export default function Sidebar() {
     void youtubePlaylistLoad.current?.(true, true)
   }
 
+  const localPlaylistLoad = useRef(0)
   const loadPlaylists = () => {
-    api.getPlaylists(user?.id).then(p => setPlaylists(Array.isArray(p) ? p : []))
+    const request = ++localPlaylistLoad.current
+    api.getPlaylists(user?.id).then(rows => {
+      if (request === localPlaylistLoad.current) setPlaylists(Array.isArray(rows) ? rows : [])
+    }).catch(() => {})
   }
 
-  useEffect(() => { loadPlaylists() }, [user?.id])
+  useEffect(() => {
+    setPlaylists([])
+    loadPlaylists()
+    return () => { localPlaylistLoad.current++ }
+  }, [user?.id])
 
   useEffect(() => {
     const reloadSidebarNav = () => {
@@ -342,6 +412,65 @@ export default function Sidebar() {
     setConfirmSignOut(false)
     logout()
   }
+
+  const renderLocalRow = pl => {
+    const key = `local:${pl.id}`
+    return (
+      <div key={key} className="group flex items-center" onDragOver={(e) => { if (pl.smart_rules) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          if (pl.smart_rules) return
+          try {
+            const data = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
+            if (data.type === 'tracks' && data.tracks) {
+              for (const track of data.tracks) {
+                await api.addToPlaylist(pl.id, track.id)
+              }
+              loadPlaylists()
+            }
+          } catch (err) { console.error('Drop error:', err) }
+        }}>
+        <button onClick={() => nav(`/playlist/${pl.id}`)}
+          title={collapsed ? pl.name : undefined}
+          aria-label={collapsed ? pl.name : undefined}
+          className={`min-w-0 flex-1 flex items-center gap-2.5 py-2 rounded-lg text-xs transition-all group ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === `/playlist/${pl.id}` ? 'bg-accent/10 text-accent' : 'text-muted hover:text-white hover:bg-elevated'}`}>
+          <PlaylistCover playlistId={pl.id} coverPath={pl.cover_path} size={28} className="flex-shrink-0 rounded" />
+          {!collapsed && <span className="truncate">{pl.name}</span>}
+          {!collapsed && pl.smart_rules && <Sparkles size={11} className="ml-auto flex-shrink-0 text-accent/70" aria-label={t("Smart playlist")} />}
+        </button>
+        {!collapsed && <PinButton pinned={pinned.has(key)} name={pl.name} onClick={() => togglePin(key)} />}
+      </div>
+    )
+  }
+  const renderProviderRow = (provider, accountId, hidden, pl) => {
+    const key = `${provider}:${pl.id}`
+    const off = hidden.has(pl.id)
+    return <ProviderPlaylistRow key={key} pl={pl} provider={provider} off={off} collapsed={collapsed}
+      nav={nav} pathname={loc.pathname} pinned={pinned.has(key)} onPin={() => togglePin(key)}
+      onHide={() => {
+        setPlaylistHidden(provider, accountId, pl.id, !off)
+        updatePlaylistPreferences(value => value + 1)
+      }} />
+  }
+  const providers = api.isElectron ? [
+    { provider: 'spotify', title: 'Spotify', playlists: spotifyPlaylists, accountId: spotifyAccountId, loading: spotifyLoading, error: spotifyError, refresh: refreshSpotifyPlaylists },
+    { provider: 'youtube', title: 'YouTube', playlists: youtubePlaylists, accountId: youtubeAccountId, loading: youtubeLoading, error: youtubeError, refresh: refreshYoutubePlaylists },
+  ].filter(section => section.accountId).map(section => ({
+    ...section,
+    rows: section.playlists.filter(matches),
+    hidden: new Set(hiddenPlaylistIds(section.provider, section.accountId)),
+  })) : []
+  const localRows = playlists.filter(matches)
+  const matchingPins = new Map(localRows.filter(pl => pinned.has(`local:${pl.id}`))
+    .map(pl => [`local:${pl.id}`, renderLocalRow(pl)]))
+  for (const { provider, accountId, hidden, rows } of providers) {
+    for (const pl of rows) {
+      const key = `${provider}:${pl.id}`
+      if (pinned.has(key) && !hidden.has(pl.id)) matchingPins.set(key, renderProviderRow(provider, accountId, hidden, pl))
+    }
+  }
+  const likedMatches = hasLikedSongs && matches({ name: t('Liked Songs') })
+  const noMatches = searchWords.length > 0 && !likedMatches && !localRows.length && providers.every(section => !section.rows.length)
 
   return (
     <aside
@@ -480,6 +609,10 @@ export default function Sidebar() {
         <div className={`flex items-center py-2 ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
           {!collapsed && <p className="text-xs font-display text-muted uppercase tracking-widest">{t('Playlists')}</p>}
           <div className={`flex items-center ${collapsed ? 'flex-col gap-1' : 'gap-1'}`}>
+            <button onClick={togglePlaylistSearch} title={t('Search playlists')} aria-label={t('Search playlists')}
+              aria-expanded={!collapsed && playlistSearchOpen} className="rounded p-0.5 text-muted hover:text-white">
+              <Search size={14} />
+            </button>
             <button onClick={() => openSmartPlaylistEditor()} title={t('New smart playlist')} aria-label={t('New smart playlist')}
               className="text-muted hover:text-white transition-colors p-0.5 rounded">
               <Sparkles size={13} />
@@ -495,6 +628,14 @@ export default function Sidebar() {
           </div>
         </div>
 
+        {playlistSearchOpen && !collapsed && <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5 focus-within:border-accent">
+          <input autoFocus type="search" value={playlistQuery} onChange={event => setPlaylistQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Escape') togglePlaylistSearch() }}
+            aria-label={t('Search playlists')} placeholder={t('Search playlists')}
+            className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden" />
+          <button type="button" onClick={togglePlaylistSearch} aria-label={t('Close playlist search')} className="text-muted hover:text-white"><X size={13} /></button>
+        </div>}
+
         {showNewPlaylist && !collapsed && (
           <div className="mb-2 flex gap-1.5">
             <input autoFocus value={newPlName} onChange={e => setNewPlName(e.target.value)}
@@ -506,7 +647,12 @@ export default function Sidebar() {
           </div>
         )}
 
-        <button onClick={() => nav('/playlist/liked')}
+        {matchingPins.size > 0 && <section aria-label={t('Pinned playlists')} className="mb-2">
+          {!collapsed && <p className="px-1 text-xs font-display text-muted">{t('Pinned')}</p>}
+          {pins.map(key => matchingPins.get(key))}
+        </section>}
+        {noMatches && <p role="status" className="px-2 py-2 text-xs text-muted">{t('No matching playlists.')}</p>}
+        {likedMatches && <button onClick={() => nav('/playlist/liked')}
           title={collapsed ? t('Liked Songs') : undefined}
           aria-label={collapsed ? t('Liked Songs') : undefined}
           className={`w-full flex items-center gap-2.5 py-2 rounded-lg text-xs transition-all group ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === '/playlist/liked' ? 'bg-accent/10 text-accent' : 'text-muted hover:text-white hover:bg-elevated'}`}>
@@ -514,45 +660,15 @@ export default function Sidebar() {
             <Heart size={12} className="text-accent" fill="currentColor" />
           </div>
           {!collapsed && <span className="truncate font-medium">{t('Liked Songs')}</span>}
-        </button>
+        </button>}
 
-        {playlists.map(pl => (
-          <div key={pl.id} onDragOver={(e) => { if (pl.smart_rules) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
-            onDrop={async (e) => {
-              e.preventDefault()
-              if (pl.smart_rules) return
-              try {
-                const data = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
-                if (data.type === 'tracks' && data.tracks) {
-                  for (const track of data.tracks) {
-                    await api.addToPlaylist(pl.id, track.id)
-                  }
-                  loadPlaylists()
-                }
-              } catch (err) { console.error('Drop error:', err) }
-            }}>
-            <button onClick={() => nav(`/playlist/${pl.id}`)}
-              title={collapsed ? pl.name : undefined}
-              aria-label={collapsed ? pl.name : undefined}
-              className={`w-full flex items-center gap-2.5 py-2 rounded-lg text-xs transition-all group ${collapsed ? 'justify-center px-0' : 'px-2'} ${loc.pathname === `/playlist/${pl.id}` ? 'bg-accent/10 text-accent' : 'text-muted hover:text-white hover:bg-elevated'}`}>
-              <PlaylistCover playlistId={pl.id} coverPath={pl.cover_path} size={28} className="flex-shrink-0 rounded" />
-              {!collapsed && <span className="truncate">{pl.name}</span>}
-              {!collapsed && pl.smart_rules && <Sparkles size={11} className="ml-auto flex-shrink-0 text-accent/70" aria-label={t("Smart playlist")} />}
-            </button>
-          </div>
-        ))}
-        {api.isElectron && <>
-          <ProviderPlaylistSection provider="spotify" title="Spotify"
-            playlists={spotifyPlaylists} accountId={spotifyAccountId}
-            loading={spotifyLoading} error={spotifyError}
-            refresh={refreshSpotifyPlaylists} collapsed={collapsed}
-            nav={nav} pathname={loc.pathname} />
-          <ProviderPlaylistSection provider="youtube" title="YouTube"
-            playlists={youtubePlaylists} accountId={youtubeAccountId}
-            loading={youtubeLoading} error={youtubeError}
-            refresh={refreshYoutubePlaylists} collapsed={collapsed}
-            nav={nav} pathname={loc.pathname} />
-        </>}
+        {localRows.filter(pl => !pinned.has(`local:${pl.id}`)).map(renderLocalRow)}
+        {providers.map(({ provider, title, rows, accountId, hidden, loading, error, refresh }) =>
+          <ProviderPlaylistSection key={`${provider}:${accountId}`} title={title}
+            playlists={rows.filter(pl => !pinned.has(`${provider}:${pl.id}`) || hidden.has(pl.id))}
+            hidden={hidden} loading={loading} error={error} refresh={refresh} collapsed={collapsed}
+            searching={searchWords.length > 0}
+            renderRow={pl => renderProviderRow(provider, accountId, hidden, pl)} />)}
       </div>
 
     </aside>

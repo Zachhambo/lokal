@@ -59,7 +59,7 @@ function createCastMediaServer({ log = () => {} } = {}) {
   let server = null
   let port = 0
   let token = null
-  const items = new Map() // key -> { kind: 'file'|'relay'|'json', ... }
+  const items = new Map() // key -> { kind: 'file'|'artwork'|'relay'|'json', ... }
 
   async function serveFile(req, res, item) {
     let stat
@@ -122,6 +122,23 @@ function createCastMediaServer({ log = () => {} } = {}) {
     }
   }
 
+  async function serveArtwork(req, res, item) {
+    // The desktop library caches WebP thumbnails. Serve a JPEG that older
+    // receivers can display, and share the conversion across HEAD and GET.
+    item.jpeg ??= fs.promises.readFile(item.path)
+      .then(bytes => require('../fileArtwork').normalizeArtwork(bytes))
+      .catch(() => null)
+    const body = await item.jpeg
+    if (!body) { res.writeHead(404, CORS); res.end(); return }
+    res.writeHead(200, {
+      ...CORS,
+      'content-type': 'image/jpeg',
+      'content-length': String(body.length),
+      'cache-control': 'no-store',
+    })
+    res.end(req.method === 'HEAD' ? undefined : body)
+  }
+
   async function handle(req, res) {
     const found = String(req.url || '').match(/^\/([0-9a-f]{32})\/([0-9a-f]{24})(?:\/[^?]*)?(?:\?.*)?$/)
     if (!found || found[1] !== token) { res.writeHead(404); res.end(); return }
@@ -130,6 +147,7 @@ function createCastMediaServer({ log = () => {} } = {}) {
     const item = items.get(found[2])
     if (!item) { res.writeHead(404, CORS); res.end(); return }
     if (item.kind === 'file') return serveFile(req, res, item)
+    if (item.kind === 'artwork') return serveArtwork(req, res, item)
     if (item.kind === 'relay') return serveRelay(req, res, item)
     if (item.kind === 'json') {
       const body = Buffer.from(JSON.stringify(item.data))

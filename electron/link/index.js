@@ -106,6 +106,8 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
           case 'library.pull':
             if (device.legacy) throw new Error('Pair this device before syncing')
             reconcilePlaylists(store, device.user_id)
+            store.applyPendingVideoClips(device.user_id)
+            libraryRefresh.accepted(0, store.takeVideoClipChanges())
             send(socket,'library.ops',store.pull('library_ops',device.user_id,body.cursor),message.id)
             break
           case 'library.push': {
@@ -115,7 +117,7 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
             reconcilePlaylists(store, device.user_id)
             const accepted = store.applyOps(body.items,device.user_id,device.id)
             savePlaylistSnapshot(store, device.user_id)
-            libraryRefresh.accepted(accepted)
+            libraryRefresh.accepted(accepted, store.takeVideoClipChanges())
             send(socket,'ack',{ok:true,accepted},message.id)
             break
           }
@@ -147,6 +149,11 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
   heartbeat.unref?.()
   const api = {
     store, auth,
+    applyPendingVideoClips(userId) {
+      if (userId !== currentUser()) return
+      store.applyPendingVideoClips(userId)
+      libraryRefresh.accepted(0, store.takeVideoClipChanges())
+    },
     identity(body) { return store.identity(body, currentUser()) },
     async createPairing() {
       if (!enabled()) throw new Error('Enable Phone Remote before pairing.')

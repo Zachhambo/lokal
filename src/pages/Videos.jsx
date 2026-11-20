@@ -47,7 +47,7 @@ function VideoCard({ item, selected, playing, onSelect, onMenu, onSave, saving, 
   const { t } = useTranslation()
   const [hover, setHover] = React.useState(false)
   const [failed, setFailed] = React.useState(false)
-  const [animated, animatedBroken] = useAnimatedPreview(item, hover, !preview)
+  const [animated, animatedBroken] = useAnimatedPreview(item, hover, !preview && item.downloadable !== false)
   const [animatedShown, setAnimatedShown] = React.useState(false)
   React.useEffect(() => { if (!hover) setAnimatedShown(false) }, [hover])
   const ref = React.useRef(null)
@@ -68,7 +68,9 @@ function VideoCard({ item, selected, playing, onSelect, onMenu, onSave, saving, 
   }, [hover, preview, failed])
   return <article className={`group relative min-w-0 ${selected ? 'rounded-xl ring-2 ring-accent/70' : ''}`} onContextMenu={onMenu}>
     <button onClick={onSelect} aria-label={`${t("Play video:")} ${item.track.title}`} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} className="relative block w-full aspect-video overflow-hidden rounded-xl bg-card border border-border shadow-lg">
-      <img src={item.video.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover transition-[transform,filter] duration-500 ease-out group-hover:scale-[1.03] group-hover:brightness-110" />
+      {item.video.thumbnail
+        ? <img src={item.video.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover transition-[transform,filter] duration-500 ease-out group-hover:scale-[1.03] group-hover:brightness-110" />
+        : <Clapperboard aria-hidden className="absolute inset-0 m-auto text-muted" />}
       {preview && hover && !failed && <video ref={ref} src={preview} muted playsInline preload="metadata" onError={() => setFailed(true)} className="absolute inset-0 w-full h-full object-cover" />}
       {!preview && hover && animated && <img src={animated} alt="" aria-hidden referrerPolicy="no-referrer" onLoad={() => setAnimatedShown(true)} onError={animatedBroken}
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${animatedShown ? 'opacity-100' : 'opacity-0'}`} />}
@@ -119,7 +121,8 @@ export default function Videos() {
     load()
     window.addEventListener('lokal:refresh', load)
     window.addEventListener('lokal:music-video-found', load)
-    return () => { loadRevision.current++; window.removeEventListener('lokal:refresh', load); window.removeEventListener('lokal:music-video-found', load) }
+    window.addEventListener('lokal:music-video-edited', load)
+    return () => { loadRevision.current++; window.removeEventListener('lokal:refresh', load); window.removeEventListener('lokal:music-video-found', load); window.removeEventListener('lokal:music-video-edited', load) }
   }, [load])
   useEffect(() => api.onMusicVideoIndexProgress(progress => {
     if (!progress) return
@@ -167,7 +170,7 @@ export default function Videos() {
     } catch (e) { showToast(e.message) } finally { busy.current = false; setSaving(null) }
   }
   const saveMany = (rows, saved) => runAction(rows, list => updateVideoLibrary(list, saved, api, (id, value) => setItems(current => current.map(row => row.track.id === id ? { ...row, saved: value } : row))))
-  const downloadMany = rows => runAction(rows, list => downloadVideos(list, api))
+  const downloadMany = rows => runAction(rows.filter(row => row.downloadable !== false), list => downloadVideos(list, api))
   const deleteMany = rows => {
     const downloaded = rows.filter(row => row.downloaded)
     if (busy.current || !downloaded.length) return
@@ -185,7 +188,7 @@ export default function Videos() {
     { label: chosen.length > 1 ? 'Play selected videos' : 'Play video', icon: Play, onSelect: () => play(chosen[0] || item, false, chosen) },
     chosen.some(row => !row.saved) && { label: chosen.length > 1 ? 'Save selected videos to library' : 'Save video to library', icon: Plus, disabled: !!saving, onSelect: () => saveMany(chosen.filter(row => !row.saved), true) },
     chosen.some(row => row.saved) && { label: chosen.length > 1 ? 'Remove selected videos from library' : 'Remove video from library', icon: Trash2, disabled: !!saving, onSelect: () => saveMany(chosen.filter(row => row.saved), false) },
-    { label: t('Download'), icon: Download, disabled: !!saving, onSelect: () => downloadMany(chosen) },
+    chosen.some(row => row.downloadable !== false) && { label: t('Download'), icon: Download, disabled: !!saving, onSelect: () => downloadMany(chosen) },
     chosen.some(row => row.downloaded) && { label: 'Delete downloads', icon: Trash2, disabled: !!saving, onSelect: () => deleteMany(chosen) },
     { separator: true },
     { label: t('Play next'), icon: Clock, onSelect: () => playNextMany(tracks) },
@@ -214,7 +217,7 @@ export default function Videos() {
     </div>
     {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
     <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 @2xl:grid-cols-4 gap-x-5 gap-y-7">
-      {visible.map(item => <VideoCard key={item.track.id} item={item} selected={selection.has(item.track.id)} playing={currentId === item.track.id} onSelect={event => selection.click(item.track.id, event) || play(item)} onSave={() => save(item)} saving={!!saving} onMenu={event => openMenu(event, item)} preview={item.downloaded && item.video.file ? api.fileURL(item.video.file) : null} />)}
+      {visible.map(item => <VideoCard key={item.track.id} item={item} selected={selection.has(item.track.id)} playing={currentId === item.track.id} onSelect={event => selection.click(item.track.id, event) || play(item)} onSave={() => save(item)} saving={!!saving} onMenu={event => openMenu(event, item)} preview={item.video.file ? api.fileURL(item.video.file) : null} />)}
     </div>
     {loaded && !visible.length && <div className="text-center py-16 text-muted"><Clapperboard size={40} className="mx-auto mb-4 opacity-40" /><p>{items.length ? t('No videos match this view.') : t('Your discovered music videos will appear here.')}</p><p className="text-xs mt-2">{t("Play songs to discover videos, or use “Find videos for my library” above.")}</p></div>}
     {/* Like the Library's bar: short labels, and only what applies to the
@@ -226,7 +229,7 @@ export default function Videos() {
       { label: t('Add to playlist'), icon: ListPlus, onClick: () => addToPlaylistMany(selectedItems.map(row => row.track)) },
       { label: t('Save'), icon: Plus, hidden: selectedItems.every(row => row.saved), disabled: !!saving, onClick: () => saveMany(selectedItems.filter(row => !row.saved), true) },
       { label: t('Remove'), icon: X, hidden: selectedItems.every(row => !row.saved), disabled: !!saving, onClick: () => saveMany(selectedItems.filter(row => row.saved), false) },
-      { label: t('Download'), icon: Download, hidden: selectedItems.every(row => row.downloaded), disabled: !!saving, onClick: () => downloadMany(selectedItems) },
+      { label: t('Download'), icon: Download, hidden: selectedItems.every(row => row.downloaded || row.downloadable === false), disabled: !!saving, onClick: () => downloadMany(selectedItems) },
       { label: t('Delete download'), icon: Trash2, danger: true, hidden: selectedItems.every(row => !row.downloaded), disabled: !!saving, onClick: () => deleteMany(selectedItems) },
     ]} />
     <ContextMenu menu={menu} />

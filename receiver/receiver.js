@@ -107,6 +107,7 @@
 
   function setTrack(track) {
     var same = state.track && track && state.track.id === track.id
+    var artworkChanged = state.track && track && state.track.image !== track.image
     state.track = track || null
     if (!track) { applyView(); return }
     $('title').textContent = track.title || ''
@@ -114,9 +115,11 @@
     $('album').textContent = track.album || ''
     all('.vtitle').forEach(function (el) { el.textContent = track.title || '' })
     all('.vartist').forEach(function (el) { el.textContent = track.artist || '' })
-    if (!same) {
+    if (!same || artworkChanged) {
       setCover(track.image)
       paintBackdrop(track.image)
+    }
+    if (!same) {
       if (state.lyrics && state.lyrics.trackId !== track.id) setLyrics(null)
       if (state.video && state.video.trackId !== track.id) setVideo(null)
       var prepared = presentations.get(track.id)
@@ -177,7 +180,7 @@
       ctx.drawImage(img, (next.width - w) / 2, (next.height - h) / 2, w, h)
       show()
     }
-    img.onerror = plain
+    img.onerror = function () { if (state.track && state.track.image === url) plain() }
     img.src = url
   }
 

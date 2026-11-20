@@ -7,7 +7,7 @@ export async function updateVideoLibrary(items, saved, client, onSaved = () => {
       if (!result || result.error) throw new Error(result?.error || 'Could not update video library.')
       onSaved(item.track.id, result.saved ?? saved)
       succeeded++
-      if (saved && !item.downloaded) {
+      if (saved && item.downloadable !== false && !item.downloaded) {
         const downloaded = await client.musicVideoDownload(item.track.id)
         if (!downloaded || downloaded.error) errors.push(downloaded?.error || 'Could not download video.')
       }

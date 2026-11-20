@@ -7,6 +7,7 @@ import { usePlayerStore } from './store/player'
 import { useDownloads } from './store/downloads'
 
 const lookups = new Map()
+if (typeof window !== 'undefined') window.addEventListener('lokal:music-video-edited', ({ detail }) => lookups.delete(detail?.trackId))
 const RETRY_MISSING_MS = 10 * 60 * 1000
 
 // How each track's lookup is going ({ stage: 'searching' | 'checking' |
@@ -29,7 +30,9 @@ export function loadMusicVideo(trackId) {
     const job = api.musicVideo(trackId).catch(() => null)
     lookups.set(trackId, job)
     job.then(video => {
-      if (!video) setTimeout(() => lookups.delete(trackId), RETRY_MISSING_MS)
+      if (!video) setTimeout(() => {
+        if (lookups.get(trackId) === job) lookups.delete(trackId)
+      }, RETRY_MISSING_MS)
       else window.dispatchEvent(new Event('lokal:music-video-found'))
     })
   }
@@ -56,9 +59,16 @@ export function useMusicVideo(track, enabled = true, prepare = false) {
       setState(current => ({ ...current, pending: false, video: current.video ? { ...current.video, file: null, src: null, downloadId: null, needsDownload: true } : null }))
     }
     const refresh = () => setRevision(value => value + 1)
+    const edited = ({ detail }) => {
+      if (detail.trackId !== id) return
+      request.current++
+      loaded.current = null
+      refresh()
+    }
+    window.addEventListener('lokal:music-video-edited', edited)
     window.addEventListener('lokal:music-video-changing', changing)
     window.addEventListener('lokal:refresh', refresh)
-    return () => { window.removeEventListener('lokal:music-video-changing', changing); window.removeEventListener('lokal:refresh', refresh) }
+    return () => { window.removeEventListener('lokal:music-video-changing', changing); window.removeEventListener('lokal:refresh', refresh); window.removeEventListener('lokal:music-video-edited', edited) }
   }, [id, state.video?.videoId])
   useEffect(() => {
     if (!id) return undefined

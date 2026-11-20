@@ -1724,6 +1724,18 @@ function registerScannerHandlers(ipcMain) {
     const db = getDB()
     const currentTrack = db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId)
     if (!currentTrack) return { error: 'Track not found' }
+    if (data.clip_url || data.clip_start !== undefined || data.clip_end !== undefined) {
+      const { localPath, localClipFile } = require('../online/clipVideo')
+      if (data.clip_url && (/^file:/i.test(data.clip_url) || localPath(data.clip_url)) && !localClipFile(data.clip_url)) {
+        return { error: 'Video file not found or unsupported' }
+      }
+      const start = data.clip_start === undefined ? currentTrack.clip_start : data.clip_start
+      const end = data.clip_end === undefined ? currentTrack.clip_end : data.clip_end
+      if ([start, end].some(value => value != null && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+        return { error: 'Clip times must be valid non-negative times.' }
+      }
+      if (end != null && Number(end) <= Number(start ?? 0)) return { error: 'Clip end must be after clip start.' }
+    }
     const updates = []
     const params = []
     let wroteFile = false
@@ -1735,7 +1747,11 @@ function registerScannerHandlers(ipcMain) {
     if (data.track_num !== undefined) { updates.push('track_num = ?'); params.push(data.track_num) }
     if (data.year !== undefined) { updates.push('year = ?'); params.push(data.year) }
     if (data.record_label !== undefined) { updates.push('record_label = ?'); params.push(data.record_label) }
-    if (data.clip_url !== undefined) { updates.push('clip_url = ?'); params.push(String(data.clip_url || '').trim() || null) }
+    if (data.clip_url !== undefined) {
+      const clipUrl = String(data.clip_url || '').trim() || null
+      updates.push('clip_url = ?', 'clip_transfer_file = ?')
+      params.push(clipUrl, require('../online/clipVideo').transferableClipFile(clipUrl))
+    }
     if (data.clip_start !== undefined) { updates.push('clip_start = ?'); params.push(data.clip_start === null || data.clip_start === '' ? null : Number(data.clip_start)) }
     if (data.clip_end !== undefined) { updates.push('clip_end = ?'); params.push(data.clip_end === null || data.clip_end === '' ? null : Number(data.clip_end)) }
     if (data.explicit !== undefined) { updates.push('explicit = ?'); params.push(data.explicit ? 1 : 0) }

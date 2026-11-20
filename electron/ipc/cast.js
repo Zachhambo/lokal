@@ -6,13 +6,16 @@
 //   cast_quality   "max" (FLAC up to 24-bit / 96 kHz) or "standard" (16 / 48)
 //   cast_devices   devices added by their address (JSON)
 
-const { CastDiscovery, probeAddress } = require('../cast/discovery')
+const { CastDiscovery, probeAddress, mergeDevices } = require('../cast/discovery')
 const { CastController } = require('../cast/controller')
 const { createCastMediaServer } = require('../cast/mediaServer')
 const { createCastMedia } = require('../cast/media')
 const { LOKAL_CAST_APP_ID } = require('../cast/appId')
+const { UpnpDiscovery } = require('../cast/upnp')
+const { UpnpController } = require('../cast/upnpController')
 
 let discovery = null
+let upnpDiscovery = null
 let controller = null
 let server = null
 let blocker = null
@@ -44,11 +47,14 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
     try {
       for (const device of JSON.parse(settings(getDB).cast_devices || '[]')) discovery.addManual(device)
     } catch {}
-    discovery.on('change', list => send('cast:devices', list))
+    upnpDiscovery = new UpnpDiscovery({ log })
+    const changed = () => send('cast:devices', mergeDevices(discovery.list(), upnpDiscovery.list()))
+    discovery.on('change', changed)
+    upnpDiscovery.on('change', changed)
     return discovery
   }
 
-  const ensureController = () => {
+  const ensureController = (backend = 'chromecast') => {
     if (controller) return controller
     server = createCastMediaServer({ log })
     const sources = require('../online/sources')
@@ -71,7 +77,9 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
       trimCache: keep => cache.trim({ keep }),
       log,
     })
-    controller = new CastController({ media, server, appId: appIdFrom(), log })
+    controller = backend === 'upnp'
+      ? new UpnpController({ media, server, log })
+      : new CastController({ media, server, appId: appIdFrom(), log })
     controller.on('status', status => {
       send('cast:status', status)
       // The computer stays awake while the TV plays from it.
@@ -86,6 +94,13 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
     return controller
   }
 
+  let outputSerial = Promise.resolve()
+  const serialized = work => (...args) => {
+    const run = outputSerial.then(() => work(...args))
+    outputSerial = run.catch(() => {})
+    return run
+  }
+
   const guard = work => async (...args) => {
     try { return await work(...args) } catch (error) { return { error: error?.message || String(error) } }
   }
@@ -94,7 +109,8 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
   ipcMain.handle('cast:devices', () => {
     const found = ensureDiscovery()
     found.scan(15000)
-    return found.list()
+    upnpDiscovery.scan()
+    return mergeDevices(found.list(), upnpDiscovery.list())
   })
   ipcMain.handle('cast:addDevice', guard(async (_, address) => {
     const device = await probeAddress(address)
@@ -109,22 +125,55 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
     saveSetting(getDB, 'cast_devices', JSON.stringify(saved))
     return { ok: true }
   }))
-  ipcMain.handle('cast:connect', guard(async (_, deviceId) => {
-    const device = ensureDiscovery().get(deviceId)
+  let previousStopUnconfirmed = null
+  ipcMain.handle('cast:connect', guard(serialized(async (_, deviceId) => {
+    ensureDiscovery()
+    const device = upnpDiscovery.get(deviceId) || discovery.get(deviceId)
     if (!device) throw new Error('That device is no longer on the network')
-    const session = ensureController()
+    const previous = controller
+    const last = previous?.status()
+    if (previous) {
+      try { await previous.disconnect({ stopReceiver: true }) }
+      catch {
+        previousStopUnconfirmed = {}
+        await previous.disconnect({ stopReceiver: false })
+      }
+      previous.removeAllListeners()
+      if (controller === previous) controller = null
+    }
+    const session = ensureController(device.backend)
     session.appId = appIdFrom()
-    const result = await session.connect(device)
-    saveSetting(getDB, 'cast_last_device', device.id)
-    return { ...result, status: session.status() }
-  }))
-  ipcMain.handle('cast:disconnect', guard(async (_, options) => (controller ? controller.disconnect(options || {}) : null)))
+    try {
+      const result = await session.connect(device)
+      if (previousStopUnconfirmed && result.joined) await session.pause()
+      saveSetting(getDB, 'cast_last_device', device.id)
+      return { ...result, previousStopped: !previousStopUnconfirmed, status: session.status() }
+    } catch (error) {
+      try { await session.disconnect({ stopReceiver: false }) } catch {}
+      session.removeAllListeners()
+      controller = null
+      if (last?.state === 'connected') send('cast:ended', { reason: 'lost', last })
+      throw error
+    }
+  })))
+  ipcMain.handle('cast:disconnect', guard(serialized(async (_, options) => {
+    if (!controller) return null
+    if (options?.stopReceiver === false && controller.status().state === 'connected') {
+      previousStopUnconfirmed = {}
+    }
+    return controller.disconnect(options || {})
+  })))
   ipcMain.handle('cast:status', () => (controller ? controller.status() : { state: 'idle' }))
   ipcMain.handle('cast:setWindow', guard(async (_, window) => { await ensureController().setWindow(window); return { ok: true } }))
   ipcMain.handle('cast:command', guard(async (_, command) => {
     const session = ensureController()
-    if (command?.type === 'play') await session.play()
-    else if (command?.type === 'pause') await session.pause()
+    if (command?.type === 'play') {
+      const unconfirmed = previousStopUnconfirmed
+      await session.play()
+      if (controller === session && previousStopUnconfirmed === unconfirmed) {
+        previousStopUnconfirmed = null
+      }
+    } else if (command?.type === 'pause') await session.pause()
     else if (command?.type === 'seek') await session.seek(command.position)
     else if (command?.type === 'volume') await session.setVolume({ level: command.level })
     else if (command?.type === 'mute') await session.setVolume({ muted: command.muted })
@@ -157,6 +206,8 @@ function registerCastHandlers(ipcMain, { getWindow, powerSaveBlocker }) {
 async function shutdownCast() {
   try { await controller?.disconnect({ stopReceiver: true }) } catch {}
   try { discovery?.stop() } catch {}
+  try { upnpDiscovery?.stop() } catch {}
 }
 
 module.exports = { registerCastHandlers, shutdownCast }
+

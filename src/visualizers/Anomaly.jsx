@@ -10,6 +10,7 @@
 // The canvas fills its box, under the floating player bar too; the sphere is
 // centred in the part above it (--player-space), like the round character.
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useRef } from 'react'
 import { getAnalyser, pickColor, useAnalyserVersion } from './audio'
 
@@ -236,9 +237,7 @@ export default function Anomaly({ sensitivity = 5, size = 1, color = ANOMALY_COL
       const analyser = getAnalyser()
       const data = analyser ? new Uint8Array(analyser.frequencyBinCount) : null
       const clock = new THREE.Clock()
-      let frame = null
-      const draw = () => {
-        frame = requestAnimationFrame(draw)
+      const stopDrawing = animateWhileVisible(() => {
         const { sensitivity: sens, size: scale, color: picked } = settingsRef.current
         const hex = pickColor(picked, ANOMALY_COLOR)
         tint.set(hex)
@@ -265,10 +264,9 @@ export default function Anomaly({ sensitivity = 5, size = 1, color = ANOMALY_COL
         anomaly.rotation.y += 0.005 * spin
         anomaly.rotation.z += 0.002 * spin
         renderer.render(scene, camera)
-      }
-      frame = requestAnimationFrame(draw)
+      })
       cleanup = () => {
-        cancelAnimationFrame(frame)
+        stopDrawing()
         observer.disconnect()
         shellGeometry.dispose()
         glowGeometry.dispose()

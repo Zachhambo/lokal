@@ -241,6 +241,7 @@ function initDB() {
     `ALTER TABLE tracks ADD COLUMN clip_start REAL`,
     `ALTER TABLE tracks ADD COLUMN clip_end REAL`,
     `ALTER TABLE tracks ADD COLUMN clip_zoom REAL`,
+    `ALTER TABLE tracks ADD COLUMN clip_transfer_file TEXT`,
     // Downloaded songs: where from ('yt', 'sc', an addon 'a-<key>', 'soulseek',
     // 'web') and which online song ("yt:<id>", "a-<key>:<id>"...), so the same
     // song isn't downloaded twice and versions from different places can be
@@ -294,6 +295,7 @@ function initDB() {
     `ALTER TABLE tracks ADD COLUMN clip_start REAL`,
     `ALTER TABLE tracks ADD COLUMN clip_end REAL`,
     `ALTER TABLE tracks ADD COLUMN clip_zoom REAL`,
+    `ALTER TABLE tracks ADD COLUMN clip_transfer_file TEXT`,
     `ALTER TABLE playlist_tracks ADD COLUMN added_by TEXT DEFAULT 'guest'`,
     `ALTER TABLE playlist_tracks ADD COLUMN added_at INTEGER`,
     
@@ -524,7 +526,7 @@ function importAppData(payload = {}) {
     }
 
     const insertTrack = db.prepare('INSERT INTO tracks (id, file_path, file_hash, title, artist, album, album_artist, track_num, year, genre, genres, record_label, explicit, instrumental, danceability, energy, track_key, loudness, mode, speechiness, acousticness, instrumentalness, liveness, valence, tempo, time_signature, duration, artwork_path, bitrate, last_modified, replaygain, play_count, liked, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    const restoreOnlineReference = db.prepare('UPDATE tracks SET source_url = ?, artwork_url = ?, source_ref = ?, clip_url = ? WHERE id = ?')
+    const restoreOnlineReference = db.prepare('UPDATE tracks SET source_url = ?, artwork_url = ?, source_ref = ?, clip_url = ?, clip_start = ?, clip_end = ?, clip_zoom = ? WHERE id = ?')
     for (const track of tracks) {
       insertTrack.run(
         track.id,
@@ -564,7 +566,7 @@ function importAppData(payload = {}) {
       )
       // Streamed history/likes still need their provider and artwork after a
       // restore, even when no local music file exists on the destination.
-      restoreOnlineReference.run(track.source_url ?? null, track.artwork_url ?? null, track.source_ref ?? null, track.clip_url ?? null, track.id)
+      restoreOnlineReference.run(track.source_url ?? null, track.artwork_url ?? null, track.source_ref ?? null, track.clip_url ?? null, track.clip_start ?? null, track.clip_end ?? null, track.clip_zoom ?? null, track.id)
     }
 
     const insertArtistLink = db.prepare('INSERT INTO artist_track_links (artist_id, track_id) VALUES (?, ?)')

@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const { planFile, targetRate, convertArgs, family } = require('../electron/cast/formats.js')
 const { createCastMediaServer, localAddressFor, parseRange } = require('../electron/cast/mediaServer.js')
 const { createCastMedia } = require('../electron/cast/media.js')
+const { didl, parseXml, value } = require('../electron/cast/upnpXml.js')
 
 test('what goes to the TV as it is, and what is converted (and to what)', () => {
   const direct = info => planFile(info).action
@@ -115,6 +117,84 @@ test('a file the TV can\'t play is converted once (the second time comes from th
   assert.ok(runs[0].includes('flac'))
   const res = await fetch(second.url.replace(/^http:\/\/[^/]+/, `http://127.0.0.1:${server.port}`))
   assert.equal(await res.text(), 'flac-bytes')
+})
+
+test('Sonos can fetch a JPEG when a queue entry is missing its library WebP cover', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-cast-cover-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const song = path.join(dir, 'song.mp3')
+  const cover = path.join(dir, 'cover.webp')
+  const frame = Buffer.alloc(417)
+  frame.set([0xff, 0xfb, 0x90, 0x00])
+  const original = Buffer.concat(Array.from({ length: 40 }, () => frame))
+  fs.writeFileSync(song, original)
+  const sharp = require('sharp')
+  await sharp({ create: { width: 16, height: 16, channels: 3, background: '#229944' } })
+    .webp().toFile(cover)
+
+  const server = createCastMediaServer()
+  await server.start()
+  t.after(() => server.stop())
+  const media = createCastMedia({
+    server,
+    cacheDir: () => path.join(dir, 'cast'),
+    trackRow: id => ({ id, file_path: song, codec: 'MPEG 1 Layer 3', artwork_path: cover }),
+  })
+  const prepared = await media.prepare({ id: 'local', artwork_path: null }, { deviceHost: '127.0.0.1', receiver: 'sonos' })
+  assert.equal(prepared.embeddedCover, true)
+  assert.equal(prepared.converted, false)
+  const audio = Buffer.from(await (await fetch(prepared.url)).arrayBuffer())
+  assert.ok(audio.includes(original), 'audio frames are copied unchanged')
+  assert.deepEqual(fs.readFileSync(song), original, 'the library file is untouched')
+  const parsed = await require('../electron/musicMetadata.js').parseBuffer(audio, 'audio/mpeg')
+  assert.equal(parsed.common.picture[0].format, 'image/jpeg')
+  const url = value(parseXml(didl(prepared, { sonosQueueId: 1 })), 'albumArtURI')
+  assert.match(url, /\/cover\.jpg$/)
+  const head = await fetch(url, { method: 'HEAD' })
+  assert.equal(head.headers.get('content-type'), 'image/jpeg')
+  const response = await fetch(url)
+  assert.equal(response.status, 200)
+  const jpeg = Buffer.from(await response.arrayBuffer())
+  assert.equal(jpeg.length, Number(head.headers.get('content-length')))
+  assert.equal((await sharp(jpeg).metadata()).format, 'jpeg')
+
+  media.release(prepared)
+  assert.equal((await fetch(url)).status, 404)
+})
+
+test('Sonos receives an embedded JPEG in converted FLAC and AAC audio', {
+  skip: spawnSync('ffmpeg', ['-version']).status !== 0 ? 'FFmpeg unavailable' : false,
+}, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lokal-cast-converted-cover-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const original = path.join(dir, 'song.wav')
+  const fixture = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.25', original])
+  assert.equal(fixture.status, 0, fixture.stderr?.toString())
+  const cover = path.join(dir, 'cover.webp')
+  await require('sharp')({ create: { width: 16, height: 16, channels: 3, background: '#229944' } }).webp().toFile(cover)
+  const server = createCastMediaServer()
+  await server.start()
+  t.after(() => server.stop())
+  const media = createCastMedia({
+    server,
+    cacheDir: () => path.join(dir, 'cast'),
+    streamRef: row => ({ provider: 'fixture', id: row.id }),
+    resolveStream: async (_provider, id) => ({
+      file: original, mime: id === 'lossless' ? 'audio/wav' : 'audio/mpeg',
+    }),
+  })
+  for (const [id, mime] of [['lossless', 'audio/flac'], ['lossy', 'audio/mp4']]) {
+    const item = await media.prepare({ id, artwork_path: cover }, { deviceHost: '127.0.0.1', receiver: 'sonos' })
+    assert.equal(item.converted, true)
+    assert.equal(item.embeddedCover, true)
+    const response = await fetch(item.url)
+    assert.equal(response.headers.get('content-type'), mime)
+    const parsed = await require('../electron/musicMetadata.js').parseBuffer(Buffer.from(await response.arrayBuffer()), mime)
+    assert.equal(parsed.common.picture[0].format, 'image/jpeg')
+    assert.ok(parsed.format.duration > 0)
+    media.release(item)
+    assert.equal((await fetch(item.url)).status, 404)
+  }
 })
 
 test('converted songs the TV still holds are kept when the cache is trimmed', async t => {

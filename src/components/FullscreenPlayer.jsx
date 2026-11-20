@@ -5,12 +5,12 @@ import { X, Play, Pause, SkipBack, SkipForward, Heart, Shuffle, Repeat, Repeat1,
 import { useNavigate } from 'react-router-dom'
 import { announceLyricsChanged } from '../lyricLine'
 import { showToast } from './Toaster'
-import { usePlayerStore, useAppStore } from '../store/player'
+import { usePlayerStore, useAppStore, volumeLimit } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
 import LyricsPanel from './LyricsPanel'
 import { cacheLyrics, hasLyricLines, peekLyrics } from '../lyrics/lyricsCache'
 import ArtworkBackdrop, { useArtworkBackdropEnabled } from './ArtworkBackdrop'
-import MotionCover, { loadMotionCover } from './MotionCover'
+import MotionCover, { loadMotionCover, useMotionCoverRevision } from './MotionCover'
 import LikeBurst from './LikeBurst'
 import { useMotionCoverOff } from '../motionCoverPrefs'
 import MixCovers from './MixCovers'
@@ -74,10 +74,10 @@ function CoverIcon({ onClick, label, pressed, dim = false, children }) {
 }
 
 /** Volume as a slim glass pill up the cover's edge: drag (or click) along it. */
-function VolumePill({ volume, onChange }) {
+function VolumePill({ volume, maxVolume, onChange }) {
   const { t } = useTranslation()
   const ref = useRef(null)
-  const volumeWheelRef = useVolumeWheel(volume, onChange)
+  const volumeWheelRef = useVolumeWheel(volume, onChange, maxVolume)
   const attachRef = useCallback(element => {
     ref.current = element
     volumeWheelRef(element)
@@ -85,7 +85,7 @@ function VolumePill({ volume, onChange }) {
   const setFrom = (clientY) => {
     const r = ref.current?.getBoundingClientRect()
     if (!r) return
-    onChange(Math.max(0, Math.min(1, (r.bottom - clientY) / r.height)))
+    onChange(maxVolume * Math.max(0, Math.min(1, (r.bottom - clientY) / r.height)))
   }
   const start = (event) => {
     event.preventDefault()
@@ -96,7 +96,7 @@ function VolumePill({ volume, onChange }) {
     window.addEventListener('pointerup', up)
   }
   const keys = (event) => {
-    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(1, volume + 0.05)) }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') { event.preventDefault(); onChange(Math.min(maxVolume, volume + 0.05)) }
     if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') { event.preventDefault(); onChange(Math.max(0, volume - 0.05)) }
   }
   // The speaker sits inside the pill, at its foot: dark over the white fill,
@@ -104,10 +104,10 @@ function VolumePill({ volume, onChange }) {
   const covered = volume > 0.12
   return (
     <div ref={attachRef} role="slider" tabIndex={0} aria-label={t("Volume")} aria-orientation="vertical"
-      aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(volume * 100)} title={`Volume ${Math.round(volume * 100)}%`}
+      aria-valuemin={0} aria-valuemax={maxVolume * 100} aria-valuenow={Math.round(volume * 100)} title={`Volume ${Math.round(volume * 100)}%`}
       onPointerDown={start} onKeyDown={keys}
       className={`relative h-44 w-7 cursor-pointer overflow-hidden rounded-full border border-white/[0.14] bg-white/[0.06] backdrop-blur-[2px] drop-shadow-[0_1px_4px_rgba(0,0,0,0.3)] outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${COVER_FADE}`}>
-      <div className="absolute inset-x-0 bottom-0 bg-white/60" style={{ height: `${Math.round(volume * 100)}%` }} />
+      <div className="absolute inset-x-0 bottom-0 bg-white/60" style={{ height: `${Math.round(volume / maxVolume * 100)}%` }} />
       <Volume2 size={13} className={`pointer-events-none absolute bottom-2.5 left-1/2 -translate-x-1/2 ${covered ? 'text-black/55' : 'text-white/80'}`} />
     </div>
   )
@@ -309,6 +309,7 @@ export default function FullscreenPlayer() {
   const backdropFx = useArtworkBackdropEnabled()
   const [fsCanvas, setFsCanvas] = useState(false)
   const [squareMotionActive, setSquareMotionActive] = useState(false)
+  const maxVolume = usePlayerStore(volumeLimit)
   const [windowHidden, setWindowHidden] = useState(isWindowHidden)
   useEffect(() => onWindowVisibility(setWindowHidden), [])
   // Turned off for this song from the side panel.
@@ -316,15 +317,16 @@ export default function FullscreenPlayer() {
   const [settings, setSettings] = useState({})
   // Whether the song has a Canvas / moving cover (asked even while it's
   // turned off, so its button stays to turn it back on).
+  const motionCoverRevision = useMotionCoverRevision(currentTrack?.id)
   const [coverClip, setCoverClip] = useState({ id: null, clip: null })
   useEffect(() => {
     const id = currentTrack?.id
     if (!id || !(showFullscreen || showLyricsFullscreen) || settings.fullscreen_visual_mode === 'turntable') return undefined
     let current = true
-    loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, clip: clip?.src ? clip : null }) })
+    loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, revision: motionCoverRevision, clip: clip?.src ? clip : null }) })
     return () => { current = false }
-  }, [currentTrack?.id, showFullscreen, showLyricsFullscreen, settings.fullscreen_visual_mode])
-  const clipNow = coverClip.id === currentTrack?.id ? coverClip.clip : null
+  }, [currentTrack?.id, showFullscreen, showLyricsFullscreen, settings.fullscreen_visual_mode, motionCoverRevision])
+  const clipNow = coverClip.id === currentTrack?.id && coverClip.revision === motionCoverRevision ? coverClip.clip : null
   const { video: musicVideo } = useMusicVideo(currentTrack, showFullscreen || showLyricsFullscreen)
   const showMusicVideo = useMusicVideoView(s => s.show)
   const clipName = clipNow && (clipNow.tall || clipNow.source === 'spotify') ? 'Canvas' : 'Moving Cover'
@@ -656,7 +658,7 @@ export default function FullscreenPlayer() {
     if (!canOpenContext) return
     // Leave fullscreen first, otherwise the overlay hides the page we land on.
     toggleFullscreen()
-    navigateToContext(nav, playbackContext, currentTrack?.id)
+    navigateToContext(nav, playbackContext, currentTrack?.id, currentTrack)
   }
 
   useEffect(() => {
@@ -1060,7 +1062,7 @@ export default function FullscreenPlayer() {
                     )}
                     {/* Volume, up the right edge. */}
                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <VolumePill volume={volume} onChange={setVolume} />
+                      <VolumePill volume={Math.min(volume, maxVolume)} maxVolume={maxVolume} onChange={setVolume} />
                     </div>
                   </div>
                 )}
@@ -1077,8 +1079,9 @@ export default function FullscreenPlayer() {
                 <span className="h-6 w-px bg-white/20" aria-hidden="true" />
                 <CoverIcon onClick={() => setFullscreenPanel(p => p === 'queue' ? 'none' : 'queue')} label={t('Queue')} pressed={fullscreenPanel === 'queue'}><ListMusic size={19}/></CoverIcon>
                 <CoverIcon onClick={() => setFullscreenPanel(p => p === 'lyrics' ? 'none' : 'lyrics')} label={t('Lyrics')} pressed={fullscreenPanel === 'lyrics'}><Mic2 size={19}/></CoverIcon>
-                <input aria-label={t('Volume')} title={t('Volume')} type="range" min="0" max="1" step="0.01"
-                  value={volume} onChange={e => setVolume(Number(e.target.value))}
+                <input aria-label={t('Volume')} title={t('Volume')} type="range" min="0" max={maxVolume} step="0.01"
+                  aria-valuetext={`${Math.round(Math.min(volume, maxVolume) * 100)}%`}
+                  value={Math.min(volume, maxVolume)} onChange={e => setVolume(Number(e.target.value))}
                   className="w-20 accent-white" />
               </div>
             )}

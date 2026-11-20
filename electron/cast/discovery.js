@@ -9,11 +9,13 @@
 // seconds, so a device that was just switched on shows up quickly.
 
 const { EventEmitter } = require('events')
+const { isIPv4 } = require('net')
 
 const SERVICE = '_googlecast._tcp.local'
 const PASSIVE_EVERY_MS = 60000
 const ACTIVE_EVERY_MS = 3000
 const FORGET_AFTER_MS = 4 * 60 * 1000 // not heard of for this long: gone
+const dnsName = name => String(name || '').replace(/\.$/, '').toLowerCase()
 
 // TXT "ca": what the device can do (a bit field).
 const CAN = { videoOut: 1, audioOut: 4, group: 32 }
@@ -40,33 +42,44 @@ function kindOf({ ca, md, port }) {
  * Folds one mDNS response's records into `known` (instance name -> partial
  * device) and returns the instances it touched. Pure, for the tests.
  */
-function absorb(known, records) {
+function absorb(known, records, addresses = new Map(), now = Date.now()) {
   const touched = new Set()
-  const addresses = new Map() // host name -> IPv4
+  const updatedHosts = new Set()
   for (const record of records) {
-    if (record.type === 'A' && record.name) addresses.set(record.name.toLowerCase(), record.data)
+    if (record.type === 'A' && record.name && isIPv4(record.data)) {
+      const host = dnsName(record.name)
+      updatedHosts.add(host)
+      if (record.ttl === 0) {
+        if (addresses.get(host)?.address === record.data) addresses.delete(host)
+      } else {
+        addresses.set(host, { address: record.data, expires: now + Math.min(record.ttl > 0 ? record.ttl * 1000 : FORGET_AFTER_MS, FORGET_AFTER_MS) })
+      }
+    }
   }
   for (const record of records) {
     const name = String(record.name || '')
-    if (record.type === 'PTR' && name.toLowerCase() === SERVICE) {
-      const instance = String(record.data)
-      if (!known.has(instance)) known.set(instance, {})
-      touched.add(instance)
-    } else if (record.type === 'SRV' && name.toLowerCase().endsWith(SERVICE)) {
-      const entry = known.get(name) || {}
-      entry.target = String(record.data?.target || '').toLowerCase()
+    const key = dnsName(name)
+    const ptr = record.type === 'PTR' && key === SERVICE
+    if (!ptr && (!['SRV', 'TXT'].includes(record.type) || !key.endsWith('.' + SERVICE))) continue
+    const instance = ptr ? String(record.data || '') : name
+    const id = dnsName(instance)
+    if (!id.endsWith('.' + SERVICE) || record.ttl === 0) continue
+    const entry = known.get(id) || { name: instance.replace(/\.$/, '') }
+    if (record.type === 'SRV') {
+      entry.target = dnsName(record.data?.target)
       entry.port = record.data?.port || 8009
-      known.set(name, entry)
-      touched.add(name)
-    } else if (record.type === 'TXT' && name.toLowerCase().endsWith(SERVICE)) {
-      const entry = known.get(name) || {}
-      entry.txt = txtMap(record)
-      known.set(name, entry)
-      touched.add(name)
-    }
+    } else if (record.type === 'TXT') entry.txt = txtMap(record)
+    entry.lastSeen = now
+    known.set(id, entry)
+    touched.add(id)
   }
   for (const [instance, entry] of known) {
-    if (entry.target && addresses.has(entry.target)) { entry.host = addresses.get(entry.target); touched.add(instance) }
+    const cached = addresses.get(entry.target)
+    const host = cached && cached.expires > now ? cached.address : undefined
+    if (entry.host !== host || (host && updatedHosts.has(entry.target))) {
+      entry.host = host
+      touched.add(instance)
+    }
   }
   return touched
 }
@@ -99,6 +112,7 @@ class CastDiscovery extends EventEmitter {
     this.now = now
     this.log = log
     this.known = new Map() // instance -> partial device
+    this.addresses = new Map() // host -> IPv4, including records received before SRV
     this.devices = new Map() // id -> device (with lastSeen)
     this.manual = new Map() // id -> device added by address
     this.mdns = null
@@ -144,29 +158,33 @@ class CastDiscovery extends EventEmitter {
 
   onResponse(response) {
     const records = [...(response?.answers || []), ...(response?.additionals || [])]
-    const touched = absorb(this.known, records)
+    const now = this.now()
+    const touched = absorb(this.known, records, this.addresses, now)
     let changed = false
     for (const instance of touched) {
       const entry = this.known.get(instance)
       const device = deviceOf(instance, entry)
       if (!device) {
         // Half an answer (no address or no TXT yet): ask for the rest of it.
-        if (entry && (!entry.txt || !entry.port)) try { this.mdns?.query({ questions: [{ name: instance, type: 'SRV' }, { name: instance, type: 'TXT' }] }) } catch {}
+        if (entry && (!entry.txt || !entry.port)) try { this.mdns?.query({ questions: [{ name: entry.name, type: 'SRV' }, { name: entry.name, type: 'TXT' }] }) } catch {}
         else if (entry?.target && !entry.host) try { this.mdns?.query({ questions: [{ name: entry.target, type: 'A' }] }) } catch {}
         continue
       }
       const before = this.devices.get(device.id)
       const same = before && before.name === device.name && before.host === device.host && before.port === device.port
-      this.devices.set(device.id, { ...device, lastSeen: this.now() })
+      this.devices.set(device.id, { ...device, lastSeen: now })
       if (!same) changed = true
     }
     if (changed) this.emit('change', this.list())
   }
 
   expire() {
+    const now = this.now()
+    for (const [host, record] of this.addresses) if (record.expires <= now) this.addresses.delete(host)
+    for (const [instance, entry] of this.known) if (now - entry.lastSeen > FORGET_AFTER_MS) this.known.delete(instance)
     let changed = false
     for (const [id, device] of this.devices) {
-      if (this.now() - device.lastSeen > FORGET_AFTER_MS) { this.devices.delete(id); changed = true }
+      if (now - device.lastSeen > FORGET_AFTER_MS) { this.devices.delete(id); changed = true }
     }
     if (changed) this.emit('change', this.list())
   }
@@ -207,6 +225,10 @@ class CastDiscovery extends EventEmitter {
 async function probeAddress(host, { fetchImpl = (...args) => fetch(...args), timeoutMs = 2500 } = {}) {
   const address = String(host || '').trim()
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(address)) throw new Error('Enter the device\'s IP address, like 192.168.1.40')
+  try {
+    const sonos = await require('./upnp').describe(`http://${address}:1400/xml/device_description.xml`, fetchImpl)
+    if (sonos) return sonos
+  } catch {}
   let name = address
   let model = ''
   const controller = new AbortController()
@@ -220,4 +242,12 @@ async function probeAddress(host, { fetchImpl = (...args) => fetch(...args), tim
   return { id: `ip:${address}`, name, model, host: address, port: 8009, kind: 'tv' }
 }
 
-module.exports = { CastDiscovery, absorb, deviceOf, kindOf, txtMap, probeAddress, SERVICE, CAN }
+function mergeDevices(saved, live) {
+  const all = new Map(saved.map(device => [device.id, device]))
+  for (const device of live) all.set(device.id, { ...all.get(device.id), ...device })
+  const order = { tv: 0, speaker: 1, group: 2 }
+  return [...all.values()].sort((a, b) => (order[a.kind] ?? 3) - (order[b.kind] ?? 3) || a.name.localeCompare(b.name))
+}
+
+module.exports = { mergeDevices, CastDiscovery, absorb, deviceOf, kindOf, txtMap, probeAddress, SERVICE, CAN }
+

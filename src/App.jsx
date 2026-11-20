@@ -361,6 +361,8 @@ function AnimatedRoutes() {
         <Route path="/playlist/:id" element={<PageTransition gated><Playlist /></PageTransition>} />
         <Route path="/spotify/playlist/:id" element={<PageTransition gated><SpotifyPlaylist /></PageTransition>} />
         <Route path="/youtube/playlist/:id" element={<PageTransition gated><SpotifyPlaylist provider="youtube" /></PageTransition>} />
+        <Route path="/discovery/spotify/playlist/:id" element={<PageTransition><SpotifyPlaylist discovery /></PageTransition>} />
+        <Route path="/discovery/youtube/playlist/:id" element={<PageTransition><SpotifyPlaylist provider="youtube" discovery /></PageTransition>} />
         {/* The Downloader lives in Search now; what asked for it (a Soulseek search) is passed on. */}
         <Route path="/downloader" element={<Navigate to="/search" replace state={location.state} />} />
         <Route path="/profile" element={<PageTransition><Profile /></PageTransition>} />
@@ -493,7 +495,13 @@ export default function App() {
     return () => { unsubscribe?.(); clearInterval(interval) }
   }, [])
 
-  useEffect(() => api.onLibraryChanged?.(() => {
+  useEffect(() => api.onLibraryChanged?.(change => {
+    if (change?.videoClips?.length) {
+      usePlayerStore.getState().syncTracks(change.videoClips)
+      for (const { id } of change.videoClips) {
+        window.dispatchEvent(new CustomEvent('lokal:music-video-edited', { detail: { trackId: id } }))
+      }
+    }
     window.dispatchEvent(new Event('lokal:refresh'))
   }), [])
 
@@ -839,7 +847,7 @@ export default function App() {
   const {
     currentTrack, isPlaying, duration, volume, repeat,
     outputDeviceId,
-    autoNext, setProgress, setDuration, setIsPlaying, setIsBuffering,
+    autoNext, setDuration, setIsPlaying, setIsBuffering,
     setAudioRef, setCfAudioRef, initLiked, setCrossfade, crossfadeSeconds,
     setActiveAudioElement,
     shuffle, playNext, addToQueue, skipAhead,
@@ -847,7 +855,7 @@ export default function App() {
   } = usePlayerStore(useShallow(({
     currentTrack, isPlaying, duration, volume, repeat,
     outputDeviceId,
-    autoNext, setProgress, setDuration, setIsPlaying, setIsBuffering,
+    autoNext, setDuration, setIsPlaying, setIsBuffering,
     setAudioRef, setCfAudioRef, initLiked, setCrossfade, crossfadeSeconds,
     setActiveAudioElement,
     shuffle, playNext, addToQueue, skipAhead,
@@ -855,7 +863,7 @@ export default function App() {
   }) => ({
     currentTrack, isPlaying, duration, volume, repeat,
     outputDeviceId,
-    autoNext, setProgress, setDuration, setIsPlaying, setIsBuffering,
+    autoNext, setDuration, setIsPlaying, setIsBuffering,
     setAudioRef, setCfAudioRef, initLiked, setCrossfade, crossfadeSeconds,
     setActiveAudioElement,
     shuffle, playNext, addToQueue, skipAhead,
@@ -1727,28 +1735,37 @@ export default function App() {
     return () => { current = false }
   }, [currentTrack, isPlaying])
 
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-    
-    const activeEl = usePlayerStore.getState().activeAudioElement === 'primary' ? audioRef.current : cfAudioRef.current
-    if (!activeEl) return
-
-    const update = () => {
-      if (isStationTrack(usePlayerStore.getState().currentTrack)) return
-      if (typeof navigator.mediaSession.setPositionState === 'function') {
-        try {
-          navigator.mediaSession.setPositionState({
-            duration: activeEl.duration || 0,
-            playbackRate: activeEl.playbackRate || 1,
-            position: activeEl.currentTime || 0
-          })
-        } catch {}
-      }
+  // Hidden windows still run both audio decks and check transitions on every
+  // media event. The display clock and OS position need fewer updates there.
+  const lastPositionUpdate = useRef(0)
+  const publishMediaPosition = useCallback((element, { force = false } = {}) => {
+    const state = usePlayerStore.getState()
+    const current = state.currentTrack
+    if (!current || state.castActive || current.atmosNative ||
+        !isAudioEventForTrack(element, current.id)) return
+    const now = performance.now()
+    const station = isStationTrack(current)
+    const progress = station ? stationSongTime(current, element.currentTime) ?? 0 : element.currentTime
+    const duration = station ? Number(current.song_duration) || 0 : element.duration
+    if (!force && state.isPlaying && isWindowHidden() && now - lastPositionUpdate.current < 1000) return
+    lastPositionUpdate.current = now
+    if (progress !== state.progress || !Object.is(duration, state.duration)) {
+      usePlayerStore.setState({ progress, duration })
     }
-
-    activeEl.addEventListener('timeupdate', update)
-    return () => activeEl.removeEventListener('timeupdate', update)
+    if (!station && Number.isFinite(duration) && duration > 0) {
+      try {
+        navigator.mediaSession?.setPositionState?.({
+          duration, playbackRate: element.playbackRate || 1, position: Math.min(progress, duration),
+        })
+      } catch {}
+    }
   }, [])
+
+  useEffect(() => onWindowVisibility(hidden => {
+    if (hidden) return
+    const active = usePlayerStore.getState().activeAudioElement === 'primary' ? audioRef.current : cfAudioRef.current
+    if (active?.readyState) publishMediaPosition(active, { force: true })
+  }), [publishMediaPosition])
 
   useEffect(() => { userRef.current = user }, [user])
 
@@ -1967,11 +1984,10 @@ export default function App() {
       }, Math.max(0, delay))
     }
     const elapsed = Date.now() - lastSync
+    initLiked([])
+    load()
     if (elapsed > syncCooldownMs || pendingPage) {
-      if (pendingPage) load()
       scheduleSync(pendingPage || 1, Math.max(0, syncCooldownMs - Math.max(0, elapsed)))
-    } else {
-      load()
     }
     // A download that added songs: a liked streamed song may now be a file
     // with an id of its own (its like moved to it), so reload the hearts.
@@ -3389,21 +3405,10 @@ export default function App() {
     const cur = e.target.currentTime
     const dur = e.target.duration
 
-    // Online radio: the time into the song heard now (when it's known), and
-    // its length only if the station's API said.
-    const playing = usePlayerStore.getState().currentTrack
-    if (isStationTrack(playing)) {
-      setProgress(stationSongTime(playing, cur) ?? 0)
-      setDuration(Number(playing.song_duration) || 0)
-      return
-    }
-    
-    setProgress(cur)
-    setDuration(dur)
-    
-    if (!dur || isNaN(dur) || isCrossfadingRef.current) return
-
+    publishMediaPosition(e.target)
     const state = usePlayerStore.getState()
+    if (isStationTrack(state.currentTrack) || !dur || isNaN(dur) || isCrossfadingRef.current) return
+
     const cf = state.crossfade?.beforeEnd || 0
     const remaining = dur - cur
 
@@ -3474,7 +3479,7 @@ export default function App() {
     }
 
     topUpRelated()
-  }, [triggerCrossfade, isEventFromActive, topUpRelated, automixAnalysis, automixPlanFor, preparedStemFor, prepareModelPair])
+  }, [triggerCrossfade, isEventFromActive, publishMediaPosition, topUpRelated, automixAnalysis, automixPlanFor, preparedStemFor, prepareModelPair])
 
   const handlePrimaryDurationChange = useCallback((e) => {
     if (isEventFromActive(e) && !isStationTrack(usePlayerStore.getState().currentTrack)) setDuration(e.target.duration)
@@ -3975,6 +3980,7 @@ export default function App() {
           onLoadedMetadata={(e) => logAddonMediaEvent('loadedmetadata', e, 'primary')}
           onCanPlay={(e) => { logAddonMediaEvent('canplay', e, 'primary'); handleAudioCanPlay(e) }}
           onSeeking={onAudioSeeking}
+          onSeeked={e => { if (isEventFromActive(e)) publishMediaPosition(e.target, { force: true }) }}
           preload="auto"
           crossOrigin="anonymous"
           onTimeUpdate={handleTimeUpdate}
@@ -3988,7 +3994,7 @@ export default function App() {
           onEmptied={(e) => logAddonMediaEvent('emptied', e, 'primary')}
           onPlaying={(e) => { logAddonMediaEvent('playing', e, 'primary'); if (isEventFromActive(e)) { setIsBuffering(false); usePlayerStore.getState().setStreamLoading(null); clearPlaybackError() } }}
           onPlay={(e) => { logAddonMediaEvent('play', e, 'primary'); if (!isEventFromActive(e) || usePlayerStore.getState().castActive) return; setIsPlaying(true); startTimer(); sendListenBrainzNowPlaying() }}
-          onPause={(e) => { logAddonMediaEvent('pause', e, 'primary'); if (pauseSuppressRef.current || usePlayerStore.getState().castActive) return; if (!isEventFromActive(e)) return; if (ignoreElementPause(e.currentTarget)) return; setIsPlaying(false); stopTimer() }}
+          onPause={(e) => { logAddonMediaEvent('pause', e, 'primary'); if (pauseSuppressRef.current || usePlayerStore.getState().castActive) return; if (!isEventFromActive(e)) return; if (ignoreElementPause(e.currentTarget)) return; publishMediaPosition(e.currentTarget, { force: true }); setIsPlaying(false); stopTimer() }}
         />
         <audio
           ref={cfAudioRef}
@@ -3996,6 +4002,7 @@ export default function App() {
           onLoadedMetadata={(e) => logAddonMediaEvent('loadedmetadata', e, 'cf')}
           onCanPlay={(e) => { logAddonMediaEvent('canplay', e, 'cf'); handleAudioCanPlay(e) }}
           onSeeking={onAudioSeeking}
+          onSeeked={e => { if (isEventFromActive(e)) publishMediaPosition(e.target, { force: true }) }}
           preload="auto"
           crossOrigin="anonymous"
           onTimeUpdate={handleTimeUpdate}
@@ -4009,7 +4016,7 @@ export default function App() {
           onEmptied={(e) => logAddonMediaEvent('emptied', e, 'cf')}
           onPlaying={(e) => { logAddonMediaEvent('playing', e, 'cf'); if (isEventFromActive(e)) { setIsBuffering(false); usePlayerStore.getState().setStreamLoading(null); clearPlaybackError() } }}
           onPlay={(e) => { logAddonMediaEvent('play', e, 'cf'); if (!isEventFromActive(e) || usePlayerStore.getState().castActive) return; setIsPlaying(true); startTimer(); sendListenBrainzNowPlaying() }}
-          onPause={(e) => { logAddonMediaEvent('pause', e, 'cf'); if (pauseSuppressRef.current || usePlayerStore.getState().castActive) return; if (!isEventFromActive(e)) return; if (ignoreElementPause(e.currentTarget)) return; setIsPlaying(false); stopTimer() }}
+          onPause={(e) => { logAddonMediaEvent('pause', e, 'cf'); if (pauseSuppressRef.current || usePlayerStore.getState().castActive) return; if (!isEventFromActive(e)) return; if (ignoreElementPause(e.currentTarget)) return; publishMediaPosition(e.currentTarget, { force: true }); setIsPlaying(false); stopTimer() }}
         />
         {/* Never connect this to the Web Audio graph (no createMediaElementSource) -
             it exists purely to keep a native, audible HTMLMediaElement "playing"

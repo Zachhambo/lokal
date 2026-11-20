@@ -15,7 +15,7 @@ import Waves from '../visualizers/Waves'
 import Lightning from '../visualizers/Lightning'
 import { QueueContent } from './QueuePanel'
 import ArtworkBackdrop, { useArtworkBackdropEnabled } from './ArtworkBackdrop'
-import MotionCover, { loadMotionCover } from './MotionCover'
+import MotionCover, { loadMotionCover, useMotionCoverRevision } from './MotionCover'
 import { useMotionCoverOff } from '../motionCoverPrefs'
 import MixCovers from './MixCovers'
 import { useMusicVideo, useMusicVideoView } from '../musicVideo'
@@ -413,6 +413,7 @@ export default function RightSidebar() {
   // (motionCoverPrefs.js). Whether it has one is asked even while it's off,
   // so the button stays to turn it back on.
   const [coverOff, setCoverOff] = useMotionCoverOff(currentTrack)
+  const motionCoverRevision = useMotionCoverRevision(currentTrack?.id)
   const [coverClip, setCoverClip] = useState({ id: null, clip: null })
   useEffect(() => {
     const id = currentTrack?.id
@@ -422,10 +423,10 @@ export default function RightSidebar() {
     // requests for a hidden panel; the player/lyrics still work normally.
     if (!id || !showRightSidebar || sidePanelView !== 'info') return undefined
     let current = true
-    loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, clip: clip?.src ? clip : null }) })
+    loadMotionCover(id).then(clip => { if (current) setCoverClip({ id, revision: motionCoverRevision, clip: clip?.src ? clip : null }) })
     return () => { current = false }
-  }, [currentTrack?.id, showRightSidebar, sidePanelView])
-  const clipNow = coverClip.id === currentTrack?.id ? coverClip.clip : null
+  }, [currentTrack?.id, showRightSidebar, sidePanelView, motionCoverRevision])
+  const clipNow = coverClip.id === currentTrack?.id && coverClip.revision === motionCoverRevision ? coverClip.clip : null
   // AutoMix turns the cover over into the next song's (when it's a still one).
   // The official music video, once found and checked (musicVideo.js).
   const { video: musicVideo } = useMusicVideo(showRightSidebar ? currentTrack : null)
@@ -489,7 +490,7 @@ export default function RightSidebar() {
       </p>
       {canOpenContext ? (
         <button
-          onClick={() => navigateToContext(nav, playbackContext, currentTrack?.id)}
+          onClick={() => navigateToContext(nav, playbackContext, currentTrack?.id, currentTrack)}
           title={`Go to ${playbackContext.name}`}
           className={`mt-0.5 block max-w-full truncate text-xs hover:underline text-left ${fx ? 'text-white/85 hover:text-white' : 'text-accent'}`}>
           {playbackContext.name}

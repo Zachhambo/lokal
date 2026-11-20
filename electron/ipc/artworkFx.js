@@ -111,6 +111,7 @@ async function motionForTrack(trackId, ffmpeg) {
     settings: settingsMap(),
     cacheDir: motionCacheDir(),
     ffmpeg,
+    offline: !!process.versions.electron && !require('electron').net.isOnline(),
   })
 }
 

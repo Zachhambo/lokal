@@ -7,6 +7,7 @@
 //   strength   how strongly the music moves them, 1 = as in the pen
 //   opacity    0-1
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useRef } from 'react'
 import { getAnalyser, pickColor, useAnalyserVersion } from './audio'
 
@@ -224,9 +225,7 @@ export default function Lightning({ isPlaying, colors = LIGHTNING_COLORS, streng
     let active = 0
     let time = 0
     let last = 0
-    let frame = null
-    const draw = (now) => {
-      frame = requestAnimationFrame(draw)
+    const stopDrawing = animateWhileVisible(now => {
       // 30 frames a second, like the other player bar visualizations; 15
       // while it only idles (paused, the lines barely sway).
       if (now - last < 1000 / (active > 0 || playingRef.current ? 30 : 15) - 1) return
@@ -252,10 +251,9 @@ export default function Lightning({ isPlaying, colors = LIGHTNING_COLORS, streng
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
-    }
-    frame = requestAnimationFrame(draw)
+    })
     return () => {
-      cancelAnimationFrame(frame)
+      stopDrawing()
       observer.disconnect()
       gl.deleteBuffer(buffer)
       gl.deleteProgram(program)

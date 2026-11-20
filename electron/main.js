@@ -693,8 +693,8 @@ app.whenReady().then(async () => {
     if (image.isEmpty()) return
     accentIcon = image
     try {
-      if (process.platform === 'darwin') app.dock?.setIcon(image)
-      else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(image)
+      // Let macOS use the bundle icon in the Dock so its size stays consistent.
+      if (process.platform !== 'darwin' && mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(image)
       if (tray && !tray.isDestroyed()) tray.setImage(trayImage(image))
     } catch (e) { log.warn('[icon] Could not apply the accent icon:', e.message) }
   })

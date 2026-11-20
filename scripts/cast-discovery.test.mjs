@@ -72,6 +72,36 @@ test('mDNS that can\'t start finds nothing instead of throwing', () => {
   assert.deepEqual(discovery.list(), [])
 })
 
+test('Nest replies correlate across packets even if the A record arrives first', t => {
+  const mdns = pretendMdns()
+  const discovery = new CastDiscovery({ mdns: () => mdns })
+  t.after(() => discovery.stop())
+  discovery.start()
+  function response(...answers) { mdns.emit('response', { answers }) }
+  response({ type: 'A', name: 'Kitchen.Local.', data: '192.168.1.41', ttl: 120 })
+  response({ type: 'PTR', name: SERVICE.toUpperCase() + '.', data: 'Nest-1.' + SERVICE })
+  response({ type: 'SRV', name: 'NEST-1.' + SERVICE + '.', data: { target: 'kitchen.local', port: 8009 } })
+  response({ ...txt({ id: 'nest', fn: 'Kitchen speaker', ca: '4' }), name: 'nest-1.' + SERVICE })
+  assert.deepEqual(discovery.list().map(({ name, host }) => [name, host]), [['Kitchen speaker', '192.168.1.41']])
+})
+
+test('Cast caches expire an old A record before a later service announcement', t => {
+  const mdns = pretendMdns()
+  let now = 1000
+  const discovery = new CastDiscovery({ mdns: () => mdns, now: () => now })
+  t.after(() => discovery.stop())
+  discovery.start()
+  mdns.emit('response', { answers: [{ type: 'A', name: 'nest.local', data: '192.168.1.41', ttl: 1 }] })
+  now += 1500
+  const reply = announce('Nest-1.' + SERVICE, { target: 'nest.local', id: 'nest', fn: 'Kitchen speaker', ca: '4' })
+  reply.additionals.pop()
+  mdns.emit('response', reply)
+  assert.deepEqual(discovery.list(), [])
+  assert.ok(mdns.queries.some(q => q.questions.some(question => question.name === 'nest.local' && question.type === 'A')))
+  mdns.emit('response', { answers: [{ type: 'A', name: 'nest.local', data: '192.168.1.42' }] })
+  assert.equal(discovery.list()[0].host, '192.168.1.42')
+})
+
 test('kinds, and a device added by its address takes its name from the device', async () => {
   assert.equal(kindOf({ ca: '4', md: 'Google Home' }), 'speaker')
   assert.equal(kindOf({ ca: '5', md: 'Chromecast' }), 'tv')

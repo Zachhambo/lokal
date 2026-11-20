@@ -84,7 +84,7 @@ function ClipLoop({ link, start, end, zoom = 0, onActive, onFail }) {
     const stopAt = (to) => (Number.isFinite(v.duration) && v.duration > 0 ? Math.min(to, v.duration - 0.05) : to)
     const check = () => {
       const part = range()
-      if (v.currentTime >= stopAt(part.end) || v.currentTime < part.start - 0.5) v.currentTime = part.start
+      if (!v.seeking && (v.currentTime >= Math.max(part.start, stopAt(part.end)) || v.currentTime < part.start)) v.currentTime = part.start
       frame = requestAnimationFrame(check)
     }
     const run = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(check) }

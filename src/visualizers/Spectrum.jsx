@@ -13,6 +13,7 @@
 //              the line through the playback buttons): twice as high, and
 //              nothing at all while it's silent
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useRef } from 'react'
 import { getAnalyser, pickColor, sliceLevel, spectrumSlices, useAnalyserVersion } from './audio'
 
@@ -50,10 +51,8 @@ export default function Spectrum({ isPlaying, bars = 119, barWidth = 4, height =
     // towards the highs.
     const ranges = analyser ? spectrumSlices(analyser, bars) : []
 
-    let frame = null
     let last = 0
-    const draw = (now = performance.now()) => {
-      frame = requestAnimationFrame(draw)
+    return animateWhileVisible(now => {
       if (now - last < FRAME_MS - 1) return
       last = now
       if (analyser && isPlaying) analyser.getByteFrequencyData(data)
@@ -93,10 +92,8 @@ export default function Spectrum({ isPlaying, bars = 119, barWidth = 4, height =
         if (h > 0) bar(i * (barWidth + GAP), height - h, barWidth, h, 'top')
       }
       // Paused (or no audio yet): once the bars have fallen, stop drawing.
-      if (!moving && !(analyser && isPlaying)) { cancelAnimationFrame(frame); frame = null }
-    }
-    draw()
-    return () => { if (frame) cancelAnimationFrame(frame) }
+      if (!moving && !(analyser && isPlaying)) return false
+    })
   }, [isPlaying, bars, barWidth, height, strength, color, radius, width, canvasHeight, mirrored, analyserVersion])
 
   return (

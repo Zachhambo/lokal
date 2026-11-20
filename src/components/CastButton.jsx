@@ -80,7 +80,7 @@ export default function CastButton() {
 
   const backHere = async () => {
     if (castActive) await useCastStore.getState().disconnect()
-    setOpen(false)
+    if (!useCastStore.getState().error) setOpen(false)
   }
 
   const label = castActive
@@ -167,6 +167,17 @@ export default function CastButton() {
             {castActive && status?.receiver === 'lokal' && <TvView />}
 
             {error && <p role="alert" className="px-2.5 pt-2 text-xs text-red-400">{error}</p>}
+            {castActive && error && (
+              <button type="button" role="menuitem"
+                onClick={async () => {
+                  await useCastStore.getState().leave()
+                  if (!useCastStore.getState().error) setOpen(false)
+                }}
+                className="mt-1 w-full rounded-lg px-2.5 py-2 text-left text-xs text-text hover:bg-card">
+                <span className="block">Return to this computer paused</span>
+                <span className="block text-[11px] text-muted">The receiver may still be playing. Stop it separately if needed.</span>
+              </button>
+            )}
 
             <div className="mt-1 border-t border-border pt-1">
               {adding

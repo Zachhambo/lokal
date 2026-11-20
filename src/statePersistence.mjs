@@ -46,8 +46,8 @@ const STATIC_ROUTES = new Set([
   '/settings', '/cache-analysis',
 ])
 const DETAIL_ROUTES = /^\/(?:artist|genre|playlist)\/[a-zA-Z0-9%_.~-]{1,200}$/
-const PROVIDER_ROUTES = /^\/(?:spotify|youtube)\/playlist\/[a-zA-Z0-9%_.~-]{1,200}$/
-const HOME_ROUTES = /^\/home\/(?:discovery|flow|releases|history)(?:\/[a-zA-Z0-9%_.~-]{1,100})?$/
+const PROVIDER_ROUTES = /^\/(?:discovery\/)?(?:spotify|youtube)\/playlist\/[a-zA-Z0-9%_.~-]{1,200}$/
+const HOME_ROUTES = /^\/home\/(?:home|discovery|flow|releases|history)(?:\/[a-zA-Z0-9%_.~-]{1,100})?$/
 
 export function allowedSavedRoute(path) {
   return typeof path === 'string' && path.length <= 256 &&

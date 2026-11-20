@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { api } from '../api'
 import { showLoadingToast, showToast } from './Toaster'
-import { setOutputRoute, usePlayerStore } from '../store/player'
+import { setOutputRoute, usePlayerStore, readLocalVolume } from '../store/player'
 import { beginAtmosOutputRelease } from '../audio/atmosHandoff.mjs'
 
 /**
@@ -61,7 +61,9 @@ export default function AtmosTransport() {
         setOutputRoute(route)
         toast?.close()
         toast = null
-        setPlayer({ isPlaying: true, isBuffering: false })
+        const volume = Math.min(1, state.volume)
+        if (state.volume > 1) route.setVolume(volume)
+        setPlayer({ isPlaying: true, isBuffering: false, volume })
         return
       }
       if (next.state === 'progress') {
@@ -110,6 +112,10 @@ export default function AtmosTransport() {
             now.currentTrack?.atmosNative !== before.currentTrack?.atmosNative)) {
         active = false
         setOutputRoute(null)
+        if (!now.castActive && !now.currentTrack?.atmosNative) {
+          const local = readLocalVolume(now.volumeBoostEnabled)
+          if (local !== now.volume) setPlayer({ volume: local })
+        }
         toast?.close()
         toast = null
         // Zustand subscribers fire synchronously on track selection.

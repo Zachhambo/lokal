@@ -56,7 +56,7 @@ export function useKeyboardShortcuts() {
         if (key === 'ArrowRight') run = () => player.next()
         else if (key === 'ArrowLeft') run = () => player.prev()
         else if (key === 'ArrowUp' || key === 'ArrowDown') {
-          const volume = Math.min(1, Math.max(0, Math.round(((player.volume ?? 1) + (key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10))
+          const volume = Math.round(((player.volume ?? 1) + (key === 'ArrowUp' ? 0.1 : -0.1)) * 10) / 10
           run = () => player.setVolume(volume)
         }
         else if (key === 's') run = () => player.toggleShuffle()

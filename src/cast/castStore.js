@@ -12,6 +12,7 @@ export const useCastStore = create((set, get) => ({
   // The device being connected to (the menu shows it spinning).
   connecting: null,
   error: null,
+  commandError: null,
   // A session that just started: { joined, at }. The player takes over from it.
   session: null,
   // A session that just ended: { reason: 'local'|'stopped'|'lost', last, at }.
@@ -28,7 +29,11 @@ export const useCastStore = create((set, get) => ({
   },
 
   setDevices: devices => set({ devices: Array.isArray(devices) ? devices : [] }),
-  setStatus: status => set({ status: status || { state: 'idle' } }),
+  setStatus: status => set(state => {
+    const next = status || { state: 'idle' }
+    const commandError = next.state === state.status?.state ? state.commandError : null
+    return { status: next, commandError, error: next.error || commandError || null }
+  }),
 
   /** The list (and a few seconds of looking hard: the menu is open). */
   refresh: async () => {
@@ -39,11 +44,11 @@ export const useCastStore = create((set, get) => ({
 
   connect: async deviceId => {
     if (get().connecting) return
-    set({ connecting: deviceId, error: null })
+    set({ connecting: deviceId, error: null, commandError: null })
     try {
       const result = await api.castConnect(deviceId)
       if (result?.error) throw new Error(result.error)
-      set({ connecting: null, status: result.status, session: { joined: !!result.joined, at: Date.now() } })
+      set({ connecting: null, status: result.status, session: { joined: !!result.joined, paused: result.previousStopped === false, at: Date.now() } })
     } catch (error) {
       set({ connecting: null, error: friendly(error) })
     }
@@ -51,8 +56,21 @@ export const useCastStore = create((set, get) => ({
 
   /** Back to this computer: the TV's app is closed and the song carries on here, from where it was. */
   disconnect: async () => {
-    const last = await api.castDisconnect({ stopReceiver: true }).catch(() => null)
-    set({ ended: { reason: 'local', last: last || get().status, at: Date.now() }, session: null })
+    set({ error: null, commandError: null })
+    try {
+      const last = await api.castDisconnect({ stopReceiver: true })
+      if (last?.error) throw new Error(last.error)
+      set({ ended: { reason: 'local', last: last || get().status, at: Date.now() }, session: null, error: null, commandError: null })
+    } catch (error) { set({ error: friendly(error), commandError: friendly(error) }) }
+  },
+
+  // Explicit recovery from a vanished receiver; local playback stays paused.
+  leave: async () => {
+    try {
+      const last = await api.castDisconnect({ stopReceiver: false })
+      if (last?.error) throw new Error(last.error)
+      set({ ended: { reason: 'lost', last: last || get().status, at: Date.now() }, session: null, error: null })
+    } catch (error) { set({ error: friendly(error), commandError: friendly(error) }) }
   },
 
   /** The main process ended it (the TV was switched off, its app closed, the network went). */
@@ -82,3 +100,4 @@ function friendly(error) {
 
 /** Whether a device is a TV, a speaker or a group (the menu's icons). */
 export const deviceKind = device => (device?.kind === 'group' ? 'group' : device?.kind === 'speaker' ? 'speaker' : 'tv')
+

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { parseClipTime } from '../src/clipVideo.js'
 import { syncVideo, seekVideo } from '../src/musicVideoPlayback.js'
 
 const segments = [{ start: 0, end: null, offset: 4 }]
@@ -79,4 +80,27 @@ test('a downloaded video in a part not buffered yet goes straight to the song (n
   const element = Object.assign(video(), { currentSrc: 'file:///videos/a.mp4', readyState: 4, buffered: { length: 0 } })
   syncVideo(element, { time: 60, segments, isPlaying: true })
   assert.equal(element.currentTime, 64)
+})
+
+for (const src of ['file:///videos/clip.mp4', 'lokal-stream://ytv/abcdefghijk']) {
+  test(`the clip starts, wraps and seeks within the chosen range for ${src}`, () => {
+    const element = Object.assign(video(), { src })
+    const clip = { start: 75, end: 85 }
+    syncVideo(element, { time: 0, clip, isPlaying: true })
+    assert.equal(element.currentTime, 75)
+    element.currentTime = 85
+    syncVideo(element, { time: 10.5, clip, isPlaying: true })
+    assert.equal(element.currentTime, 75.5)
+    const state = { isPlaying: false, setProgressWithAudioUpdate() {} }
+    seekVideo(24, { state, element, clip })
+    assert.equal(element.currentTime, 79)
+  })
+}
+
+test('clip times accept seconds and clock notation and reject malformed values', () => {
+  assert.equal(parseClipTime('0'), 0)
+  assert.equal(parseClipTime('1:15.5'), 75.5)
+  assert.equal(parseClipTime('1:02:03'), 3723)
+  assert.equal(parseClipTime(''), null)
+  for (const value of ['-1', 'abc', '1::20', '1:65', '1m20']) assert.ok(Number.isNaN(parseClipTime(value)))
 })

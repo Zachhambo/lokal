@@ -250,6 +250,8 @@ export default function Settings() {
   const [autoplayEnabled, setAutoplayEnabled] = useState(() => {
     try { return localStorage.getItem('lokal-autoplay') !== '0' } catch { return true }
   })
+  const volumeBoostEnabled = usePlayerStore(s => s.volumeBoostEnabled)
+  const setVolumeBoostEnabled = usePlayerStore(s => s.setVolumeBoostEnabled)
   const playbackSpeed = usePlaybackSpeed(s => s.speed)
   const setPlaybackSpeed = usePlaybackSpeed(s => s.setSpeed)
   // Seeded from the settings already read (and the version / tools found on
@@ -1743,6 +1745,13 @@ activeCategory === 'data' ? usersTried
             try { localStorage.setItem('lokal-autoplay', enabled ? '1' : '0') } catch {}
           }} className="px-4 py-1.5 rounded-lg text-xs border border-border">
             {autoplayEnabled ? t("On") : t("Off")}
+          </button>
+        </Row>
+        <Row label={t('Volume booster')} desc={t('Raise volume up to 200% for audio played through Lokal’s software output.')}>
+          <button type="button" aria-label={t('Volume booster')} aria-pressed={volumeBoostEnabled}
+            onClick={() => setVolumeBoostEnabled(!volumeBoostEnabled)}
+            className="px-4 py-1.5 rounded-lg text-xs border border-border">
+            {volumeBoostEnabled ? t('On') : t('Off')}
           </button>
         </Row>
         <OutputPrecisionSettings />

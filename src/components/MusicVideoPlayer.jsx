@@ -7,9 +7,9 @@ import { usePlayerStore } from '../store/player'
 import LyricsPanel from './LyricsPanel'
 import { api, wordSyncEnabled } from '../api'
 import { trackArtURL } from '../onlineTracks'
-import { useMusicVideo, useMusicVideoView, videoTimeFor, songTime, useVideoOffsets, withOffset } from '../musicVideo'
+import { useMusicVideo, useMusicVideoView, songTime, useVideoOffsets, withOffset } from '../musicVideo'
 import VideoOffsetControl from './VideoOffsetControl'
-import { syncVideo, seekVideo } from '../musicVideoPlayback'
+import { syncVideo, seekVideo, playbackVideoTime } from '../musicVideoPlayback'
 import { useLyricLines } from '../lyricLine'
 import { useLyricSubline } from '../lyrics/useLyricSubline'
 import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
@@ -57,7 +57,19 @@ export default function MusicVideoPlayer({ compact = false }) {
     currentTrack: s.currentTrack, isPlaying: s.isPlaying, togglePlay: s.togglePlay, next: s.next, prev: s.prev,
     progress: s.progress, duration: s.duration,
   })))
-  const { video, loading, progress: lookupProgress, download } = useMusicVideo(currentTrack, open, open)
+  const { video: foundVideo, loading, progress: lookupProgress, download } = useMusicVideo(currentTrack, open, open)
+  const fallbackKey = foundVideo?.clip && foundVideo?.streamed ? JSON.stringify([currentTrack?.id, foundVideo.clip.link, foundVideo.src]) : null
+  const [fallback, setFallback] = useState(null)
+  const fallbackAttempt = useRef(null)
+  const currentFallbackKey = useRef(fallbackKey)
+  currentFallbackKey.current = fallbackKey
+  const video = useMemo(() => fallbackKey && fallback?.key === fallbackKey && fallback.src
+    ? { ...foundVideo, src: fallback.src, streamed: false }
+    : foundVideo, [fallback, fallbackKey, foundVideo])
+  useEffect(() => {
+    fallbackAttempt.current = null
+    setFallback(null)
+  }, [fallbackKey])
   const reduceMotion = useReducedMotion()
   const videoRef = useRef(null)
   const [ready, setReady] = useState(false)
@@ -161,7 +173,7 @@ export default function MusicVideoPlayer({ compact = false }) {
   const segments = useMemo(() => withOffset(video?.segments, videoOffset), [video?.segments, videoOffset])
   const sync = useCallback(() => {
     const result = syncVideo(videoRef.current, {
-      time: songTime(), segments, duration: video?.duration,
+      time: songTime(), segments, clip: video?.clip, duration: video?.duration,
       isPlaying: usePlayerStore.getState().isPlaying, hidden: isWindowHidden(),
     })
     if (result) setOutside(result.outside)
@@ -194,16 +206,29 @@ export default function MusicVideoPlayer({ compact = false }) {
       try {
         el.load()
         el.addEventListener('loadeddata', () => {
-          const target = videoTimeFor(segments, songTime())
+          const target = playbackVideoTime(songTime(), { segments, clip: video?.clip, duration: el.duration })
           if (target != null && target >= 0) el.currentTime = target
           if (usePlayerStore.getState().isPlaying && !isWindowHidden()) el.play().catch(() => {})
         }, { once: true })
         return
       } catch {}
     }
+    if (fallbackKey && fallbackAttempt.current !== fallbackKey) {
+      fallbackAttempt.current = fallbackKey
+      api.clipVideoSource(foundVideo.clip.link, { fallback: true }).then(result => {
+        if (currentFallbackKey.current !== fallbackKey) return
+        if (result?.src) setFallback({ key: fallbackKey, src: result.src })
+        else {
+          setFailed(true)
+          setStalled(false)
+          setErrorText(result?.error || 'Could not stream this clip')
+        }
+      })
+      return
+    }
     setFailed(true)
     setStalled(false)
-    setErrorText(el?.error?.message || 'Could not open the downloaded video')
+    setErrorText(el?.error?.message || 'Could not open the video')
     // A streamed video: why YouTube stopped giving it (the player itself only
     // sees "data source error"); Lokal remembers the reason.
     if (video?.streamed && video.src) {
@@ -212,7 +237,7 @@ export default function MusicVideoPlayer({ compact = false }) {
         .then(reason => { if (reason?.trim()) setErrorText(reason.trim().slice(0, 600)) })
         .catch(() => {})
     }
-  }, [video, segments])
+  }, [video, segments, fallbackKey, foundVideo?.clip?.link])
 
   const art = trackArtURL(currentTrack)
   const showVideo = !!video?.src && !video.error && !failed && (ready || everPlayed) && !outside
@@ -240,7 +265,7 @@ export default function MusicVideoPlayer({ compact = false }) {
     loading: loadingText,
   }[status]
   // A streamed video offers Download once it has failed, not while it's still starting.
-  const canDownload = !!video?.videoId && (!video.src || (video.streamed && failed)) && !loading && !video.downloadId
+  const canDownload = !!video?.needsDownload && (!video.src || failed) && !loading && !video.downloadId
   // The cover card never sits over open lyrics; the shade behind them is enough.
   // Synced lyrics show as subtitles under the picture (the mini player's
   // style); plain lyrics, which have no "now", keep the panel at the side.
@@ -255,14 +280,14 @@ export default function MusicVideoPlayer({ compact = false }) {
   const seek = (e) => {
     const r = e.currentTarget.getBoundingClientRect()
     if (duration > 0) seekVideo(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration, {
-      state: usePlayerStore.getState(), element: videoRef.current, segments,
+      state: usePlayerStore.getState(), element: videoRef.current, segments, clip: video?.clip,
     })
   }
 
   if (compact) return open && currentTrack ? (
     <div className="relative aspect-video w-full overflow-hidden bg-black" aria-label={t('Music video: {title}', { title: currentTrack.title })}>
       {!showVideo && (art ? <img src={art} alt={t("Artwork")} className="absolute inset-0 h-full w-full object-contain" /> : <span className="absolute inset-0 flex items-center justify-center text-muted">♪</span>)}
-      {video?.src && !video.error && !failed && <video key={video.videoId} ref={el => { videoRef.current = el; if (el) lastVideo.current = el }} src={video.src} muted playsInline preload="auto" disablePictureInPicture
+      {video?.src && !video.error && !failed && <video key={video.src} ref={el => { videoRef.current = el; if (el) lastVideo.current = el }} src={video.src} muted playsInline preload="auto" disablePictureInPicture
         onPlaying={() => { setReady(true); setEverPlayed(true); recoverRef.current = 0 }} onCanPlay={sync} onLoadedMetadata={sync} onLoadedData={() => { setReady(true); sync() }} onSeeked={sync} onError={onVideoError}
         className={`absolute inset-0 h-full w-full object-contain ${showVideo ? '' : 'opacity-0'}`} />}
       {!showVideo && message && <p role="status" className="absolute inset-x-0 bottom-0 bg-black/65 px-3 py-1 text-center text-[10px] text-white/80">{message}</p>}
@@ -328,7 +353,7 @@ export default function MusicVideoPlayer({ compact = false }) {
 
           {video?.src && !video.error && !failed && (
             <motion.video
-              key={video.videoId}
+              key={video.src}
               ref={el => { videoRef.current = el; if (el) lastVideo.current = el }}
               src={video.src}
               muted

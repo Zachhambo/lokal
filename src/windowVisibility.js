@@ -43,3 +43,25 @@ export function onWindowVisibility(fn) {
     window.removeEventListener('lokal:window-visibility', handler)
   }
 }
+
+/** Run a visual update on each visible frame. Returning false lets it settle. */
+export function animateWhileVisible(draw) {
+  let frame = null
+  let hidden = isWindowHidden()
+  const tick = now => {
+    frame = null
+    if (!hidden && draw(now) !== false) frame = requestAnimationFrame(tick)
+  }
+  const update = nextHidden => {
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
+    hidden = nextHidden
+    if (!hidden) frame = requestAnimationFrame(tick)
+  }
+  const unsubscribe = onWindowVisibility(update)
+  update(hidden)
+  return () => {
+    unsubscribe()
+    if (frame !== null) cancelAnimationFrame(frame)
+  }
+}

@@ -184,6 +184,47 @@ router.get('/files/:trackId', (req, res) => {
   } catch { res.sendStatus(404) }
 })
 
+// A paired phone can copy a clip explicitly selected in Desktop. Never
+// serve a path supplied by the caller or one set through the web metadata API.
+router.get('/files/:trackId/clip', (req, res) => {
+  if (!pairedUser(req, res)) return
+  const track = require('../../electron/trackAlias').trackById(getDB(), req.params.trackId)
+  if (!track) return res.sendStatus(404)
+  res.set('Cache-Control', 'private, no-store')
+  const link = String(track.clip_url || '').trim()
+  if (!link) return res.json({ clip: null })
+  const { localPath, transferableClipFile, videoIdFromClipLink } = require('../../electron/online/clipVideo')
+  const file = track.clip_transfer_file && transferableClipFile(link)
+  const local = file && file === track.clip_transfer_file
+  const path = require('path')
+  let media
+  if (local) {
+    const stat = require('fs').statSync(file, { throwIfNoEntry: false })
+    if (stat?.isFile()) {
+      const version = require('crypto').createHash('sha256')
+        .update(JSON.stringify([file, stat.size, stat.mtimeMs, track.clip_start, track.clip_end])).digest('hex')
+      media = { extension: path.extname(file).slice(1).toLowerCase(), version }
+    }
+  }
+  if (req.query.media === '1') {
+    if (!media || req.query.version !== media.version) return res.sendStatus(409)
+    return res.sendFile(file)
+  }
+  if (!media && track.clip_transfer_file && localPath(link)) return res.sendStatus(410)
+  const videoId = videoIdFromClipLink(link)
+  let url = null
+  if (!videoId && !local) {
+    try {
+      const parsed = new URL(link)
+      if (/^https?:$/.test(parsed.protocol)) url = parsed.href
+    } catch {}
+  }
+  const source = videoId ? { videoId } : media || (url ? { url } : null)
+  return res.json({
+    clip: source ? { ...source, start: track.clip_start, end: track.clip_end } : null,
+  })
+})
+
 function queryText(value) {
   return String(value || '').trim().slice(0, 100)
 }

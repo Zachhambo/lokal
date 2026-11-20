@@ -33,20 +33,13 @@ export function clipOpenUrl(text) {
   return `file:///${path}`
 }
 
-/** A time field as typed: anything but a digit becomes ":" (one at a time). */
-export function clipTimeInput(text) {
-  return String(text || '').replace(/[^0-9]+/g, ':')
-}
-
-/** "75", "1:15", "1:02:03" -> seconds; '' -> null; NaN when it can't be read. */
+/** "75", "1:15", "1:02:03" or decimal seconds; blank means unset. */
 export function parseClipTime(text) {
-  const raw = String(text || '').trim()
-  if (/(^|:)\s*-\s*\d/.test(raw)) return NaN
-  const value = clipTimeInput(raw).replace(/^:+|:+$/g, '')
+  const value = String(text ?? '').trim()
   if (!value) return null
-  const parts = value.split(':').map(Number)
-  if (parts.length > 3 || parts.some(n => !Number.isFinite(n))) return NaN
-  return parts.reduce((total, n) => total * 60 + n, 0)
+  if (!/^\d+(?::[0-5]?\d){0,2}(?:\.\d+)?$/.test(value)) return NaN
+  const seconds = value.split(':').reduce((total, part) => total * 60 + Number(part), 0)
+  return Number.isFinite(seconds) ? seconds : NaN
 }
 
 /** Seconds as the field shows them: "1:15", "1:02:03"; null -> ''. */
@@ -117,6 +110,6 @@ export function clipRange(start, end, duration) {
     if (length && boundedStart >= length) return { start: Math.max(0, length - SHORT_LOOP), end: length }
     return { start: boundedStart, end: cap(boundedStart + SHORT_LOOP) }
   }
-  if (end != null) return { start: Math.max(0, cap(end) - SHORT_LOOP), end: cap(end) }
+  if (end > 0) return { start: Math.max(0, cap(end) - SHORT_LOOP), end: cap(end) }
   return length ? { start: length / 3, end: (length * 2) / 3 } : { start: 0, end: Infinity }
 }

@@ -2,6 +2,17 @@ const { randomBytes, randomUUID, createHash, createHmac, timingSafeEqual } = req
 const { MAX_BATCH, text, trackKey, nextClock, compareStamp } = require('./protocol')
 const { splitArtists } = require('../artistSplit')
 const { keepCommaSetFromDb } = require('../artistRoles')
+// Link carries YouTube identifiers, never a path on either device.
+function linkedVideoClip(value) {
+  if (value === null) return [null, null, null]
+  if (!value || typeof value !== 'object' || typeof value.videoId !== 'string' ||
+      !/^[A-Za-z0-9_-]{11}$/.test(value.videoId)) return null
+  const { videoId, start = null, end = null } = value
+  if ([start, end].some(time => time !== null && (!Number.isFinite(time) || time < 0 || time > 86400)) ||
+      (end !== null && end <= (start ?? 0))) return null
+  return [`https://www.youtube.com/watch?v=${videoId}`, start, end]
+}
+
 const deviceName = value => typeof value === 'string' ? Array.from(value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 100).join('') : ''
 const hash = token => createHash('sha256').update(String(token)).digest('hex')
 const safeEqual = (a, b) => { const aa = Buffer.from(String(a)), bb = Buffer.from(String(b)); return aa.length === bb.length && timingSafeEqual(aa, bb) }
@@ -15,6 +26,7 @@ class LinkStore {
     this.pairing = null
     this.attempts = new Map()
     this.suppressed = 0
+    this.videoClipChanges = new Map()
     db.exec(`
       CREATE TABLE IF NOT EXISTS link_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS link_track_aliases (track_key TEXT PRIMARY KEY, track_id TEXT NOT NULL);
@@ -23,6 +35,10 @@ class LinkStore {
       CREATE TABLE IF NOT EXISTS library_ops (cursor INTEGER PRIMARY KEY AUTOINCREMENT, op_id TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL, device_id TEXT NOT NULL, hlc TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL, op TEXT NOT NULL, fields_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS library_field_clocks (user_id TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL, field TEXT NOT NULL, hlc TEXT NOT NULL, device_id TEXT NOT NULL, op_id TEXT NOT NULL, PRIMARY KEY(user_id, entity, entity_id, field));
       CREATE TABLE IF NOT EXISTS link_tombstones (user_id TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT NOT NULL, hlc TEXT NOT NULL, device_id TEXT NOT NULL, op_id TEXT NOT NULL, PRIMARY KEY(user_id, entity, entity_id));
+      CREATE TABLE IF NOT EXISTS link_pending_video_clips (
+        user_id TEXT NOT NULL, track_key TEXT NOT NULL, op_id TEXT NOT NULL,
+        PRIMARY KEY(user_id, track_key)
+      );
       CREATE INDEX IF NOT EXISTS link_history_user_cursor ON history_events(user_id, cursor);
       CREATE INDEX IF NOT EXISTS link_ops_user_cursor ON library_ops(user_id, cursor);
     `)
@@ -34,6 +50,19 @@ class LinkStore {
     if (!id) { id = randomUUID(); db.prepare("INSERT INTO link_meta VALUES ('device_id', ?)").run(id) }
     this.deviceId = id
     this.clock = db.prepare("SELECT MAX(hlc) AS value FROM library_ops").get()?.value || db.prepare("SELECT value FROM link_meta WHERE key='hlc'").get()?.value || ''
+    // Older desktop versions retained unknown track fields in the journal.
+    // An upgrade can apply those edits even after the phone advanced its cursor.
+    if (!db.prepare("SELECT 1 FROM link_meta WHERE key='video_clip_journal_v1'").get()) {
+      const previous = db.prepare(`
+        SELECT * FROM library_ops
+        WHERE entity='track' AND op='track.edit' AND json_type(fields_json, '$.video_clip') IS NOT NULL
+      `).all()
+      for (const item of previous) {
+        const fields = JSON.parse(item.fields_json)
+        if (linkedVideoClip(fields.video_clip)) this.queueVideoClip(item, item.user_id, fields)
+      }
+      db.prepare("INSERT INTO link_meta VALUES ('video_clip_journal_v1', '1')").run()
+    }
     if (!db.prepare('PRAGMA table_info(playlists)').all().some(column => column.name === 'uuid')) db.exec('ALTER TABLE playlists ADD COLUMN uuid TEXT')
     const update = db.prepare('UPDATE playlists SET uuid=? WHERE id=?')
     for (const row of db.prepare("SELECT id FROM playlists WHERE uuid IS NULL OR uuid=''").all()) update.run(randomUUID(), row.id)
@@ -223,9 +252,78 @@ class LinkStore {
     this.applyOps([item], userId, deviceId)
     return item
   }
+  videoClipOriginal(fields, userId) {
+    const original = fields.desktop_original
+    return original?.owner === `${this.deviceId}:${userId}` ? text(original.track_id, 512) : ''
+  }
+
+  queueVideoClip(item, userId, fields) {
+    const original = this.videoClipOriginal(fields, userId)
+    const key = original ? `desktop:${original}` : item.entity_id
+    const prior = this.db.prepare(`
+      SELECT o.hlc, o.device_id, o.op_id FROM link_pending_video_clips p
+      JOIN library_ops o ON p.op_id=o.op_id
+      WHERE p.user_id=? AND p.track_key=?
+    `).get(userId, key)
+    if (prior && compareStamp(item, prior) <= 0) return
+    this.db.prepare('INSERT OR REPLACE INTO link_pending_video_clips VALUES (?, ?, ?)')
+      .run(userId, key, item.op_id)
+  }
+
+  applyPendingVideoClips(userId) {
+    const changed = this.db.transaction(() => {
+      const updates = []
+      const pending = this.db.prepare(`
+        SELECT o.*, p.track_key AS clip_key FROM link_pending_video_clips p JOIN library_ops o ON p.op_id=o.op_id
+        WHERE p.user_id=?
+      `).all(userId)
+      if (!pending.length) return updates
+      const clock = this.db.prepare(`
+        SELECT hlc, device_id, op_id FROM library_field_clocks
+        WHERE user_id=? AND entity='track' AND entity_id=? AND field='video_clip'
+      `)
+      const setClock = this.db.prepare(`
+        INSERT OR REPLACE INTO library_field_clocks VALUES (?, 'track', ?, 'video_clip', ?, ?, ?)
+      `)
+      const remove = this.db.prepare('DELETE FROM link_pending_video_clips WHERE user_id=? AND track_key=?')
+      const update = this.db.prepare('UPDATE tracks SET clip_url=?, clip_start=?, clip_end=?, clip_transfer_file=NULL WHERE id=?')
+      this.suppressed++
+      try {
+        for (const item of pending) {
+          const fields = JSON.parse(item.fields_json)
+          const original = this.videoClipOriginal(fields, userId)
+          const track = original
+            ? require('../trackAlias').trackById(this.db, original)
+            : this.matchTrack({ ...fields, track_key: item.entity_id })
+          if (!track) continue
+          const clockKey = `desktop:${track.id}`
+          const prior = clock.get(userId, clockKey)
+          if (prior && compareStamp(item, prior) <= 0) {
+            remove.run(userId, item.clip_key)
+            continue
+          }
+          const [clip_url, clip_start, clip_end] = linkedVideoClip(fields.video_clip)
+          update.run(clip_url, clip_start, clip_end, track.id)
+          setClock.run(userId, clockKey, item.hlc, item.device_id, item.op_id)
+          remove.run(userId, item.clip_key)
+          updates.push({ id: track.id, clip_url, clip_start, clip_end })
+        }
+      } finally { this.suppressed-- }
+      return updates
+    })()
+    for (const update of changed) this.videoClipChanges.set(update.id, update)
+    return changed.length
+  }
+
+  takeVideoClipChanges() {
+    const changes = [...this.videoClipChanges.values()]
+    this.videoClipChanges.clear()
+    return changes
+  }
+
   applyOps(items, userId, deviceId) {
     if (!Array.isArray(items) || items.length > MAX_BATCH) throw new Error('Invalid library batch')
-    return this.db.transaction(() => {
+    const count = this.db.transaction(() => {
       let accepted = 0
       this.suppressed++
       try {
@@ -275,10 +373,15 @@ class LinkStore {
               }
             }
           } else if (item.entity==='track' && item.op==='track.edit') {
+            if (Object.hasOwn(fields, 'video_clip') && linkedVideoClip(fields.video_clip)) {
+              this.queueVideoClip(item, userId, fields)
+            }
+            const tags = ['title','artist','album','album_artist','genre','year','track_num']
+            if (!tags.some(field => Object.hasOwn(fields, field))) continue
             const track=this.matchTrack({ ...fields,track_key:item.entity_id })
             if (!track) continue
             this.db.prepare('INSERT OR IGNORE INTO link_track_aliases VALUES (?,?)').run(item.entity_id,track.id)
-            for (const field of ['title','artist','album','album_artist','genre','year','track_num']) if (Object.hasOwn(fields,field) && win(field)) {
+            for (const field of tags) if (Object.hasOwn(fields,field) && win(field)) {
               const value=['year','track_num'].includes(field)?Number(fields[field]):text(fields[field],1000)
               if (typeof value==='number' && !Number.isFinite(value)) continue
               this.db.prepare(`UPDATE tracks SET ${field}=? WHERE id=?`).run(value,track.id)
@@ -288,6 +391,8 @@ class LinkStore {
       } finally { this.suppressed-- }
       return accepted
     })()
+    this.applyPendingVideoClips(userId)
+    return count
   }
 }
 module.exports = { LinkStore, hash, safeEqual }

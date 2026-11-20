@@ -16,7 +16,8 @@ const { pathToFileURL, fileURLToPath } = require('url')
 const { cookieArgs } = require('../ipc/ytCookies')
 const { jsRuntime } = require('./jsRuntime')
 
-const VIDEO_FILE = /\.(?:mp4|m4v|webm|mov|mkv|ogv|ogg)$/i
+const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'webm', 'mov', 'mkv', 'ogv', 'ogg']
+const VIDEO_FILE = new RegExp(`\\.(?:${VIDEO_EXTENSIONS.join('|')})$`, 'i')
 const VIDEO_ID = /^[\w-]{11}$/
 const YTDLP_TIMEOUT_MS = 60000
 const FOUND_TTL_MS = 2 * 60 * 60 * 1000
@@ -40,6 +41,26 @@ function localPath(text) {
   if (/^file:\/\//i.test(text)) { try { return fileURLToPath(text) } catch { return null } }
   if (/^[a-z]:[\\/]/i.test(text) || /^\\\\/.test(text) || (process.platform !== 'win32' && text.startsWith('/'))) return text
   return null
+}
+
+function localClipFile(link) {
+  const file = localPath(String(link || '').trim())
+  try { return file && VIDEO_FILE.test(file) && fs.statSync(file).isFile() ? file : null } catch { return null }
+}
+
+function transferableClipFile(link) {
+  const file = localClipFile(link)
+  try {
+    const real = file && fs.realpathSync(file)
+    return real && VIDEO_FILE.test(real) ? real : null
+  } catch { return null }
+}
+
+function videoIdFromClipLink(link) {
+  try {
+    const url = new URL(link)
+    return /^https?:$/.test(url.protocol) ? youtubeVideoId(url) : null
+  } catch { return null }
 }
 
 // The best picture without HLS/DASH manifests (the player only reads plain
@@ -78,7 +99,7 @@ async function resolveClipVideo(link, { fallback = false, ytdlp = null, settings
   const text = String(link || '').trim()
   if (!text) return { error: 'No video' }
   const file = localPath(text)
-  if (file) return fs.existsSync(file) ? { src: pathToFileURL(file).href, local: true } : { error: 'File not found' }
+  if (file) return localClipFile(text) ? { src: pathToFileURL(file).href, local: true } : { error: 'Video file not found or unsupported' }
   let url
   try { url = new URL(text) } catch { return { error: 'Not a link' } }
   if (!/^https?:$/.test(url.protocol)) return { error: 'Not a web link' }
@@ -102,4 +123,4 @@ async function resolveClipVideo(link, { fallback = false, ytdlp = null, settings
   return result
 }
 
-module.exports = { resolveClipVideo, youtubeVideoId, localPath }
+module.exports = { resolveClipVideo, videoIdFromClipLink, localPath, localClipFile, transferableClipFile }

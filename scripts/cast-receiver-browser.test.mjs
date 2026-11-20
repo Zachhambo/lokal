@@ -11,7 +11,7 @@ const caf = `(() => {
    setMediaElement() {}, addEventListener(types, callback) { callbacks.push({types: Array.isArray(types) ? types : [types], callback}) },
    setMessageInterceptor(type, callback) { (window.messageInterceptors ||= {})[type] = callback },
    getQueueManager() { return { getItems: () => window.cafQueueItems || [{ itemId: 1 }], getCurrentItemIndex: () => window.cafQueueIndex || 0 } },
-   getMediaInformation: () => ({ metadata: { title:'Receiver regression',artist:'Lokal',images:[{url:'/cover.svg'}] }, customData:{trackId:window.receiverTrack||'track-1'},duration:30 }),
+   getMediaInformation: () => ({ metadata: { title:'Receiver regression',artist:'Lokal',images:[{url:window.receiverCover||'/cover.svg'}] }, customData:{trackId:window.receiverTrack||'track-1'},duration:30 }),
    getPlayerState: () => audio()?.ended ? 'IDLE' : audio()?.paused ? 'PAUSED' : 'PLAYING',
    getDurationSec: () => audio()?.duration || 30,
  };
@@ -47,7 +47,7 @@ for (const failScriptOnce of [false, true]) {
 test(failScriptOnce ? 'receiver retries video loading after a transient API failure' : 'receiver binds audible audio, paints art, and switches lyrics/video without muting the recording', async t => {
  const server=createServer(async(req,res)=>{
    if(req.url==='/tone.wav'){res.writeHead(200,{'Content-Type':'audio/wav'});res.end(tone());return}
-   if(req.url==='/cover.svg'){res.writeHead(200,{'Content-Type':'image/svg+xml'});res.end('<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="#503981"/><circle cx="250" cy="250" r="140" fill="#f0bc85"/></svg>');return}
+   if(req.url==='/cover.svg'||req.url==='/updated-cover.svg'){res.writeHead(200,{'Content-Type':'image/svg+xml'});res.end('<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500"><rect width="500" height="500" fill="#503981"/><circle cx="250" cy="250" r="140" fill="#f0bc85"/></svg>');return}
    const name=req.url==='/'?'index.html':req.url.slice(1);
    if(!['index.html','receiver.css','receiver.js'].includes(name)){res.writeHead(404);res.end();return}
    res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');
@@ -98,6 +98,8 @@ test(failScriptOnce ? 'receiver retries video loading after a transient API fail
  assert.deepEqual(transport.commands.map(command => command.trackId),
    ['track-1', 'track-1', 'track-1']);
  await page.waitForFunction(()=>document.getElementById('cover').classList.contains('on'));
+ await page.evaluate(()=>{window.receiverCover='/updated-cover.svg';castAudio.dispatchEvent(new Event('timeupdate'))});
+ await page.waitForFunction(()=>document.getElementById('cover').getAttribute('src')==='/updated-cover.svg');
  const rms=await page.evaluate(async()=>{
    const context=new AudioContext();await context.resume();const source=context.createMediaElementSource(castAudio);const analyser=context.createAnalyser();source.connect(analyser);analyser.connect(context.destination);
    await new Promise(r=>setTimeout(r,250));const values=new Float32Array(2048);analyser.getFloatTimeDomainData(values);

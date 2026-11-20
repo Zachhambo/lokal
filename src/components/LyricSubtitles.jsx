@@ -8,6 +8,7 @@
 // requestAnimationFrame loop paints; React re-renders only when the line
 // changes.
 
+import { animateWhileVisible } from '../windowVisibility'
 import React, { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Voice, paintVoice, useLyricClock } from './LyricsPanel'
@@ -26,8 +27,7 @@ export default function LyricSubtitles({ lines, subLines = null, progress, wordS
   const subLinesRef = useRef(subLines)
   subLinesRef.current = subLines
   useEffect(() => {
-    let frame = 0
-    const tick = () => {
+    return animateWhileVisible(() => {
       const t = clock()
       const next = subtitleIndex(lines, t, lineEndOf)
       if (next !== shown.current) { shown.current = next; setIndex(next) }
@@ -38,10 +38,7 @@ export default function LyricSubtitles({ lines, subLines = null, progress, wordS
         paintVoice(els.bg, line.bgWords, t, true)
         if (els.sub && subLinesRef.current?.[next]?.words?.length) paintVoice(els.sub, subLinesRef.current[next].words, t, true)
       }
-      frame = requestAnimationFrame(tick)
-    }
-    tick()
-    return () => cancelAnimationFrame(frame)
+    })
   }, [lines, clock])
 
   const line = lines[index]

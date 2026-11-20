@@ -1,13 +1,22 @@
+import { clipRange } from './clipVideo.js'
 import { playbackSpeed } from './playbackSpeed.mjs'
+
+export function playbackVideoTime(time, { segments, clip, duration }) {
+  if (clip) {
+    const { start, end } = clipRange(clip.start, clip.end, duration)
+    return Number.isFinite(end) && end > start ? start + Math.max(0, time) % (end - start) : start + Math.max(0, time)
+  }
+  const segment = (segments || []).find(s => time >= s.start && (s.end == null || time < s.end))
+  return segment ? time + segment.offset : null
+}
 
 // The song remains the playback clock. Following it must never pause its audio
 // element: that emits a real Pause and changes the player's intended state.
-export function syncVideo(element, { time, segments, isPlaying, hidden = false, duration }) {
+export function syncVideo(element, { time, segments, clip, isPlaying, hidden = false, duration }) {
   if (!element || element.readyState < 1) return null
-  const segment = (segments || []).find(s => time >= s.start && (s.end == null || time < s.end))
-  const target = segment ? time + segment.offset : null
   const end = Number.isFinite(element.duration) ? element.duration : duration
-  if (target == null || target < 0 || (end > 0 && target > end - 0.05)) {
+  const target = playbackVideoTime(time, { segments, clip, duration: end })
+  if (target == null || target < 0 || (!clip && end > 0 && target > end - 0.05)) {
     if (!element.paused) element.pause()
     return { outside: true }
   }
@@ -15,7 +24,11 @@ export function syncVideo(element, { time, segments, isPlaying, hidden = false, 
   let hold = false
   if (!element.seeking) {
     const drift = element.currentTime - target
-    if (isStreamed(element) && element.readyState < 3 && Math.abs(drift) < WAIT_FOR_DATA_S) {
+    if (clip) {
+      const range = clipRange(clip.start, clip.end, end)
+      if (Math.abs(drift) > 0.35 || element.currentTime < range.start || element.currentTime >= range.end) element.currentTime = target
+      element.playbackRate = playbackSpeed()
+    } else if (isStreamed(element) && element.readyState < 3 && Math.abs(drift) < WAIT_FOR_DATA_S) {
       // Still loading where it was sent (a streamed video's next piece takes
       // a second or two): seeking again would only throw that request away.
     } else if (isStreamed(element) && drift > 0.35 && drift < SEEK_LEAD_S + 0.6) {
@@ -52,10 +65,9 @@ function isBuffered(element, time) {
 }
 
 /** A seek preserves play/pause intent and lets both media elements resume. */
-export function seekVideo(time, { state, element, segments }) {
+export function seekVideo(time, { state, element, segments, clip }) {
   state.setProgressWithAudioUpdate(time)
-  const segment = (segments || []).find(s => time >= s.start && (s.end == null || time < s.end))
-  const target = segment ? time + segment.offset : null
+  const target = playbackVideoTime(time, { segments, clip, duration: element?.duration })
   if (element?.readyState >= 1 && target != null && target >= 0) {
     element.currentTime = target
     element.playbackRate = playbackSpeed()

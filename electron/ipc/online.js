@@ -327,20 +327,23 @@ function registerOnlineHandlers(ipcMain) {
   ipcMain.handle('musicVideo:find', (event, trackId) => musicVideoFor(trackId, {
     onProgress: musicVideoProgress(event, trackId),
   }).catch(() => null))
+  ipcMain.handle('musicVideo:currentLink', (_, trackId) => {
+    const track = getDB().prepare('SELECT * FROM tracks WHERE id = ?').get(trackId)
+    if (!track) return null
+    if (track.clip_url) return null
+    const video = knownMusicVideoFor(track)
+    return video ? `https://www.youtube.com/watch?v=${video.videoId}` : null
+  })
   ipcMain.handle('musicVideo:download', (_, trackId) => prepareMusicVideoFor(trackId, { download: true }).catch(e => ({ error: e.message })))
   ipcMain.handle('musicVideo:prepare', (_, trackId) => prepareMusicVideoFor(trackId).catch(e => ({ error: e.message })))
   // Where a video that isn't downloaded is streamed from (see videoStreamBase).
   ipcMain.handle('musicVideo:streamBase', () => videoStreamBase().catch(() => null))
-  ipcMain.handle('clipVideo:resolve', (_, link, options) => require('../online/clipVideo').resolveClipVideo(link, {
-    fallback: options?.fallback === true,
-    ytdlp: findYtDlp(),
-    settings: settings(),
-    streamBase: videoStreamBase,
-  }).catch(error => ({ error: error?.message || String(error) })))
+  ipcMain.handle('clipVideo:resolve', (_, link, options) => resolveClip(link, options?.fallback === true)
+    .catch(error => ({ error: error?.message || String(error) })))
   ipcMain.handle('musicVideo:deleteDownload', async (_, trackId) => {
     try {
       const video = await musicVideoFor(trackId)
-      if (!video) throw new Error('No music video found for this song')
+      if (!video?.videoId || !/^[\w-]{11}$/.test(video.videoId)) throw new Error('No downloadable music video found for this song')
       const manager = require('./downloader').manager()
       for (const job of [...manager.jobs.values()]) {
         if (job.kind !== 'music-video' || job.opts.videoId !== video.videoId) continue
@@ -457,12 +460,32 @@ function songAudioFor(track, canStream, options = {}) {
   return null
 }
 
-/** The official music video for a track (see online/musicVideo.js), or null. */
-async function musicVideoFor(trackId, { onProgress } = {}) {
-  const track = getDB().prepare('SELECT id, title, artist, duration, file_path FROM tracks WHERE id = ?').get(trackId)
-  if (!track) return null
+function resolveClip(link, fallback = false) {
+  return require('../online/clipVideo').resolveClipVideo(link, {
+    fallback,
+    ytdlp: findYtDlp(),
+    settings: settings(),
+    streamBase: videoStreamBase,
+  })
+}
+
+function manualMusicVideo(track) {
+  const link = track.clip_url?.trim()
+  if (!link) return null
+  const { videoIdFromClipLink } = require('../online/clipVideo')
+  const youtubeId = videoIdFromClipLink(link)
+  return {
+    videoId: youtubeId || `clip:${track.id}`,
+    title: track.title,
+    artist: track.artist,
+    clip: { link, start: track.clip_start, end: track.clip_end },
+  }
+}
+
+function knownMusicVideoFor(track) {
   const cacheFile = musicVideoMetadataFile()
   const matcher = require('../online/musicVideo')
+  const trackId = track.id
   ensureVideoLibrary()
   const known = matcher.knownMusicVideos([track], { cacheFile, findFile: musicVideoFile })[0]?.video
   if (known) return known
@@ -473,6 +496,17 @@ async function musicVideoFor(trackId, { onProgress } = {}) {
     const saved = JSON.parse(getDB().prepare('SELECT video_json FROM saved_music_videos WHERE track_id = ?').get(trackId)?.video_json || 'null')
     if (/^[\w-]{11}$/.test(String(saved?.videoId || '')) && (saved.motion === 'verified' || musicVideoFile(saved, track))) return saved
   } catch {}
+  return null
+}
+
+/** The specified clip or the official music video for a track. */
+async function musicVideoFor(trackId, { onProgress } = {}) {
+  const track = getDB().prepare('SELECT * FROM tracks WHERE id = ?').get(trackId)
+  if (!track) return null
+  const existing = manualMusicVideo(track) || knownMusicVideoFor(track)
+  if (existing) return existing
+  const cacheFile = musicVideoMetadataFile()
+  const matcher = require('../online/musicVideo')
   if (accountSession) await accountSession.credentials().catch(() => {})
   const { findFfmpeg } = require('./tools')
   const options = streamOptions()
@@ -617,14 +651,24 @@ function listMusicVideos() {
       if (/^[\w-]{11}$/.test(String(video?.videoId || ''))) known.set(track.id, { track, video })
     } catch {}
   }
+  for (const track of tracks) {
+    const video = manualMusicVideo(track)
+    if (video) known.set(track.id, { track, video })
+  }
   const matcher = require('../online/musicVideo')
   const items = [...known.values()]
     .sort((a, b) => String(a.track.artist || '').localeCompare(String(b.track.artist || '')) || String(a.track.title || '').localeCompare(String(b.track.title || '')))
     .map(({ track, video }) => {
-      const file = musicVideoFile(video, track)
+      const downloadable = /^[\w-]{11}$/.test(video.videoId)
+      const file = downloadable ? musicVideoFile(video, track) : require('../online/clipVideo').localClipFile(video.clip?.link)
+      let savedVideo = null
+      try { savedVideo = JSON.parse(saved.get(track.id)) } catch {}
       return {
-        track, video: { ...video, file, thumbnail: `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg` },
-        saved: saved.has(track.id), downloaded: !!file,
+        track,
+        video: { ...video, file, thumbnail: downloadable ? `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg` : null },
+        saved: savedVideo?.videoId === video.videoId,
+        downloaded: downloadable && !!file,
+        downloadable,
       }
     })
   return matcher.dedupeMusicVideoItems(items)
@@ -633,6 +677,11 @@ function listMusicVideos() {
 async function prepareMusicVideoFor(trackId, { wait = false, download = false } = {}) {
   const video = await musicVideoFor(trackId)
   if (!video) return null
+  if (video.clip && !/^[\w-]{11}$/.test(video.videoId)) {
+    if (download) throw new Error('This clip cannot be downloaded to the Videos folder')
+    const result = await resolveClip(video.clip.link)
+    return { ...video, ...result }
+  }
   const { peekDurableVideoFile, recordedVideoFile, heightOf } = require('../online/musicVideoDownloads')
   const options = { videoHeight: heightOf(settings().video_quality), artist: trackArtist(trackId) || video.artist, title: video.title, trackId }
   const file = musicVideoFile(video, { artist: options.artist })

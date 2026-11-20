@@ -2,7 +2,7 @@
 // clip that fades in once its first frame is ready. The still cover stays
 // underneath the whole time, so a missing or failing clip just means the
 // usual artwork. Clips are looked up (and cached) by the main process; the
-// lookup is remembered per track here too, so reopening a view is instant.
+// in-flight lookup is shared by the views that request the same track.
 
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
@@ -16,11 +16,13 @@ const lookups = new Map() // trackId -> Promise<{ src, source } | null>
 
 export function loadMotionCover(trackId) {
   if (!trackId || !api.motionCover) return Promise.resolve(null)
-  if (!lookups.has(trackId)) {
-    if (lookups.size > 200) lookups.delete(lookups.keys().next().value)
-    lookups.set(trackId, Promise.resolve(api.motionCover(trackId)).catch(() => null))
-  }
-  return lookups.get(trackId)
+  if (lookups.has(trackId)) return lookups.get(trackId)
+  if (lookups.size >= 200) lookups.delete(lookups.keys().next().value)
+  const lookup = Promise.resolve().then(() => api.motionCover(trackId)).catch(() => null).finally(() => {
+    if (lookups.get(trackId) === lookup) lookups.delete(trackId)
+  })
+  lookups.set(trackId, lookup)
+  return lookup
 }
 
 /** Settings changed (moving covers turned on/off, sources): look again. */
@@ -29,9 +31,27 @@ export function forgetMotionCovers() {
 }
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('lokal:settings-saved', forgetMotionCovers)
+  for (const event of ['lokal:settings-saved', 'online', 'offline']) {
+    window.addEventListener(event, forgetMotionCovers)
+  }
   // A track was edited (title, artist, album...): its old answer may be wrong.
   window.addEventListener('lokal:track-updated', (e) => { for (const id of e.detail?.ids || []) lookups.delete(id) })
+}
+
+export function useMotionCoverRevision(trackId) {
+  const [revision, setRevision] = useState(0)
+  useEffect(() => {
+    const refresh = () => setRevision(r => r + 1)
+    const onUpdated = e => { if ((e.detail?.ids || []).includes(trackId)) refresh() }
+    const events = ['lokal:settings-saved', 'online', 'offline']
+    for (const event of events) window.addEventListener(event, refresh)
+    window.addEventListener('lokal:track-updated', onUpdated)
+    return () => {
+      for (const event of events) window.removeEventListener(event, refresh)
+      window.removeEventListener('lokal:track-updated', onUpdated)
+    }
+  }, [trackId])
+  return revision
 }
 
 /**
@@ -52,14 +72,7 @@ export default function MotionCover({ trackId, className = '', onActive, only, s
   }, [])
   const [clip, setClip] = useState(null)
   const [ready, setReady] = useState(false)
-  const [revision, setRevision] = useState(0)
-
-  // The track on screen was edited: look it up again.
-  useEffect(() => {
-    const onUpdated = (e) => { if ((e.detail?.ids || []).includes(trackId)) setRevision(r => r + 1) }
-    window.addEventListener('lokal:track-updated', onUpdated)
-    return () => window.removeEventListener('lokal:track-updated', onUpdated)
-  }, [trackId])
+  const revision = useMotionCoverRevision(trackId)
 
   useEffect(() => {
     let cancelled = false

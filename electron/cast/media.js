@@ -14,8 +14,6 @@ const fs = require('fs')
 const path = require('path')
 const { planFile, convertArgs, streamMime } = require('./formats')
 
-const IMAGE_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }
-
 function runFfmpeg(ffmpeg, args, { timeoutMs = 10 * 60 * 1000, spawn = require('child_process').spawn } = {}) {
   return new Promise((resolve, reject) => {
     let err = ''
@@ -54,7 +52,7 @@ function createCastMedia({
   const inUse = new Map() // converted file the TV may fetch -> how many prepared songs use it
   const use = file => inUse.set(file, (inUse.get(file) || 0) + 1)
 
-  async function convertOnce(dest, args) {
+  async function stageOnce(dest, write) {
     if (fs.existsSync(dest)) {
       try { const now = new Date(); fs.utimesSync(dest, now, now) } catch {}
       return dest
@@ -63,10 +61,9 @@ function createCastMedia({
     const job = (async () => {
       const temp = `${dest}.part${path.extname(dest)}`
       try {
-        args[args.length - 1] = temp
-        await convert(ffmpeg(), args)
+        await write(temp)
         fs.renameSync(temp, dest)
-        // Kept: this file, and every converted file the TV holds or plays now.
+        // Keep this file and every cached file a receiver can still fetch.
         try { trimCache([dest, ...inUse.keys()]) } catch {}
         return dest
       } catch (error) {
@@ -78,6 +75,13 @@ function createCastMedia({
     return job
   }
 
+  function convertOnce(dest, args) {
+    return stageOnce(dest, temp => {
+      args[args.length - 1] = temp
+      return convert(ffmpeg(), args)
+    })
+  }
+
   function cachePath(identity, plan) {
     const dir = cacheDir()
     if (!dir) throw new Error('No cache folder to convert into')
@@ -86,14 +90,50 @@ function createCastMedia({
     return path.join(dir, key + plan.ext)
   }
 
-  function artworkFor(row, deviceHost) {
-    if (row.artwork_path && fs.existsSync(row.artwork_path)) {
-      const mime = IMAGE_MIME[path.extname(row.artwork_path).toLowerCase()] || 'image/jpeg'
-      const added = server.add({ kind: 'file', path: row.artwork_path, mime }, 'cover' + (path.extname(row.artwork_path) || '.jpg'))
+  function artworkSource(track, libraryTrack) {
+    // A queue entry may have been saved before its library cover was written.
+    for (const file of [track.artwork_path, libraryTrack.artwork_path]) {
+      if (file && fs.existsSync(file)) return { file }
+    }
+    for (const url of [track.artwork_url, libraryTrack.artwork_url]) {
+      if (/^https?:\/\//i.test(String(url || ''))) return { url }
+    }
+    return null
+  }
+
+  function artworkFor(source, deviceHost) {
+    if (source?.file) {
+      const added = server.add({ kind: 'artwork', path: source.file }, 'cover.jpg')
       return { url: server.urlFor(added.path, deviceHost), key: added.key }
     }
-    if (/^https?:\/\//i.test(String(row.artwork_url || ''))) return { url: row.artwork_url, key: null }
-    return { url: null, key: null }
+    return { url: source?.url || null, key: null }
+  }
+
+  async function copyWithSonosCover(file, original, source) {
+    const ext = path.extname(file).toLowerCase()
+    if (!['.flac', '.mp3', '.m4a', '.mp4'].includes(ext) || !cacheDir()) return null
+    try {
+      const { filePicture } = require('../artwork/fullCover')
+      const embedded = await filePicture(original)
+      if (file === original && ['image/jpeg', 'image/png'].includes(embedded?.mime)) return file
+      const artwork = embedded?.bytes || (source?.file
+        ? await fs.promises.readFile(source.file)
+        : source?.url && await require('../playlists/remoteCover').fetchCoverData(source.url, { timeout: 2500 }))
+      if (!artwork) return null
+      const { normalizeArtwork, writeEmbeddedArtwork } = require('../fileArtwork')
+      const jpeg = await normalizeArtwork(artwork)
+      const { size, mtimeMs } = await fs.promises.stat(file)
+      const digest = crypto.createHash('sha256').update(jpeg).digest('hex')
+      const dest = cachePath(`sonos-cover-v1:${file}\u0000${size}\u0000${mtimeMs}\u0000${digest}`, { ext, to: 'copy' })
+      return await stageOnce(dest, async temp => {
+        await fs.promises.copyFile(file, temp, fs.constants.COPYFILE_FICLONE)
+        await fs.promises.chmod(temp, 0o600)
+        writeEmbeddedArtwork(temp, jpeg)
+      })
+    } catch {
+      // A failed cover fetch or tag cannot make a playable song unavailable.
+      return null
+    }
   }
 
   /**
@@ -101,19 +141,24 @@ function createCastMedia({
    * @param options { deviceHost, convert: true to convert even what could be relayed (a retry) }
    * @returns { trackId, url, mime, duration, metadata, keys, converted }
    */
-  async function prepare(track, { deviceHost, convert: forceConvert = false } = {}) {
-    const row = { ...(trackRow(track?.id) || {}), ...track }
+  async function prepare(track, { deviceHost, convert: forceConvert = false, receiver = 'chromecast' } = {}) {
+    const libraryTrack = trackRow(track?.id) || {}
+    const row = { ...libraryTrack, ...track }
     if (!row?.id) throw new Error('Nothing to play')
     const keys = []
     const files = [] // converted files it plays from (kept by the cache while in use)
     let url = null
     let mime = null
     let converted = false
+    let playbackFile = null
+    let originalFile = null
+    let embeddedCover = false
+    const cover = artworkSource(track, libraryTrack)
     const ref = streamRef(row)
     if (ref) {
-      if (forceConvert) {
+      if (forceConvert || receiver === 'sonos') {
         const stream = await resolveStream(ref.provider, ref.id)
-        const plan = { action: 'convert', to: 'flac', ext: '.flac', mime: 'audio/flac', rate: null, depth: 24 }
+        const plan = { action: 'convert', to: 'flac', ext: '.flac', mime: 'audio/flac', rate: receiver === 'sonos' ? 48000 : null, depth: receiver === 'sonos' ? 16 : 24 }
         // Lossy sources stay lossy: AAC is plenty for what YouTube or SoundCloud send.
         if (!/flac|wav|alac/i.test(String(stream.mime || ''))) Object.assign(plan, { to: 'aac', ext: '.m4a', mime: 'audio/mp4', depth: null })
         const dest = cachePath(`${ref.provider}:${ref.id}`, plan)
@@ -121,9 +166,8 @@ function createCastMedia({
         await convertOnce(dest, convertArgs(source, dest, plan, { headers: stream.file ? null : stream.headers }))
         use(dest)
         files.push(dest)
-        const added = server.add({ kind: 'file', path: dest, mime: plan.mime }, 'song' + plan.ext)
-        keys.push(added.key)
-        url = server.urlFor(added.path, deviceHost)
+        originalFile = stream.file
+        playbackFile = dest
         mime = plan.mime
         converted = true
       } else {
@@ -139,14 +183,17 @@ function createCastMedia({
     } else {
       const file = String(row.file_path || '')
       if (!file || file.startsWith('ghost://') || !fs.existsSync(file)) throw new Error('This song has no file to play')
+      originalFile = file
       let info = { file, codec: row.codec, sampleRate: row.sample_rate, bitDepth: row.bit_depth, lossless: row.lossless }
       if (!info.codec) info = { ...info, ...(await probe(file).catch(() => null) || {}) }
-      let plan = planFile(info, quality())
+      let plan = planFile(info, receiver === 'sonos' ? 'standard' : quality())
+      // Sonos models differ; use a conservative 16/48 FLAC fallback for
+      // containers outside the common MP3/AAC/FLAC/WAV set.
+      if (receiver === 'sonos' && /opus|ogg|webm/.test(plan.mime || ''))
+        plan = { action: 'convert', to: 'flac', ext: '.flac', mime: 'audio/flac', rate: 48000, depth: 16 }
       if (forceConvert && plan.action === 'direct') plan = { ...planFile({ ...info, codec: 'ALAC' }, quality()), to: info.lossless || /flac|pcm|wav/i.test(String(info.codec)) ? 'flac' : 'aac' }
       if (plan.action === 'direct') {
-        const added = server.add({ kind: 'file', path: file, mime: plan.mime }, 'song' + path.extname(file).toLowerCase())
-        keys.push(added.key)
-        url = server.urlFor(added.path, deviceHost)
+        playbackFile = file
         mime = plan.mime
       } else {
         if (plan.to === 'aac') Object.assign(plan, { ext: '.m4a', mime: 'audio/mp4' })
@@ -156,20 +203,33 @@ function createCastMedia({
         await convertOnce(dest, convertArgs(file, dest, plan))
         use(dest)
         files.push(dest)
-        const added = server.add({ kind: 'file', path: dest, mime: plan.mime }, 'song' + plan.ext)
-        keys.push(added.key)
-        url = server.urlFor(added.path, deviceHost)
+        playbackFile = dest
         mime = plan.mime
         converted = true
       }
     }
-    const art = artworkFor(row, deviceHost)
+    if (playbackFile) {
+      const covered = receiver === 'sonos' ? await copyWithSonosCover(playbackFile, originalFile, cover) : null
+      if (covered && covered !== playbackFile) {
+        use(covered)
+        files.push(covered)
+      }
+      embeddedCover = !!covered
+      const added = server.add(
+        { kind: 'file', path: covered || playbackFile, mime },
+        'song' + path.extname(playbackFile).toLowerCase(),
+      )
+      keys.push(added.key)
+      url = server.urlFor(added.path, deviceHost)
+    }
+    const art = artworkFor(cover, deviceHost)
     if (art.key) keys.push(art.key)
     return {
       trackId: String(row.id),
       url,
       mime,
       converted,
+      embeddedCover,
       duration: Number(row.duration) > 0 ? Number(row.duration) : null,
       metadata: {
         metadataType: 3, // MusicTrackMediaMetadata
@@ -195,11 +255,11 @@ function createCastMedia({
 
   /** A song's cover for Lokal's receiver (its Up Next row): { url, key } (key: to take it down). */
   function artwork(track, { deviceHost } = {}) {
-    const row = { ...(trackRow(track?.id) || {}), ...track }
-    return artworkFor(row, deviceHost)
+    return artworkFor(artworkSource(track || {}, trackRow(track?.id) || {}), deviceHost)
   }
 
   return { prepare, release, artwork, unpublish: key => { if (key) server.remove(key) } }
 }
 
 module.exports = { createCastMedia, runFfmpeg }
+
