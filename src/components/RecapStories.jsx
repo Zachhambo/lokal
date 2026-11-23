@@ -4,6 +4,7 @@ import { CalendarRange, Clock3, Disc3, Music4, Play, Plus, Sparkles, Users, X, C
 import { api } from '../api'
 import { useAppStore, usePlayerStore } from '../store/player'
 import { useShallow } from 'zustand/react/shallow'
+import QualityImage from './QualityImage'
 
 function fmtMinutes(minutes) {
   if (!minutes) return '0 min'
@@ -21,8 +22,8 @@ function fmtHour(hour) {
 }
 
 function trackArt(track) {
-  if (!track?.artwork_path) return ''
-  return api.isElectron ? api.fileURL(track.artwork_path) : api.artworkURL(track.id)
+  if (track?.artwork_path) return api.fullArtworkURL(track.id)
+  return /^https:\/\//.test(String(track?.artwork_url || '')) ? track.artwork_url : ''
 }
 
 export default function RecapStories({ open, onClose }) {
@@ -244,7 +245,7 @@ export default function RecapStories({ open, onClose }) {
                               className="group relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-3xl border border-white/10 bg-white/5"
                             >
                               {trackArt(track) ? (
-                                <img src={trackArt(track)} alt={track.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                                <QualityImage src={trackArt(track)} alt={track.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center text-white/25">
                                   <Disc3 size={22} />
@@ -295,7 +296,7 @@ export default function RecapStories({ open, onClose }) {
                           </p>
                           <div className="mt-6 overflow-hidden rounded-[30px] border border-white/10 bg-black/20">
                             {trackArt(slides[1]?.track) ? (
-                              <img src={trackArt(slides[1]?.track)} alt={slides[1]?.track?.title} className="h-56 w-full object-cover" />
+                              <QualityImage src={trackArt(slides[1]?.track)} alt={slides[1]?.track?.title} className="h-56 w-full object-cover" />
                             ) : (
                               <div className="flex h-56 w-full items-center justify-center text-white/20">
                                 <Music4 size={28} />
@@ -368,7 +369,7 @@ export default function RecapStories({ open, onClose }) {
                               className="overflow-hidden rounded-2xl border border-white/10 bg-black/20"
                             >
                               {trackArt(track) ? (
-                                <img src={trackArt(track)} alt={track.title} className="h-28 w-full object-cover" />
+                                <QualityImage src={trackArt(track)} alt={track.title} className="h-28 w-full object-cover" />
                               ) : (
                                 <div className="flex h-28 w-full items-center justify-center text-white/20">
                                   <Disc3 size={18} />
@@ -412,7 +413,7 @@ export default function RecapStories({ open, onClose }) {
                           >
                             <div className="aspect-square bg-black/30">
                               {trackArt(track) ? (
-                                <img src={trackArt(track)} alt={track.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                                <QualityImage src={trackArt(track)} alt={track.title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center text-white/30">
                                   <Disc3 size={28} />
@@ -445,7 +446,7 @@ export default function RecapStories({ open, onClose }) {
                         <div className="mt-6 overflow-hidden rounded-[26px] border border-white/10 bg-white/[0.04]">
                           <div className="aspect-[4/3] bg-black/30">
                             {trackArt(topTracks[selectedTrackIndex]) ? (
-                              <img src={trackArt(topTracks[selectedTrackIndex])} alt={topTracks[selectedTrackIndex]?.title} className="h-full w-full object-cover" />
+                              <QualityImage src={trackArt(topTracks[selectedTrackIndex])} alt={topTracks[selectedTrackIndex]?.title} className="h-full w-full object-cover" />
                             ) : (
                               <div className="flex h-full w-full items-center justify-center text-white/30">
                                 <Disc3 size={32} />
@@ -504,7 +505,7 @@ export default function RecapStories({ open, onClose }) {
                               <div className="w-8 text-center text-xs font-display text-white/45">{index + 1}</div>
                               <div className="h-12 w-12 overflow-hidden rounded-xl bg-black/20">
                                 {trackArt(track) ? (
-                                  <img src={trackArt(track)} alt={track.title} className="h-full w-full object-cover" />
+                                  <QualityImage src={trackArt(track)} alt={track.title} className="h-full w-full object-cover" />
                                 ) : (
                                   <div className="flex h-full w-full items-center justify-center text-white/20">
                                     <Disc3 size={16} />

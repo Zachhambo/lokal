@@ -37,6 +37,7 @@ const { isPreparedStemClipName } = require('../automix/stem-clip')
 // Same secrets as the web server's SECRET_KEYS (server/routes/settings.js):
 // Masked by settings:get, omitted by default from exports, kept on import.
 const { SECRET_SETTING_KEYS, exportAppData: buildBackup } = require('../appDataExport')
+const { planFolders, prepareRestore } = require('../backupRestorePaths')
 const SECRET_SETTING_PLACEHOLDER = '••••••••'
 const DRUM_KIT_PATTERNS = /\b(kick|snare|808|hi[- ]?hat|hihat|rimshot|clap|crash|cymbal|drum( kit| loop| sample)?|sample pack|loop kit|one[- ]?shot|fx[- ]?sound|bass[- ]?drum|perc(ussion)?|stem[s]?|acapella)\b/i
 
@@ -57,6 +58,18 @@ function getMinDuration() {
 
 let scanStatus = { scanning: false, total: 0, done: 0, errors: 0, skipped: 0 }
 let mainWindow = null
+let activeLibraryScans = 0
+let restoringBackup = false
+
+async function withLibraryScan(scan) {
+  if (restoringBackup) return { error: 'A backup is being restored.' }
+  activeLibraryScans++
+  try { return await scan() } finally { activeLibraryScans-- }
+}
+
+function currentSettings() {
+  return Object.fromEntries(getDB().prepare('SELECT key, value FROM settings').all().map(({ key, value }) => [key, value]))
+}
 
 function emit(channel, data) {
   if (mainWindow) mainWindow.webContents.send(channel, data)
@@ -364,7 +377,7 @@ function configuredMusicFolders(db = getDB()) {
   })
 }
 
-async function scanFolders(folderPaths = []) {
+async function scanFolders(folderPaths = [], { saveRoots = true } = {}) {
   const db = getDB()
   const folders = []
   const onlineFolders = []
@@ -388,8 +401,11 @@ async function scanFolders(folderPaths = []) {
   }
   if (!folders.length) return { error: 'Choose at least one existing music folder', folders: configuredMusicFolders(db) }
 
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
+  const saveFolderSettings = () => {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
+  }
+  if (saveRoots) saveFolderSettings()
   // Snapshot the preference once for all roots; otherwise the first root could
   // save the checkpoint and make later roots skip their unchanged files.
   const artistNamePreference = getArtistNamePreference(db)
@@ -433,12 +449,13 @@ async function scanFolders(folderPaths = []) {
   }
   // Persist only after all roots scan without file errors, so a failed rescan
   // is retried next time.
-  rememberArtistNamePreferenceAfterScan(db, artistNamePreference, results)
-  // Scanning a folder must not replace the selected root list or leave only
-  // the last folder watched.
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folders', ?)").run(JSON.stringify(folders))
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('music_folder', ?)").run(folders[0])
-  try { require('../libraryWatcher').watchLibraryRoots(onlineFolders) } catch (error) { console.warn('[scanner] Library watchers not started:', error.message) }
+  if (saveRoots) {
+    rememberArtistNamePreferenceAfterScan(db, artistNamePreference, results)
+    // Scanning a folder must not replace the selected root list or leave only
+    // the last folder watched.
+    saveFolderSettings()
+    try { require('../libraryWatcher').watchLibraryRoots(onlineFolders) } catch (error) { console.warn('[scanner] Library watchers not started:', error.message) }
+  }
   // Retain offline mounted shares so a temporary NAS outage cannot silently
   // erase the configured roots. Reconnect and rescan when the host returns.
   return { folders, offlineFolders, results, status: scanStatus }
@@ -1304,15 +1321,15 @@ function exportAppData(options = {}) {
 function registerScannerHandlers(ipcMain) {
   const { BrowserWindow } = require('electron')
   try { require('../genreList').registerGenreFunctions(getDB()) } catch (error) { console.warn('[scanner] Genre filters unavailable:', error.message) }
-  ipcMain.handle('scanner:scan', async (e, folder) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolder(folder || DEFAULT_MUSIC_PATH) })
-  ipcMain.handle('scanner:scanFolders', async (e, folders) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return scanFolders(folders) })
+  ipcMain.handle('scanner:scan', async (e, folder) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return withLibraryScan(() => scanFolder(folder || DEFAULT_MUSIC_PATH)) })
+  ipcMain.handle('scanner:scanFolders', async (e, folders) => { mainWindow = BrowserWindow.fromWebContents(e.sender); return withLibraryScan(() => scanFolders(folders)) })
   ipcMain.handle('scanner:connectNetworkShare', async (e, input) => {
     const { probeNetworkLibraryLocation } = require('../networkShare')
     const { folder } = await probeNetworkLibraryLocation(input)
     const roots = configuredMusicFolders()
     if (!roots.some(root => root.toLowerCase() === folder.toLowerCase())) roots.push(folder)
     mainWindow = BrowserWindow.fromWebContents(e.sender)
-    return scanFolders(roots)
+    return withLibraryScan(() => scanFolders(roots))
   })
   ipcMain.handle('scanner:status', () => scanStatus)
   ipcMain.handle('scanner:artworkRepairStatus', () => require('../artwork/repairDownloads').artworkRepairStatus())
@@ -1902,35 +1919,61 @@ function registerScannerHandlers(ipcMain) {
     }
   })
   ipcMain.handle('settings:exportAll', (_, options) => exportAppData(options))
-  ipcMain.handle('settings:importAll', (_, payload) => {
-    // Validate portable addon records before replacing any database tables.
-    const { validateBackupRecords } = require('../mornye/storage')
-    const addonRecords = validateBackupRecords(payload?.addonCredentials)
-    const restoreBackup = getDB().transaction(() => {
-      const incoming = payload?.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
-        ? payload.settings
-        : {}
-      const current = getDB().prepare('SELECT key, value FROM settings').all()
-      const kept = current.filter(row => SECRET_SETTING_KEYS.has(row.key))
-      const result = importAppData(payload)
-      if (kept.length) {
-        const restore = getDB().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-        for (const row of kept) {
-          const incomingValue = incoming[row.key]
-          if (!(row.key in incoming) || String(incomingValue) === SECRET_SETTING_PLACEHOLDER) {
-            restore.run(row.key, row.value)
-          }
+  ipcMain.handle('settings:previewRestoreFolders', (_, incoming) =>
+    planFolders(incoming || {}, currentSettings(), null, require('./networkLibrary').isReadableRoot))
+  ipcMain.handle('settings:importAll', async (_, payload, selection) => {
+    if (restoringBackup) return { error: 'A backup is already being restored.' }
+    if (payload?.version !== 1) throw new Error('Unsupported backup version')
+    restoringBackup = true
+    try {
+      const { validateBackupRecords } = require('../mornye/storage')
+      const addonRecords = validateBackupRecords(payload.addonCredentials)
+      const { isReadableRoot, withTimeout } = require('./networkLibrary')
+      const current = currentSettings()
+      const prepared = await prepareRestore(payload, current, selection, {
+        storageDir: getStorageDir(), readable: isReadableRoot, stat: withTimeout(fsp.stat),
+      })
+
+      const watcher = require('../libraryWatcher')
+      if (activeLibraryScans || watcher.isWorking()) {
+        return { error: 'A library scan is in progress. Try restoring again when it finishes.' }
+      }
+
+      const db = getDB()
+      const restoreBackup = db.transaction(() => {
+        const incoming = prepared.data.settings
+        for (const [key, value] of Object.entries(current)) {
+          if (SECRET_SETTING_KEYS.has(key) &&
+              (!(key in incoming) || String(incoming[key]) === SECRET_SETTING_PLACEHOLDER)) incoming[key] = value
         }
-      }
-      if (addonRecords.length) {
-        const packages = require('../mornye/packages').service(getDB())
-        packages.shutdown()
-        packages.storage.importRecords(addonRecords)
-      }
-      return result
-    })
-    return restoreBackup()
+        const result = importAppData(prepared.data)
+        if (addonRecords.length) {
+          const packages = require('../mornye/packages').service(db)
+          packages.shutdown()
+          packages.storage.importRecords(addonRecords)
+        }
+        return result
+      })
+      const result = restoreBackup()
+      try {
+        watcher.stopWatching()
+        watcher.watchLibraryRoots(prepared.plan.onlineFolders)
+      } catch (error) { console.warn('[backups] Could not restart library watchers:', error.message) }
+      try { require('./ytCookies').syncPastedCookie(prepared.data.settings) }
+      catch (error) { console.warn('[backups] Could not apply YouTube cookie settings:', error.message) }
+
+      return { ...result, library: { ...prepared.library, refreshFolders: prepared.refreshFolders } }
+    } finally {
+      restoringBackup = false
+    }
   })
+  ipcMain.handle('settings:refreshRestoredLibrary', (event, folders) => withLibraryScan(() => {
+    const requested = new Set(Array.isArray(folders) ? folders : [])
+    const selected = configuredMusicFolders().filter(folder => requested.has(folder))
+    if (!selected.length) return { results: [] }
+    mainWindow = BrowserWindow.fromWebContents(event.sender)
+    return scanFolders(selected, { saveRoots: false })
+  }))
   ipcMain.handle('settings:factoryReset', () => resetAppData())
   
   function parseM3U(content) {
@@ -2467,7 +2510,7 @@ async function applyFileChanges(changes = [], activeRoots) {
   }
 }
 
-module.exports = { sourceFilter, genreFilter, userStats, registerScannerHandlers, scanFolder, scanFolders, configuredMusicFolders, applyFileChanges, DEFAULT_MUSIC_PATH, indexSingleFile, AUDIO_EXTS, relinkArtists, relinkArtistsIfNeeded, SECRET_SETTING_KEYS, getLibraryFolders }
+module.exports = { sourceFilter, genreFilter, userStats, registerScannerHandlers, scanFolder, scanFolders, withLibraryScan, configuredMusicFolders, applyFileChanges, DEFAULT_MUSIC_PATH, indexSingleFile, AUDIO_EXTS, relinkArtists, relinkArtistsIfNeeded, SECRET_SETTING_KEYS, getLibraryFolders }
 
 
 function registerExtraHandlers(ipcMain) {

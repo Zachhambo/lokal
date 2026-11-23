@@ -41,6 +41,7 @@ const MAX_CATCH_UP_RETRIES = 3
 let deferUntil = 0
 let retryAfter = 0
 let busyFailures = 0
+let startupReconciliationScheduled = false
 
 function deferStartupWork(durationMs = 8000) {
   deferUntil = Math.max(deferUntil, Date.now() + Math.max(0, durationMs))
@@ -81,7 +82,11 @@ function queue(filePath, renamed) {
   schedule()
 }
 
+let watchGeneration = 0
+let activeCatchUps = 0
+
 async function flush() {
+  const generation = watchGeneration
   timer = null
   if (running) return schedule()
   const now = Date.now()
@@ -92,6 +97,7 @@ async function flush() {
       stat = await require('./ipc/networkLibrary')
         .withTimeout(fs.promises.stat)(filePath)
     } catch {}
+    if (generation !== watchGeneration) return
     if (stat?.isFile() && now - stat.mtimeMs < SETTLE_MS) continue
     ready.push({ path: filePath, renamed })
     pending.delete(filePath)
@@ -110,11 +116,12 @@ async function flush() {
       if (stat.isDirectory()) needsScan = true
     } catch { needsScan = true }
   }
+  if (generation !== watchGeneration) return
   if (needsScan) {
     const active = [...new Set(ready.map(change => rootForPath(change.path)).filter(Boolean))]
     const { isReadableRoot } = require('./ipc/networkLibrary')
     for (const folder of active) {
-      if (await isReadableRoot(folder)) catchUpLater(folder)
+      if (await isReadableRoot(folder) && generation === watchGeneration) catchUpLater(folder)
     }
     return
   }
@@ -177,6 +184,11 @@ function selectedRoot(folder) {
 }
 
 async function scan(folder) {
+  activeCatchUps++
+  try { return await scanRoot(folder) } finally { activeCatchUps-- }
+}
+
+async function scanRoot(folder) {
   const target = path.resolve(folder)
   const { isReadableRoot } = require('./ipc/networkLibrary')
   if (!selectedRoot(target) || !await isReadableRoot(target)) return false
@@ -295,6 +307,15 @@ function catchUpLater(folder) {
   scheduleCatchUp()
 }
 
+function scheduleStartupReconciliation(folderPaths = configuredRoots()) {
+  if (startupReconciliationScheduled) return
+  startupReconciliationScheduled = true
+  for (const value of Array.isArray(folderPaths) ? folderPaths : []) {
+    if (typeof value !== 'string' || !value.trim()) continue
+    catchUpLater(path.resolve(value.trim()))
+  }
+}
+
 function attachWatcher(next) {
   if (watchers.has(next)) return
   try {
@@ -383,6 +404,7 @@ function watchLibraryRoots(folderPaths = []) {
 }
 
 function stopWatching() {
+  watchGeneration++
   for (const watcher of watchers.values()) {
     try { watcher.close() } catch {}
   }
@@ -406,6 +428,7 @@ function stopWatching() {
 
 module.exports = {
   watchLibrary, watchLibraryRoots, stopWatching,
+  isWorking: () => Boolean(running || activeCatchUps),
   scanRootForCatchUp: scan, discardPendingForRoot,
-  deferStartupWork, busyRetryDelay, databaseBusy,
+  deferStartupWork, scheduleStartupReconciliation, busyRetryDelay, databaseBusy,
 }

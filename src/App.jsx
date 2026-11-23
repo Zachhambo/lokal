@@ -70,7 +70,7 @@ import ShareCardModal from './components/ShareCardModal'
 import { usePlayerStore, useAppStore } from './store/player'
 import { useShallow } from 'zustand/react/shallow'
 import { api, peekSettings } from './api'
-import { collectLocalPrefs } from './localPrefsBackup'
+import { collectLocalPrefs, RESTORE_RESULT_KEY } from './localPrefsBackup'
 import { isStationTrack, stationSongTime } from './radio/stations'
 import { pauseRadio, playRadio, radioTrackId, releaseRadio, startRadio } from './radio/radioSession'
 import { handleStationTitle, resetStationDisplay } from './radio/radioNowPlaying'
@@ -506,6 +506,32 @@ export default function App() {
   }), [])
 
   const { t } = useTranslation()
+  useEffect(() => {
+    let result
+    try {
+      result = JSON.parse(sessionStorage.getItem(RESTORE_RESULT_KEY))
+      sessionStorage.removeItem(RESTORE_RESULT_KEY)
+    } catch {}
+    if (!result) return
+
+    const message = result.unmatched
+      ? t('Backup restored. Some tracks still need their original files ({count}).', { count: result.unmatched })
+      : t('Backup restored.')
+    if (!result.refreshFolders?.length) {
+      showToast(message)
+      return
+    }
+    const toast = showLoadingToast(t('Refreshing restored music folders…'))
+    api.refreshRestoredLibrary(result.refreshFolders).then(scan => {
+      window.dispatchEvent(new Event('lokal:refresh'))
+      if (scan?.error || scan?.results?.some(folder => folder.errors) || scan?.offlineFolders?.length) {
+        toast.close(t('Backup restored. Some music folders could not be fully refreshed.'))
+      } else {
+        toast.close(message)
+      }
+    }).catch(() => toast.close(t('Backup restored. The music folder refresh failed.')))
+  }, [t])
+
   // The glass player bar floats over the pages, which keep room for it.
   const glassPlayerBar = useAppearanceFlag('glass_player_bar')
   const performanceMode = usePerformanceMode()

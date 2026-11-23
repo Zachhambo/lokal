@@ -53,7 +53,7 @@ export function sessionComment(session) {
 
 /** A track's cover: its artwork file, else a streamed song's own (https) cover. */
 export function trackArt(track) {
-  if (track?.artwork_path) return api.isElectron ? api.fileURL(track.artwork_path) : api.artworkURL(track.id)
+  if (track?.artwork_path) return api.fullArtworkURL(track.id)
   return /^https:\/\//.test(String(track?.artwork_url || '')) ? track.artwork_url : ''
 }
 

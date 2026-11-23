@@ -400,7 +400,9 @@ export const api = {
   automaticBackupDeliverPrefs: (id, prefs) => isE() ? el().automaticBackupDeliverPrefs(id, prefs) : Promise.resolve({ ok: false }),
   onAutomaticBackupPrefsRequest: (fn) => isE() ? el().onAutomaticBackupPrefsRequest(fn) : () => {},
 
-  importAllData: (payload) => isE() ? el().importAllData(payload) : apiFetch('/settings/import-all', { method:'POST', body: payload }),
+  refreshRestoredLibrary: (folders) => el().refreshRestoredLibrary(folders),
+  previewRestoreFolders: (settings) => el().previewRestoreFolders(settings),
+  importAllData: (payload, selection) => isE() ? el().importAllData(payload, selection) : apiFetch('/settings/import-all', { method:'POST', body: payload }),
   factoryReset: () => isE() ? el().factoryReset() : apiFetch('/settings/factory-reset', { method:'POST' }),
   clearTracks: () => isE() ? el().clearTracks() : apiFetch('/settings/clear-tracks', { method:'POST' }),
   getKeepCommaArtists: () => isE() ? el().getKeepCommaArtists() : apiFetch('/settings/keep-comma-artists'),

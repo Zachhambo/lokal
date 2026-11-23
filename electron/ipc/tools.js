@@ -1,6 +1,7 @@
 const { app } = require('electron')
 const path = require('path')
 const fs = require('fs-extra')
+const { extractTarArchive } = require('./systemTar')
 const https = require('https')
 const { execFile } = require('child_process')
 const AdmZip = require('adm-zip')
@@ -698,9 +699,8 @@ async function downloadFfmpeg(progressCallback) {
           await replaceFileWithRetry(srcFfprobe, destFfprobe, progressCallback)
         }
       } else {
-        const tar = require('tar')
         fs.ensureDirSync(extractFolder)
-        await tar.extract({ file: archivePath, cwd: extractFolder })
+        await extractTarArchive(archivePath, extractFolder)
 
         const srcFfmpeg = path.join(extractFolder, extractFolderName, exeSubPath, 'ffmpeg')
         const destFfmpeg = path.join(binDir, 'ffmpeg')

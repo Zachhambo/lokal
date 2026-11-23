@@ -16,6 +16,7 @@ const SKIP = new Set([
 ])
 const SKIP_PREFIXES = ['lokal-stream:']
 const EXTRA_KEYS = new Set(['word-sync'])
+export const RESTORE_RESULT_KEY = 'lokal-backup-restore-result'
 
 const isBackedUp = key => (key.startsWith('lokal-') || EXTRA_KEYS.has(key))
   && !SKIP.has(key)

@@ -20,22 +20,33 @@ test('backup and password recovery retain both account and Guest history and des
   initDB()
   const db = getDB()
   t.after(() => {
+    require('../electron/libraryWatcher').stopWatching()
     db.close()
     if (previous === undefined) delete process.env.LOKAL_DATA_DIR
     else process.env.LOKAL_DATA_DIR = previous
     fs.rmSync(root, { recursive: true, force: true })
   })
+  const sourceFolder = path.sep === '\\' ? '/old/music' : 'D:\\Old Music'
+  const sourceSong = (path.sep === '\\' ? path.posix : path.win32).join(sourceFolder, 'Local.flac')
+  const destination = path.join(root, 'Music')
+  const destinationSong = path.join(destination, 'Local.flac')
+  fs.mkdirSync(destination)
+  fs.writeFileSync(destinationSong, 'fixture')
   const hash = bcrypt.hashSync('forgotten-password', 4)
   importAppData({ version: 1, users: [{ id: 'owner', username: 'listener', password_hash: hash }],
-    tracks: [{ id: 'song', file_path: 'ghost://test/song', file_hash: 'song-hash', title: 'Song', artist: 'Artist', source_ref: 'test:song', source_url: 'https://example.com/song', artwork_url: 'https://example.com/cover.jpg' }],
+    tracks: [{ id: 'song', file_path: 'ghost://test/song', file_hash: 'song-hash', title: 'Song', artist: 'Artist', source_ref: 'test:song', source_url: 'https://example.com/song', artwork_url: 'https://example.com/cover.jpg' },
+      { id: 'local', file_path: sourceSong, file_hash: 'local-hash', title: 'Local', artist: 'Artist', download_source: 'web' },
+    ],
     playlists: [{ id: 'playlist', name: 'Keep me', user_id: 'owner' }],
-    user_likes: [{ user_id: 'owner', track_id: 'song' }],
+    playlist_tracks: [{ playlist_id: 'playlist', track_id: 'local', added_by: 'owner' }],
+    user_likes: [{ user_id: 'owner', track_id: 'local' }],
     play_history: [
       { id: 1, user_id: 'guest', track_id: 'song', seconds_played: 60 },
-      { id: 2, user_id: 'owner', track_id: 'song', seconds_played: 120 },
+      { id: 2, user_id: 'owner', track_id: 'local', seconds_played: 120 },
     ],
     listening_events: [{ user_id: 'owner', track_id: 'song', seconds_played: 120 }],
     settings: {
+      music_folder: sourceFolder,
       spotify_sp_dc: 'test-cookie',
       lastfm_api_key: 'test-lastfm-api-key',
       lastfm_api_secret: 'test-lastfm-secret',
@@ -74,7 +85,16 @@ test('backup and password recovery retain both account and Guest history and des
   const link = new LinkStore(db)
   db.prepare('INSERT INTO remote_devices (id,name,token_hash,user_id,created,last_seen,revoked) VALUES (?,?,?,?,?,?,?)').run('phone', 'Phone', 'token-hash', 'owner', 1, 1, 0)
   const desktopId = link.deviceId
-  nativeHandlers.get('settings:importAll')({}, JSON.parse(JSON.stringify(nativeBackup)))
+  db.prepare("UPDATE settings SET value=? WHERE key='music_folder'").run(destination)
+  const restored = await nativeHandlers.get('settings:importAll')({}, JSON.parse(JSON.stringify(nativeBackup)))
+  assert.equal(restored.library.relocated, 1)
+  assert.deepEqual(db.prepare('SELECT file_path, download_source FROM tracks WHERE id=?').get('local'), {
+    file_path: destinationSong, download_source: 'web',
+  })
+  for (const table of ['playlist_tracks', 'user_likes']) {
+    assert.equal(db.prepare('SELECT track_id FROM ' + table).get().track_id, 'local')
+  }
+  assert.equal(db.prepare('SELECT track_id FROM play_history WHERE id=2').get().track_id, 'local')
   for (const key of ['lastfm_api_key', 'lastfm_api_secret', 'lastfm_session_key', 'lastfm_username', 'lastfm_enabled', 'lastfm_scrobbling', 'listenbrainz_token', 'listenbrainz_username', 'listenbrainz_enabled']) {
     assert.equal(db.prepare('SELECT value FROM settings WHERE key=?').get(key).value, nativeBackup.settings[key], key)
   }
@@ -97,7 +117,7 @@ test('backup and password recovery retain both account and Guest history and des
   // failed import. The destination's Spotify cookie and accounts stay intact.
   packages.storage.key = null
   packages.storage.vaultProvider = () => { throw new Error('test vault unavailable') }
-  assert.throws(() => nativeHandlers.get('settings:importAll')({}, {
+  await assert.rejects(() => nativeHandlers.get('settings:importAll')({}, {
     ...nativeBackup, settings: { spotify_sp_dc: 'replacement-cookie' }, users: [],
   }), /test vault unavailable/)
   assert.equal(db.prepare('SELECT value FROM settings WHERE key=?').get('spotify_sp_dc').value, 'test-cookie')

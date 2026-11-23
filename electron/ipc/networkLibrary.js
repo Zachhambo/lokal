@@ -190,7 +190,7 @@ function registerNetworkLibraryHandlers(ipcMain) {
   // their orchestration; actual scan and playback remain unchanged.
   ipcMain.removeHandler('scanner:scanFolders')
   ipcMain.removeHandler('scanner:connectNetworkShare')
-  ipcMain.handle('scanner:scanFolders', async (event, inputs) => {
+  ipcMain.handle('scanner:scanFolders', (event, inputs) => scanner.withLibraryScan(async () => {
     progress(event, true)
     try {
       const result = await run(inputs)
@@ -200,8 +200,8 @@ function registerNetworkLibraryHandlers(ipcMain) {
       progress(event, false)
       return { error: error?.message || 'Could not scan the selected folders.' }
     }
-  })
-  ipcMain.handle('scanner:connectNetworkShare', async (event, input) => {
+  }))
+  ipcMain.handle('scanner:connectNetworkShare', (event, input) => scanner.withLibraryScan(async () => {
     try {
       const { folder } = await probeNetworkLibraryLocation(input, {
         stat: withTimeout(fs.stat),
@@ -239,7 +239,7 @@ function registerNetworkLibraryHandlers(ipcMain) {
       progress(event, false)
       return { error: error?.message || 'Could not open this network share.' }
     }
-  })
+  }))
 }
 
 module.exports = { registerNetworkLibraryHandlers, isReadableRoot, scanNetworkRoots, withTimeout, verifiedMissingPaths, verifiedPruneExists }

@@ -19,6 +19,7 @@ import { usePlayerStore } from '../store/player'
 import { albumArt, artistAlbumName, filteredGenres, fmtHour, genreComment, hourComment, sessionComment, trackArt } from '../recapText'
 import { isWindowHidden, onWindowVisibility } from '../windowVisibility'
 import { useTranslation } from '../i18n'
+import QualityImage from './QualityImage'
 
 const SOUND_KEY = 'lokal-recap-story-sound'
 // A press this long pauses (like holding a story) instead of turning the page.
@@ -407,7 +408,7 @@ function Cover({ src, className = '', iconSize = 18 }) {
   return (
     <div className={`overflow-hidden bg-white/5 ${className}`}>
       {src
-        ? <img src={src} alt="" draggable={false} className="h-full w-full object-cover" />
+        ? <QualityImage src={src} alt="" draggable={false} className="h-full w-full object-cover" />
         : <div className="flex h-full w-full items-center justify-center text-white/30"><Disc3 size={iconSize} /></div>}
     </div>
   )

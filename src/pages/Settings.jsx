@@ -5,7 +5,7 @@ import { usePanelWidths } from '../panelWidths.jsx'
 import { KEYBOARD_SHORTCUTS } from '../useKeyboardShortcuts'
 import SplitWordsSettings from '../components/SplitWordsSettings'
 import { normalizeSidebarCardLayout } from '../sideCardView'
-import { collectLocalPrefs, restoreLocalPrefs } from '../localPrefsBackup'
+import { collectLocalPrefs, restoreLocalPrefs, RESTORE_RESULT_KEY } from '../localPrefsBackup'
 import AutomaticBackupSettings from '../components/AutomaticBackupSettings'
 import ResetLocalPasswordModal from '../components/ResetLocalPasswordModal'
 import AppTabsSettings from '../components/AppTabsSettings'
@@ -482,6 +482,16 @@ export default function Settings() {
   usePageReady(settingsLoaded && (!api.isElectron || (!!appVersion && !!toolsStatus)))
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateCheckResult, setUpdateCheckResult] = useState('')
+  const [linuxUpdate, setLinuxUpdate] = useState({ phase: 'idle', version: '', progress: 0, error: '' })
+  useEffect(() => {
+    if (!api.isElectron) return undefined
+    return api.onUpdaterEvent((event, payload) => {
+      if (event === 'available') setLinuxUpdate({ phase: 'available', version: payload?.version || '', progress: 0, error: '' })
+      else if (event === 'progress') setLinuxUpdate(current => ({ ...current, phase: 'downloading', progress: Math.max(0, Math.min(100, Number(payload?.percent) || 0)) }))
+      else if (event === 'ready') setLinuxUpdate(current => ({ ...current, phase: 'ready', progress: 100, error: '' }))
+      else if (event === 'error') setLinuxUpdate(current => ({ ...current, phase: 'error', error: String(payload || 'Update failed') }))
+    })
+  }, [])
   const [statusMessage, setStatusMessage] = useState('')
   const [statusMessageValues, setStatusMessageValues] = useState(null)
   const [statusMessageIsError, setStatusMessageIsError] = useState(false)
@@ -717,29 +727,54 @@ export default function Settings() {
     if (!api.isElectron) return
     setCheckingUpdate(true)
     setUpdateCheckResult('')
+    setLinuxUpdate({ phase: 'checking', version: '', progress: 0, error: '' })
     try {
       const result = await api.updaterCheck()
       if (result?.store) {
-        setUpdateCheckResult('')
         setCheckingUpdate(false)
         await api.openExternal('ms-windows-store://downloadsandupdates')
         return
       }
       if (result?.nightly) {
-        // Nightlies aren't offered the stable release; they update by hand.
-        setUpdateCheckResult('')
         setCheckingUpdate(false)
         api.openExternal('https://github.com/Zachhambo/lokal/releases')
         return
       }
-      setUpdateCheckResult(t('Checking for updates...'))
-      setTimeout(() => {
-        setUpdateCheckResult('')
-        setCheckingUpdate(false)
-      }, 5000)
+      if (result?.available) {
+        setLinuxUpdate({ phase: 'available', version: result.version || '', progress: 0, error: '' })
+        setUpdateCheckResult(t('Update available'))
+      } else if (result?.current) {
+        setLinuxUpdate({ phase: 'current', version: result.version || '', progress: 0, error: '' })
+        setUpdateCheckResult(t('Lokal is up to date'))
+      } else if (result?.error) {
+        setLinuxUpdate({ phase: 'error', version: '', progress: 0, error: result.error })
+        setUpdateCheckResult(result.error)
+      } else {
+        setUpdateCheckResult(t('Checking for updates...'))
+      }
     } catch (e) {
-      setUpdateCheckResult(t('Error checking for updates'))
+      setLinuxUpdate({ phase: 'error', version: '', progress: 0, error: e?.message || String(e) })
+      setUpdateCheckResult(e?.message || t('Error checking for updates'))
+    } finally {
       setCheckingUpdate(false)
+    }
+  }
+
+  const downloadUpdate = async () => {
+    setLinuxUpdate(current => ({ ...current, phase: 'downloading', progress: 0, error: '' }))
+    const result = await api.updaterDownload()
+    if (result?.error) setLinuxUpdate(current => ({ ...current, phase: 'error', error: result.error }))
+    else if (result?.downloaded) setLinuxUpdate(current => ({ ...current, phase: 'ready', progress: 100 }))
+  }
+
+  const installUpdate = async () => {
+    setLinuxUpdate(current => ({ ...current, phase: 'installing', error: '' }))
+    try {
+      const result = await api.updaterInstall()
+      if (result?.error) setLinuxUpdate(current => ({ ...current, phase: 'error', error: result.error }))
+      else if (!result?.installing) setLinuxUpdate(current => ({ ...current, phase: 'error', error: t('The package installer did not start') }))
+    } catch (error) {
+      setLinuxUpdate(current => ({ ...current, phase: 'error', error: error?.message || String(error) }))
     }
   }
 
@@ -1010,14 +1045,14 @@ export default function Settings() {
     setTimeout(() => setAccountStatus(''), 4000)
   }
 
-  const reloadAfterDataReplace = async () => {
+  const reloadAfterDataReplace = async ({ relaunch = true } = {}) => {
     logout()
     try {
       localStorage.removeItem('lokal-queue')
       localStorage.removeItem('lokal-user')
       localStorage.removeItem(LASTFM_STATUS_KEY)
     } catch {}
-    if (api.isElectron) {
+    if (api.isElectron && relaunch) {
       await api.relaunchApp()
       return
     }
@@ -1032,8 +1067,10 @@ export default function Settings() {
       const parsed = JSON.parse(content)
       if (!parsed || typeof parsed !== 'object') throw new Error(t('Invalid backup file'))
       if (parsed.version !== 1) throw new Error(t('Unsupported backup version'))
+      const library = api.isElectron ? await api.previewRestoreFolders(parsed.settings) : null
       setImportPreview({
         filePath: fp,
+        library,
         data: parsed,
         summary: {
           users: Array.isArray(parsed.users) ? parsed.users.length : 0,
@@ -1049,16 +1086,54 @@ export default function Settings() {
     }
   }
 
+  const chooseRestoreFolder = async (index) => {
+    try {
+      const folder = await api.openFolder()
+      if (!folder) return
+      setImportPreview(current => {
+        if (!current?.library) return current
+        const { primary, mappings } = current.library
+        const nextMappings = mappings.map((entry, position) =>
+          position === index || (index === null && position === 0 && (!entry.folder || entry.folder === primary))
+            ? { ...entry, folder }
+            : entry,
+        )
+        return {
+          ...current,
+          library: { ...current.library, primary: index === null ? folder : primary || folder, mappings: nextMappings },
+        }
+      })
+    } catch (error) {
+      alert(t('Could not select a music folder: {error}', { error: t(error.message) }))
+    }
+  }
+
   const handleImportBackup = async () => {
     if (!importPreview?.data) return
     setImportingAllData(true)
     try {
-      const result = await api.importAllData(importPreview.data)
+      await flushSettings()
+      const library = importPreview.library
+      const result = await api.importAllData(importPreview.data, library && {
+        primary: library.primary,
+        mappings: library.mappings.map(entry => entry.folder),
+      })
       if (!result || result.error) throw new Error(t(result?.error || 'Import failed'))
+      // A failed pre-import settings save must not retry over the restored DB.
+      clearTimeout(pendingSettingsTimer)
+      pendingSettings = {}
       restoreLocalPrefs(importPreview.data.localPrefs)
+      if (result.library) {
+        usePlayerStore.setState({
+          queue: [], queueIndex: -1, currentTrack: null, playNextIds: [],
+          playbackContext: null, isPlaying: false, isBuffering: false,
+        })
+        api.castDisconnect({ stopReceiver: true }).catch(() => {})
+        try { sessionStorage.setItem(RESTORE_RESULT_KEY, JSON.stringify(result.library)) } catch {}
+      }
       setShowImportModal(false)
       setImportPreview(null)
-      await reloadAfterDataReplace()
+      await reloadAfterDataReplace({ relaunch: false })
     } catch (e) {
       alert(t('Failed to import backup: {error}', { error: t(e.message) }))
     } finally {
@@ -1338,7 +1413,22 @@ activeCategory === 'data' ? usersTried
                 {checkingUpdate ? t('Checking...') : isWindowsStore ? t('Open Microsoft Store') : /-nightly\./i.test(appVersion || '') ? t('Open Releases') : t('Check for updates')}
               </button>
               {updateCheckResult && (
-                <span className="text-xs text-muted">{t(updateCheckResult)}</span>
+                <span className="text-xs text-muted">{updateCheckResult}</span>
+              )}
+              {linuxUpdate.phase === 'available' && (
+                <button onClick={downloadUpdate} className="px-3 py-2 rounded-lg bg-accent text-white text-sm">{t('Download update')} {linuxUpdate.version}</button>
+              )}
+              {linuxUpdate.phase === 'downloading' && (
+                <span className="text-xs text-muted">{t('Downloading update')} {linuxUpdate.progress}%</span>
+              )}
+              {linuxUpdate.phase === 'ready' && (
+                <button onClick={installUpdate} className="px-3 py-2 rounded-lg bg-accent text-white text-sm">{t('Install and restart')}</button>
+              )}
+              {linuxUpdate.phase === 'installing' && (
+                <span className="text-xs text-muted">{t('Installing update. Complete the system authentication prompt to continue...')}</span>
+              )}
+              {linuxUpdate.phase === 'error' && (
+                <span role="alert" className="text-xs text-red-400">{linuxUpdate.error}</span>
               )}
             </div>
           </Row>
@@ -3451,6 +3541,35 @@ activeCategory === 'data' ? usersTried
                   <p className="text-[10px] text-muted uppercase tracking-wider">{t("History")}</p>
                 </div>
               </div>
+              {importPreview.library && (
+                <div className="space-y-3 border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{t('Default music folder on this PC')}</p>
+                      <p className="break-all text-xs text-muted">{importPreview.library.primary || t('No folder selected')}</p>
+                    </div>
+                    <button type="button" onClick={() => chooseRestoreFolder(null)} disabled={importingAllData}
+                      className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-white disabled:opacity-50">
+                      {t('Choose folder')}
+                    </button>
+                  </div>
+                  {importPreview.library.mappings.some(entry => entry.source !== entry.folder) && (
+                    <p className="text-xs text-muted">{t('To reconnect songs in a moved folder, choose the matching folder on this PC. Songs without a match keep their playlist, like, and history entries.')}</p>
+                  )}
+                  {importPreview.library.mappings.map(({ source, folder }, index) => (source !== folder || folder !== importPreview.library.primary) && (
+                    <div key={source} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 break-all text-xs text-muted">
+                        <p>{source}</p>
+                        <p className="text-white/80">{folder || t('Folder unavailable')}</p>
+                      </div>
+                      <button type="button" onClick={() => chooseRestoreFolder(index)} disabled={importingAllData}
+                        className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-white disabled:opacity-50">
+                        {t('Reconnect')}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-muted">{t('After import, Lokal opens as Guest. Sign in to a restored account to see its history, likes and playlists. If you forgot its password, use Reset Password under Settings → Data → Accounts.')}</p>
               {Array.isArray(importPreview.data.users) && importPreview.data.users.filter(account => account && typeof account === 'object').map(account => <p key={account.id} className="text-xs text-muted">
                 @{account.username} · {t('History')}: {Array.isArray(importPreview.data.play_history) ? importPreview.data.play_history.filter(entry => entry?.user_id === account.id).length : 0}

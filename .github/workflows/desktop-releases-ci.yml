@@ -9,6 +9,9 @@ on:
       - scripts/desktop_releases.py
       - scripts/test_desktop_releases.py
       - scripts/desktop-updater-release.test.cjs
+      - electron/linuxDebUpdater.js
+      - electron/main.js
+      - scripts/linux-deb-updater.test.mjs
   push:
     branches: [main]
     paths:
@@ -19,6 +22,9 @@ on:
       - scripts/desktop_releases.py
       - scripts/test_desktop_releases.py
       - scripts/desktop-updater-release.test.cjs
+      - electron/linuxDebUpdater.js
+      - electron/main.js
+      - scripts/linux-deb-updater.test.mjs
   workflow_dispatch:
 permissions:
   contents: read
@@ -35,6 +41,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
+      - name: Test Linux DEB update discovery, download and installation
+        run: node --test scripts/linux-deb-updater.test.mjs
+      - name: Check Electron main-process syntax
+        run: node --check electron/main.js && node --check electron/linuxDebUpdater.js
       - name: Check the shipped updater against rolling releases
         run: |
           npm install --prefix "$RUNNER_TEMP/updater-contract" --ignore-scripts --no-package-lock electron-updater@6.8.9

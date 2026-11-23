@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, Folder, History, ListEnd, ListMusic, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus, Pencil } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Clock, Disc3, Download, Folder, History, ListEnd, ListMusic, ListPlus, Music, Play, Plus, Radio, RefreshCw, Sparkles, User, UserMinus, UserPlus, Pencil, Smartphone } from 'lucide-react'
 import { usePlayerStore, useAppStore } from '../store/player'
 import TrackList from '../components/TrackList'
 import PlaylistCollection from '../components/PlaylistCollection'
@@ -18,7 +18,7 @@ import { showToast, showLoadingToast } from '../components/Toaster'
 import { addToPlaylistMany, addToQueueMany, playNextMany, saveAsPlaylist } from '../trackActions'
 import { artistPath } from '../releaseActions'
 import ProviderConnections from '../components/ProviderConnections'
-import { libraryDownloadMessage, saveTracksToLibrary, trackArtURL } from '../onlineTracks'
+import { libraryDownloadMessage, saveTracksToLibrary, trackArtURL, trackFullArtURL } from '../onlineTracks'
 import { openRadio } from '../radioActions'
 import { songKey, sourceName, resolveRecommendationTracks, playbackFallbackMessage, dispatchAddonVerificationRequired, isAddonVerificationRequiredError } from '../recommendations'
 import { recommendationSession, rememberHomePath } from '../recommendationSession'
@@ -38,6 +38,7 @@ import { personalizedHomeMessages } from '../homeGreeting.mjs'
 import { useAppearanceFlag } from '../appearanceFlags'
 import FolderArtwork from '../components/FolderArtwork'
 import { chooseRandomFolders, configuredMusicRoots, getFoldersWithDirectTracks } from '../homeFolders.mjs'
+import { connectedPhones, sendTracksToPhone, transferableTracks } from '../sendToMobile.mjs'
 
 const today = () => new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
 const mixTitle = (mix) => (mix.type === 'artist' ? `${mix.name} Mix` : mix.name)
@@ -82,6 +83,51 @@ function dateLabel(timestamp, t) {
   return new Date(value * 1000).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
+function MixArtwork({ track }) {
+  const thumbnail = trackArtURL(track)
+  const full = trackFullArtURL(track) || thumbnail
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [full, thumbnail])
+
+  return (
+    <>
+      {thumbnail && <QualityImage src={thumbnail} className="absolute inset-0 w-full h-full object-cover" />}
+      {full && full !== thumbnail && !failed && (
+        <QualityImage src={full} className="absolute inset-0 w-full h-full object-cover"
+          onError={() => setFailed(true)} />
+      )}
+    </>
+  )
+}
+
+function MixCard({ mix, onClick, onOpen, onSave, saving, onContextMenu }) {
+  const { t } = useTranslation()
+  const arts = [...new Map(mix.tracks.map(track => [trackArtURL(track), track]).filter(([art]) => art)).values()].slice(0, 4)
+  return (
+    <motion.div whileHover={{ scale: 1.03 }} className="relative group" onContextMenu={onContextMenu}>
+      <motion.button whileTap={{ scale: 0.98 }} onClick={onClick}
+        aria-label={`Play ${mixTitle(mix)}`}
+        className="w-full flex flex-col gap-3 p-3 bg-elevated border border-border rounded-xl hover:border-accent/30 transition-all text-left">
+        <div className="w-full aspect-square rounded-lg overflow-hidden bg-card relative">
+          {arts.length === 0 && <div className="w-full h-full flex items-center justify-center text-subtle"><Radio size={36} /></div>}
+          {arts.length === 1 && <MixArtwork track={arts[0]} />}
+          {arts.length > 1 && <div className="w-full h-full grid grid-cols-2">{arts.map((track, index) => <div key={index} className="relative aspect-square min-w-0 min-h-0"><MixArtwork track={track} /></div>)}</div>}
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"><div className="w-10 h-10 bg-accent rounded-full flex items-center justify-center shadow-xl"><Play size={16} fill="currentColor" className="text-base translate-x-0.5" /></div></div>
+        </div>
+      </motion.button>
+      <button type="button" onClick={onOpen}
+        aria-label={`Open ${mixTitle(mix)} playlist`}
+        className="w-full px-3 pb-1 text-left rounded-md hover:text-accent focus-visible:ring-2 focus-visible:ring-accent">
+        <p className="text-sm font-medium truncate">{mix.name}</p>
+        <p className="text-xs text-muted">{plural(mix.tracks.length, 'track')} · {mixTitle(mix)}</p>
+      </button>
+      <button onClick={onSave} disabled={saving} title={t("Save as playlist")} aria-label={`Save ${mixTitle(mix)} as a playlist`} className={`absolute right-5 top-5 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white/85 backdrop-blur transition-all hover:bg-black/80 hover:text-accent focus:opacity-100 ${saving ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        {saving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent/30 border-t-accent" /> : <ListPlus size={15} />}
+      </button>
+    </motion.div>
+  )
+}
+
 function SectionHeader({ icon: Icon, eyebrow, title, count, subtitle, onExpand, expanded, action, onContextMenu }) {
   const { t } = useTranslation()
   return (
@@ -107,34 +153,6 @@ function DiscoveryTrack({ track, onPlay, onRadio, onContextMenu, getDownloadTrac
       </button>
       <SaveToLibraryButton track={track} getTrack={() => getDownloadTrack(track)} meta={track} className="p-2 opacity-0 group-hover:opacity-100 focus:opacity-100" />
       {onRadio && <button type="button" aria-label={`Start radio for ${track.title}`} onClick={() => onRadio(track)} className="rounded-full p-2 text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100" title={t("Start radio")}><Radio size={14} /></button>}
-    </div>
-  )
-}
-
-function MixCard({ mix, onClick, onOpen, onSave, saving, onContextMenu }) {
-  const { t } = useTranslation()
-  const title = mixTitle(mix)
-  const firstTrack = mix.tracks[0]
-  const artwork = firstTrack ? trackArtURL(firstTrack) || secureImage(firstTrack.artwork_url) : ''
-  return (
-    <div onContextMenu={onContextMenu} className="group min-w-0 overflow-hidden rounded-xl border border-border bg-elevated">
-      <div className="relative aspect-square overflow-hidden bg-card">
-        <button type="button" onClick={onClick} aria-label={t('Play {name}', { name: title })} className="absolute inset-0 h-full w-full">
-          {artwork ? <DiscoveryImage item={firstTrack} src={artwork} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
-            : <div className="flex h-full items-center justify-center"><Disc3 size={38} className="text-muted" /></div>}
-          <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-white opacity-0 transition-opacity group-hover:opacity-100">
-            <Play size={22} fill="currentColor" />
-          </span>
-        </button>
-        <button type="button" onClick={onSave} disabled={saving} aria-label={t('Save {name} as a playlist', { name: title })}
-          className="absolute right-2 top-2 rounded-full bg-black/65 p-2 text-white opacity-0 transition-opacity hover:text-accent focus:opacity-100 group-hover:opacity-100 disabled:opacity-50">
-          <ListPlus size={15} />
-        </button>
-      </div>
-      <button type="button" onClick={onOpen} className="block w-full min-w-0 p-3 text-left">
-        <p className="truncate text-sm font-medium text-white">{title}</p>
-        <p className="mt-0.5 text-xs text-muted">{plural(mix.tracks.length, 'track')}</p>
-      </button>
     </div>
   )
 }
@@ -365,6 +383,11 @@ function HomeContent({ user }) {
   const playQueue = usePlayerStore(s => s.playQueue)
   const navigate = useNavigate()
   const menu = useContextMenu()
+  const menuRequestRef = useRef(0)
+  const openMenu = (event, items) => {
+    menuRequestRef.current++
+    return menu.open(event, items)
+  }
   const [showDiscoveryEditor, setShowDiscoveryEditor] = useState(false)
   const [shelfLayouts, setShelfLayouts] = useState(() => Object.fromEntries(
     Object.keys(DISCOVERY_SHELF_DEFAULTS).map(provider => {
@@ -632,7 +655,7 @@ function HomeContent({ user }) {
   } : discovery
   const recommendationTracks = data?.freshFinds || []
   const goHome = (next, section = null) => navigate(next === 'home' ? '/' : `/home/${next}${section ? `/${section}` : ''}`)
-  const openMixMenu = (event, mix) => menu.open(event, [
+  const openMixMenu = (event, mix) => openMenu(event, [
     { label: 'Play', icon: Play, onSelect: () => playQueue(mix.tracks, 0, localMixContext(mix)) },
     { label: 'Play next', icon: Clock, onSelect: () => playNextMany(mix.tracks) },
     { label: 'Add to queue', icon: ListEnd, onSelect: () => addToQueueMany(mix.tracks) },
@@ -641,7 +664,7 @@ function HomeContent({ user }) {
     { label: 'Save as playlist', icon: ListPlus, onSelect: () => saveMix(mix), disabled: !!saving },
   ])
   const visibleArtists = artists => (Array.isArray(artists) ? artists : []).filter(artist => !hiddenArtists.has(discoveryArtistKey(artist.name)))
-  const openArtistMenu = (event, artist) => menu.open(event, [
+  const openArtistMenu = (event, artist) => openMenu(event, [
     { label: 'Start artist radio', icon: Radio, onSelect: () => startRadio({ artist: artist.name, type: 'artist' }) },
     { label: 'Go to artist', icon: User, onSelect: () => navigate(artist.source === 'library' ? `/artist/${encodeURIComponent(artist.id)}` : artistPath(artist.name), { state: { name: artist.name } }) },
     { separator: true },
@@ -724,13 +747,61 @@ function HomeContent({ user }) {
     if (section === 'history') return data?.history || []
     return data?.categories?.find(group => group.id === section)?.tracks || []
   }
-  const openTrackMenu = (event, track, section = 'fresh') => {
-    return menu.open(event, [
+  const sendToPhone = async (device, tracks) => {
+    const tracksToSend = transferableTracks(tracks)
+    if (!tracksToSend.length) return
+    const toast = showLoadingToast(t('Sending {count} songs to {device}…', { count: tracksToSend.length, device: device.name }))
+    try {
+      const result = await sendTracksToPhone(window.electron, device.id, tracksToSend, progress => {
+        toast.update(
+          t('Copying batch {batch} of {batches} ({completed}/{total} songs)…', progress),
+          progress.completed / progress.total * 100,
+        )
+      })
+      const skipped = tracks.length > tracksToSend.length ? ` ${t('Unavailable or duplicate tracks were skipped.')}` : ''
+      toast.close(`${t('Sent {count} songs to {device}.', { count: result.copied, device: device.name })}${skipped}`)
+    } catch (error) {
+      const copied = Math.min(Number(error?.copied) || 0, tracksToSend.length)
+      const message = copied
+        ? t('Sent {copied} of {total} songs to {device}; the rest could not be copied: {error}', { copied, total: tracksToSend.length, device: device.name, error: error.message })
+        : t('Could not send songs to {device}: {error}', { device: device.name, error: error.message })
+      toast.close(message)
+    }
+  }
+  const mobileMenuItems = async tracks => {
+    if (!api.isElectron || !transferableTracks(tracks).length || !window.electron?.getLinkDevices) return []
+    try {
+      const devices = connectedPhones(await window.electron.getLinkDevices())
+      return devices.map(device => ({
+        label: devices.length === 1 ? 'Send to mobile' : 'Send to mobile: {device}',
+        labelValues: devices.length === 1 ? undefined : { device: device.name },
+        icon: Smartphone,
+        onSelect: () => sendToPhone(device, tracks),
+      }))
+    } catch (error) {
+      showToast(t('Could not check connected phones: {error}', { error: error?.message || t('Unknown error') }))
+      return []
+    }
+  }
+  const openTrackMenu = async (event, track, section = 'fresh') => {
+    const request = ++menuRequestRef.current
+    const position = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      preventDefault() {},
+      stopPropagation() {},
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const mobileItems = await mobileMenuItems([track])
+    if (request !== menuRequestRef.current) return
+    return menu.open(position, [
       { label: 'Play', icon: Play, onSelect: () => playRecommendation(track, shelfContext(recommendationSource, section), shelfTracks(section)) },
       { label: 'Play next', icon: Clock, onSelect: () => withRecommendation(track, playNextMany) },
       { label: 'Add to queue', icon: ListEnd, onSelect: () => withRecommendation(track, addToQueueMany) },
       { label: 'Add to playlist…', icon: Plus, onSelect: () => withRecommendation(track, addToPlaylistMany) },
       { label: 'Download song', icon: Download, onSelect: () => withRecommendation(track, downloadRecommendations) },
+      ...mobileItems,
       { label: 'Start radio', icon: Radio, onSelect: () => startRadio(track) },
       { separator: true },
       ...followMenu(track.artist),
@@ -743,12 +814,12 @@ function HomeContent({ user }) {
   const sectionProps = {
     data: data ? { ...data, artists: visibleArtists(data.artists) } : data, localArtists: visibleArtists(localArtists), allArtists: [...localArtists, ...(discovery?.artists || [])], source: recommendationSource, loading: discoveryLoading, error: discoveryError,
     layout: shelfLayouts[recommendationSource] || restoreShelfLayout(recommendationSource),
-    onEditCategory: event => menu.open(event, [{ label: 'Edit', icon: Pencil, onSelect: () => setShowDiscoveryEditor(true) }]),
+    onEditCategory: event => openMenu(event, [{ label: 'Edit', icon: Pencil, onSelect: () => setShowDiscoveryEditor(true) }]),
     getDownloadTrack: resolveDownloadTrack,
     onOpenShelf: section => navigate(shelfContext(recommendationSource, section).path),
     onProviderMixPlay: playProviderMix,
     onProviderMixOpen: mix => navigate(providerMixContext(mix).path, { state: { title: mix.title, cover: secureImage(mix.artwork_url || mix.thumbnail) } }),
-    onProviderMixMenu: (event, mix) => menu.open(event, [
+    onProviderMixMenu: (event, mix) => openMenu(event, [
       { label: 'Open playlist', icon: ListMusic, onSelect: () => sectionProps.onProviderMixOpen(mix) },
       { label: 'Play mix', icon: Play, onSelect: () => playProviderMix(mix) },
       { label: 'Save as playlist', icon: ListPlus, onSelect: () => saveProviderMix(mix) },
@@ -771,7 +842,7 @@ function HomeContent({ user }) {
     onRadio: startRadio, onArtistMenu: openArtistMenu,
     onArtistPlay: artist => artist.source === 'library' ? navigate(`/artist/${encodeURIComponent(artist.id)}`) : playCatalogue('artist', artist),
     onAlbumPlay: album => playCatalogue('album', album),
-    onAlbumMenu: (event, album) => menu.open(event, [
+    onAlbumMenu: (event, album) => openMenu(event, [
       { label: 'Play album', icon: Play, onSelect: () => playCatalogue('album', album) },
       { label: 'Save as playlist', icon: ListPlus, onSelect: () => saveRecommendedAlbum(album) },
       { label: 'Download album', icon: Download, onSelect: () => downloadRecommendedAlbum(album) },
@@ -790,13 +861,27 @@ function HomeContent({ user }) {
   const picks = madeForYou(uidKey, mixes)
   const pickTracks = picks.map(pick => pick.track)
   const madeForYouContext = { type: 'made-for-you', name: 'Made for you', path: '/home/home' }
-  const openPickMenu = (event, track) => menu.open(event, [
-    { label: 'Play next', icon: ListEnd, onSelect: () => playNextMany([track]) },
-    { label: 'Add to queue', icon: ListPlus, onSelect: () => addToQueueMany([track]) },
-    { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylistMany([track]) },
-    { separator: true },
-    { label: 'Go to artist', icon: User, onSelect: () => navigate(artistPath(track.artist)) },
-  ])
+  const openPickMenu = async (event, track) => {
+    const request = ++menuRequestRef.current
+    const position = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      preventDefault() {},
+      stopPropagation() {},
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const mobileItems = await mobileMenuItems([track])
+    if (request !== menuRequestRef.current) return
+    return menu.open(position, [
+      { label: 'Play next', icon: ListEnd, onSelect: () => playNextMany([track]) },
+      { label: 'Add to queue', icon: ListPlus, onSelect: () => addToQueueMany([track]) },
+      { label: 'Add to playlist…', icon: Plus, onSelect: () => addToPlaylistMany([track]) },
+      ...mobileItems,
+      { separator: true },
+      { label: 'Go to artist', icon: User, onSelect: () => navigate(artistPath(track.artist)) },
+    ])
+  }
   const selectedMixId = tab === 'home' && route.section?.startsWith('mix-')
     ? decodeURIComponent(route.section.slice(4)) : null
   const selectedMix = mixes.find(mix => String(mix.id) === selectedMixId)
