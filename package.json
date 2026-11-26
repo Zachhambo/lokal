@@ -55,8 +55,7 @@
     "test:brand-icons": "node --test scripts/brand-icons.test.cjs",
     "gen:installer": "node scripts/generate-installer-assets.cjs",
     "test:installer": "node --test scripts/installer-assets.test.cjs",
-    "test:jsx-bindings": "node --test scripts/jsx-bindings.test.mjs",
-    "test:eac3-stereo": "node --test scripts/eac3-stereo-downmix.test.mjs"
+    "test:jsx-bindings": "node --test scripts/jsx-bindings.test.mjs"
   },
   "build": {
     "appId": "com.lokal.music",
