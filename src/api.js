@@ -422,7 +422,6 @@ export const api = {
     return api.saveSettings({ music_folders: JSON.stringify(list), music_folder: list[0] || '' })
   },
   resolveFileToPlay: (f) => isE() ? el().resolveFileToPlay(f) : Promise.resolve({ success: false, error: 'Electron only' }),
-  prepareStereoEac3: (trackId) => isE() && typeof el().prepareStereoEac3 === 'function' ? el().prepareStereoEac3(trackId) : Promise.resolve({ converted: false }),
   onOpenFileRequest: (fn) => { if (isE() && typeof el().onOpenFileRequest === 'function') return el().onOpenFileRequest(fn); return () => {} },
   updateThumbarState: (state) => (isE() && typeof el().updateThumbarState === 'function') ? el().updateThumbarState(state) : Promise.resolve(),
   // Settings > Library > Open Folders In: start one of those programs on a sidebar folder.
