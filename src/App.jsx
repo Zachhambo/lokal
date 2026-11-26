@@ -3313,30 +3313,7 @@ export default function App() {
           player.streamLoading.recovering) {
         player.setStreamLoading({ ...player.streamLoading, recovering: false })
       }
-      let playbackSrc = src
-      // Chromium's built-in media decoder does not consistently support
-      // multichannel E-AC-3 in an M4A container. Prepare a cached stereo PCM
-      // copy only for local M4A files; FFmpeg/FFprobe identify the actual codec
-      // and channel count, so AAC/ALAC and stereo E-AC-3 remain untouched.
-      const localM4a = !ref && typeof currentTrack.file_path === 'string' &&
-        /\\.m4a$/i.test(currentTrack.file_path) && api.prepareStereoEac3
-      if (localM4a) {
-        const prepared = await api.prepareStereoEac3(String(currentTrack.id)).catch(error => {
-          playbackLog(`[audio] E-AC-3 stereo preparation failed: ${error?.message || error}`, 'warn')
-          return null
-        })
-        const latest = usePlayerStore.getState()
-        if (cancelled || latest.playbackGeneration !== generation ||
-            latest.currentTrack?.id !== currentTrack.id ||
-            latest.currentTrack?.file_path !== currentTrack.file_path) return
-        if (prepared?.url) {
-          playbackSrc = prepared.url
-          playbackLog(`[audio] Using ${prepared.cached ? 'cached' : 'new'} stereo downmix for E-AC-3 M4A`, 'info')
-        } else if (prepared?.error) {
-          playbackLog(`[audio] Stereo downmix unavailable; trying original file: ${prepared.error}`, 'warn')
-        }
-      }
-      replaceAudioSource(el, playbackSrc)
+      replaceAudioSource(el, src)
       if (resumeFrom > 0) { try { el.currentTime = resumeFrom } catch {} }
       else beginLastfmPlayback(live.currentTrack)
       if (usePlayerStore.getState().isPlaying) el.play().catch(() => {})
