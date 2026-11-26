@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('electron', {
   onArtworkRepairProgress: (fn) => on('scanner:artworkRepairProgress', (_, status) => fn(status)),
   resolveFileToPlay: (f) => invoke('scanner:resolveFileToPlay', f),
   getReplayGain: (trackId) => invoke('player:getReplayGain', trackId),
+  prepareStereoEac3: (trackId) => invoke('player:prepareStereoEac3', trackId),
   onOpenFileRequest: (fn) => on('player:openFile', (_, filePath) => fn(filePath)),
   updateThumbarState: (state) => invoke('thumbar:updateState', state),
   onThumbarCommand: (fn) => {
