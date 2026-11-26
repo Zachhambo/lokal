@@ -1,9 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const mm = require('../musicMetadata')
-const { getDB, getStorageDir } = require('./db')
-const { prepareEac3Stereo } = require('../audio/stereoDownmix')
-const { findFfmpeg, findFfprobe } = require('./tools')
+const { getDB } = require('./db')
 
 const replayGainCache = new Map()
 const REPLAYGAIN_CACHE_LIMIT = 512
@@ -62,25 +60,6 @@ function registerPlayerHandlers(ipcMain) {
   })
 
   
-  ipcMain.handle('player:prepareStereoEac3', async (_, trackId) => {
-    if (typeof trackId !== 'string' || !trackId || trackId.length > 256) return { error: 'Invalid track.' }
-    try {
-      // Resolve the path from the library, never from renderer-supplied paths.
-      const track = require('../trackAlias').trackById(getDB(), trackId)
-      if (!track?.file_path || track.file_path.startsWith('ghost://') || path.extname(track.file_path).toLowerCase() !== '.m4a') return { converted: false }
-      const result = await prepareEac3Stereo({
-        filename: path.resolve(track.file_path), ffmpeg: findFfmpeg(), ffprobe: findFfprobe(),
-        cacheDirectory: path.join(getStorageDir(), 'audio-cache', 'eac3-stereo'),
-      })
-      if (!result.converted) return { converted: false }
-      const { pathToFileURL } = require('url')
-      return { converted: true, url: pathToFileURL(result.output).href, cached: result.cached }
-    } catch (error) {
-      console.warn('[audio] E-AC-3 stereo preparation failed:', error.message)
-      return { error: error.message || 'Could not prepare E-AC-3 stereo audio.' }
-    }
-  })
-
   ipcMain.handle('player:getFileURL', (e, filePath) => {
     const { pathToFileURL } = require('url')
     return pathToFileURL(filePath).href
