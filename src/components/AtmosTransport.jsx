@@ -63,7 +63,7 @@ export default function AtmosTransport() {
         toast = null
         const volume = Math.min(1, state.volume)
         if (state.volume > 1) route.setVolume(volume)
-        setPlayer({ isPlaying: true, isBuffering: false, volume })
+        setPlayer({ isPlaying: true, isBuffering: false, volume, progress: 0 })
         return
       }
       if (next.state === 'progress') {

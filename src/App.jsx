@@ -726,7 +726,7 @@ export default function App() {
       const localTrack = usePlayerStore.getState().currentTrack
       if (localTrack?.id && !localTrack.atmosLocalAttempted && /\.m4a$/i.test(filePath)) {
         const nativeTrack = { ...localTrack, atmosNative: true, atmosLocal: true, atmosMode: 'headphones', atmosProvider: 'local', atmosSourceId: String(localTrack.id) }
-        usePlayerStore.setState({ currentTrack: nativeTrack, isBuffering: true })
+        usePlayerStore.setState({ currentTrack: nativeTrack, isBuffering: true, progress: 0, duration: 0 })
         el.pause()
         const native = await api.atmosPlayLocal?.(String(localTrack.id)).catch(() => null)
         if (native?.ok) return

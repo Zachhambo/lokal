@@ -489,6 +489,8 @@ export const usePlayerStore = create((set, get) => ({
         set({ 
           shuffleIndex: nextIdx,
           currentTrack: nextTrack,
+          progress: 0,
+          duration: 0,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
           playHistory: newHistory,
@@ -505,6 +507,8 @@ export const usePlayerStore = create((set, get) => ({
           shuffleQueue: newShuffleQueue,
           shuffleIndex: nextIndex,
           currentTrack: nextTrack,
+          progress: 0,
+          duration: 0,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
           playHistory: [nextTrack.id],
@@ -526,6 +530,8 @@ export const usePlayerStore = create((set, get) => ({
     set({ 
       queueIndex: idx, 
       currentTrack: nextTrack, 
+      progress: 0,
+      duration: 0,
       isPlaying: true,
       playHistory: newHistory,
       futureHistory: []
@@ -546,6 +552,8 @@ export const usePlayerStore = create((set, get) => ({
         set({ 
           shuffleIndex: nextIdx,
           currentTrack: nextTrack,
+          progress: 0,
+          duration: 0,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
           playHistory: newHistory,
@@ -562,6 +570,8 @@ export const usePlayerStore = create((set, get) => ({
           shuffleQueue: newShuffleQueue,
           shuffleIndex: nextIndex,
           currentTrack: nextTrack,
+          progress: 0,
+          duration: 0,
           queueIndex: queue.findIndex(t => t.id === nextTrack.id),
           isPlaying: true,
           playHistory: [nextTrack.id],
@@ -584,6 +594,8 @@ export const usePlayerStore = create((set, get) => ({
     set({ 
       queueIndex: idx, 
       currentTrack: nextTrack, 
+      progress: 0,
+      duration: 0,
       isPlaying: true,
       playHistory: newHistory,
       futureHistory: []
