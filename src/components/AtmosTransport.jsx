@@ -28,6 +28,7 @@ export default function AtmosTransport() {
         const value = Math.max(0, Math.min(1, Number(level) || 0))
         api.atmosCommand('volume ' + value.toFixed(3)).catch(() => {})
       },
+      togglePlay: () => api.atmosCommand('cycle pause'),
     }
     const setPlayer = patch => {
       updatingFromBackend = true
@@ -129,14 +130,6 @@ export default function AtmosTransport() {
         return
       }
       if (updatingFromBackend || !active || !now.currentTrack?.atmosNative) return
-      // Zustand's togglePlay handles every local/media-key/sleep-timer
-      // control, so forward only genuine user requested state transitions.
-      if (now.isPlaying !== before.isPlaying && paused === now.isPlaying) {
-        paused = !now.isPlaying
-        api.atmosCommand('cycle pause').catch(() => {
-          setPlayer({ isPlaying: before.isPlaying })
-        })
-      }
     })
     return () => {
       unsubscribe()

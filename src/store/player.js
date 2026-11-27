@@ -474,7 +474,14 @@ export const usePlayerStore = create((set, get) => ({
   },
 
   togglePlay: () => {
-    set(s => ({ isPlaying: !s.isPlaying }))
+    const wasPlaying = get().isPlaying
+    const nextPlaying = !wasPlaying
+    if (!outputRoute?.togglePlay) {
+      set({ isPlaying: nextPlaying })
+      return
+    }
+    set({ isPlaying: nextPlaying })
+    Promise.resolve(outputRoute.togglePlay()).catch(() => set({ isPlaying: wasPlaying }))
   },
 
   next: () => {
