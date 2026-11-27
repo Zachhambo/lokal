@@ -714,6 +714,10 @@ export default function App() {
       return
     }
     if (!api.isElectron || !el || (code !== 3 && code !== 4)) return
+    // Queue restore keeps the last selection but deliberately starts paused.
+    // A decoder error raised while the browser inspects that source must not
+    // start native playback until the user explicitly presses Play.
+    if (!usePlayerStore.getState().isPlaying) return
     const src = el.getAttribute('src') || ''
     if (!src.startsWith('file://') || el.dataset.fallbackFor === src || el.dataset.fallbackSrc === src) return
     el.dataset.fallbackFor = src
