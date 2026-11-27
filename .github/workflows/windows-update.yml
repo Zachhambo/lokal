@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch, tag, or commit to build'
+        description: 'Branch to build and increment'
         required: true
         default: '4k-fork-new'
 
@@ -21,6 +21,12 @@ concurrency:
 jobs:
   build:
     name: Build Windows updater
+    # The sync workflow dispatches this build after its version commit. Ignore
+    # that push-triggered run so each update advances the patch only once.
+    if: >-
+      github.event_name != 'push' ||
+      (!startsWith(github.event.head_commit.message, 'Version ') &&
+       !startsWith(github.event.head_commit.message, 'Windows build version '))
     runs-on: windows-latest
     permissions:
       contents: write
@@ -36,6 +42,30 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+
+      - name: Increment and persist Windows patch version
+        shell: bash
+        env:
+          BUILD_REF: ${{ inputs.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --heads origin "$BUILD_REF" >/dev/null; then
+            echo "::error::Windows update builds must target a branch so the incremented version can be persisted: $BUILD_REF"
+            exit 1
+          fi
+
+          git fetch origin "$BUILD_REF"
+          git checkout -B "$BUILD_REF" "origin/$BUILD_REF"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          npm version patch --no-git-tag-version --ignore-scripts
+          VERSION=$(node -p "require('./package.json').version")
+          sed -i -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$VERSION-blue/" README.md
+          git add package.json package-lock.json README.md
+          git commit -m "Windows build version $VERSION"
+          git push origin "HEAD:refs/heads/$BUILD_REF"
+          echo "Windows updater version advanced to $VERSION."
 
       - name: Read release version
         id: version
