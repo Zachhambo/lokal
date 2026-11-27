@@ -714,6 +714,10 @@ export default function App() {
       return
     }
     if (!api.isElectron || !el || (code !== 3 && code !== 4)) return
+    // Queue restore keeps the last selection but deliberately starts paused.
+    // A decoder error raised while the browser inspects that source must not
+    // start native playback until the user explicitly presses Play.
+    if (!usePlayerStore.getState().isPlaying) return
     const src = el.getAttribute('src') || ''
     if (!src.startsWith('file://') || el.dataset.fallbackFor === src || el.dataset.fallbackSrc === src) return
     el.dataset.fallbackFor = src
@@ -723,6 +727,18 @@ export default function App() {
     try {
       let filePath = src.slice('file://'.length)
       try { filePath = decodeURIComponent(filePath) } catch {}
+      const localTrack = usePlayerStore.getState().currentTrack
+      if (localTrack?.id && !localTrack.atmosLocalAttempted && /\.m4a$/i.test(filePath)) {
+        const nativeTrack = { ...localTrack, atmosNative: true, atmosLocal: true, atmosMode: 'headphones', atmosProvider: 'local', atmosSourceId: String(localTrack.id) }
+        usePlayerStore.setState({ currentTrack: nativeTrack, isBuffering: true, progress: 0, duration: 0 })
+        el.pause()
+        const native = await api.atmosPlayLocal?.(String(localTrack.id)).catch(() => null)
+        if (native?.ok) return
+        if (usePlayerStore.getState().currentTrack === nativeTrack) {
+          api.log('warn', `[eac3-playback] Windows Media Foundation fallback failed: ${native?.error || 'no response'}`)
+          usePlayerStore.setState({ currentTrack: { ...localTrack, atmosNative: false, atmosLocal: false, atmosLocalAttempted: true }, isBuffering: false })
+        }
+      }
       const result = await api.playableFile?.(filePath).catch(() => null)
       const copy = typeof result === 'string' ? result : result?.path || null
       if (!copy && el.getAttribute('src') === src) {
