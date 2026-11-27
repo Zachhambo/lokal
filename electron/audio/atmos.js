@@ -351,6 +351,46 @@ function registerAtmosHandlers(ipcMain, { getDB, broadcast }) {
   }
 
   let startGeneration = 0
+  ipcMain.handle('atmos:playLocal', async (_, trackId) => {
+    if (process.platform !== 'win32' || !headphones.headphoneCapability().available) return { error: 'Windows Media Foundation playback is unavailable in this build.' }
+    if (typeof trackId !== 'string' || !trackId || trackId.length > 256) return { error: 'Invalid library track' }
+    const filename = getDB().prepare('SELECT file_path FROM tracks WHERE id = ?').get(trackId)?.file_path
+    if (!filename || !path.isAbsolute(filename) || filename.startsWith('ghost://') || !fs.existsSync(filename)) return { error: 'The local audio file is unavailable.' }
+    const ffprobe = require('../ipc/tools').findFfprobe()
+    if (!ffprobe) return { error: 'FFprobe is required to identify E-AC-3 audio.' }
+    let probe
+    try {
+      const { stdout } = await execFileAsync(ffprobe, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name,channels', '-of', 'json', filename], { windowsHide: true, encoding: 'utf8', timeout: 12000, maxBuffer: 256 * 1024 })
+      probe = JSON.parse(stdout).streams?.[0]
+    } catch { return { error: 'Could not inspect this audio file with FFprobe.' } }
+    if (probe?.codec_name !== 'eac3') return { error: 'This track is not E-AC-3 audio.' }
+    const generation = ++startGeneration
+    await stop()
+    if (generation !== startGeneration) return { error: 'Playback request was superseded.' }
+    const session = { mode: 'headphones', controller: new AbortController(), proc: null, artifact: null }
+    active = session
+    notify({ state: 'loading', provider: 'local', id: trackId, message: 'Opening E-AC-3 with Windows Media Foundation…' })
+    try {
+      await headphones.startHeadphones(filename, { signal: session.controller.signal })
+      if (active !== session) return { error: 'Playback request was cancelled.' }
+      notify({ state: 'playing', provider: 'local', id: trackId, mode: 'headphones', codec: 'E-AC-3' })
+      session.monitor = setInterval(() => {
+        if (active !== session) return
+        const state = headphones.headphoneStatus()
+        if (state.state === 'playing' || state.state === 'paused') notify({ state: 'progress', provider: 'local', id: trackId, mode: 'headphones', position: state.position_secs, duration: state.duration_secs, paused: state.state === 'paused' })
+        else if (state.state === 'ended' || state.state === 'error') {
+          clearInterval(session.monitor); active = null
+          notify({ state: state.state, provider: 'local', id: trackId, error: state.error ? headphones.headphoneDecoderFailure(state.error) : undefined })
+        }
+      }, 500)
+      session.monitor.unref?.()
+      return { ok: true, codec: 'E-AC-3' }
+    } catch (error) {
+      if (active === session) active = null
+      notify({ state: 'error', provider: 'local', id: trackId, error: error.message || String(error) })
+      return { error: error.message || String(error) }
+    }
+  })
   ipcMain.handle('atmos:play', async (_, provider, id, device = '', mode = 'hdmi') => {
     const generation = ++startGeneration
     if (!['hdmi', 'headphones'].includes(mode)) return { error: 'Invalid Atmos playback mode' }

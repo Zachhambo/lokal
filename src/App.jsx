@@ -723,6 +723,18 @@ export default function App() {
     try {
       let filePath = src.slice('file://'.length)
       try { filePath = decodeURIComponent(filePath) } catch {}
+      const localTrack = usePlayerStore.getState().currentTrack
+      if (localTrack?.id && !localTrack.atmosLocalAttempted && /\.m4a$/i.test(filePath)) {
+        const nativeTrack = { ...localTrack, atmosNative: true, atmosLocal: true, atmosMode: 'headphones', atmosProvider: 'local', atmosSourceId: String(localTrack.id) }
+        usePlayerStore.setState({ currentTrack: nativeTrack, isBuffering: true })
+        el.pause()
+        const native = await api.atmosPlayLocal?.(String(localTrack.id)).catch(() => null)
+        if (native?.ok) return
+        if (usePlayerStore.getState().currentTrack === nativeTrack) {
+          api.log('warn', `[eac3-playback] Windows Media Foundation fallback failed: ${native?.error || 'no response'}`)
+          usePlayerStore.setState({ currentTrack: { ...localTrack, atmosNative: false, atmosLocal: false, atmosLocalAttempted: true }, isBuffering: false })
+        }
+      }
       const result = await api.playableFile?.(filePath).catch(() => null)
       const copy = typeof result === 'string' ? result : result?.path || null
       if (!copy && el.getAttribute('src') === src) {

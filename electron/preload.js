@@ -234,6 +234,7 @@ contextBridge.exposeInMainWorld('electron', {
   atmosChooseMpv: () => invoke('atmos:chooseMpv'),
   atmosOpenFile: (device, mode) => invoke('atmos:openFile', device, mode),
   atmosPlay: (provider, id, device, mode) => invoke('atmos:play', provider, id, device, mode),
+  atmosPlayLocal: trackId => invoke('atmos:playLocal', trackId),
   atmosStop: () => invoke('atmos:stop'),
   atmosCommand: command => invoke('atmos:command', command),
   onAtmosStatus: callback => on('atmos:status', (_, data) => callback(data)),

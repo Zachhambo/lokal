@@ -506,6 +506,7 @@ export const api = {
   atmosOpenFile: (device, mode) => isE() && el().atmosOpenFile ? el().atmosOpenFile(device, mode) : Promise.resolve({ error: 'Desktop only' }),
   atmosPlay: (provider, id, device = '', mode = 'hdmi') => isE() && el().atmosPlay
     ? el().atmosPlay(provider, id, device, mode) : Promise.resolve({ error: 'Native Atmos HDMI output requires desktop Lokal' }),
+  atmosPlayLocal: trackId => isE() && el()?.atmosPlayLocal ? el().atmosPlayLocal(trackId) : Promise.resolve({ error: 'Windows native playback is unavailable' }),
   atmosStop: () => isE() && el().atmosStop ? el().atmosStop() : Promise.resolve({ ok: true }),
   atmosCommand: command => isE() && el().atmosCommand ? el().atmosCommand(command) : Promise.resolve({ error: 'Unavailable' }),
   onAtmosStatus: callback => isE() && el()?.onAtmosStatus ? el().onAtmosStatus(callback) : () => {},
