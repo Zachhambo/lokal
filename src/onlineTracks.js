@@ -6,7 +6,7 @@
 import { api } from './api.js'
 import { downloadBatchCurrent } from './downloadCancellation.js'
 
-export const PROVIDER_LABELS = { yt: 'YouTube', sc: 'SoundCloud', mono: 'Monochrome' }
+export const PROVIDER_LABELS = { yt: 'YouTube', sc: 'SoundCloud', mono: 'Monochrome', mobile: 'Mobile' }
 
 /** Is `provider` a user-installed addon ("a-<key>")? */
 export function isAddonProvider(provider) {

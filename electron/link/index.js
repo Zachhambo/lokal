@@ -6,6 +6,7 @@ const { LinkStore, safeEqual } = require('./store')
 const { installCapture } = require('./capture')
 const { reconcilePlaylists, savePlaylistSnapshot } = require('./reconcile')
 const { createLinkedLibraryRefresh } = require('./libraryRefresh')
+const { createMobileCatalog } = require('./mobileCatalog')
 const { envelope, decode, text } = require('./protocol')
 const { advertise, reconcileDiscovery } = require('./discovery')
 const { createPendingCommands } = require('./pendingCommands')
@@ -16,8 +17,10 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
   if (instance) return instance
   const currentUser = () => String(remote.getRemoteState().userId || 'guest')
   const store = new LinkStore(db)
+  store.currentUser = currentUser
   installCapture(store, currentUser)
   const libraryRefresh = createLinkedLibraryRefresh()
+  const mobileCatalog = createMobileCatalog(db, store)
   const sockets = new Map(), pending = createPendingCommands(), snapshots = new Map()
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
   let stopDiscovery
@@ -77,7 +80,7 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
     sockets.set(device.id,socket)
     socket.alive=true
     socket.on('pong',()=>{socket.alive=true})
-    send(socket,'hello',{desktopId:store.deviceId,name:os.hostname(),user:{id:device.user_id},proto:1,capabilities:['remote','handoff','history','library','theme'],syncPreview:{history:db.prepare('SELECT COUNT(*) n FROM history_events WHERE user_id=?').get(device.user_id).n,operations:db.prepare('SELECT COUNT(*) n FROM library_ops WHERE user_id=?').get(device.user_id).n}})
+    send(socket,'hello',{desktopId:store.deviceId,name:os.hostname(),platform:process.platform,user:{id:device.user_id},proto:1,capabilities:['remote','handoff','history','library','theme','track_lifecycle','mobile_catalog'],syncPreview:{history:db.prepare('SELECT COUNT(*) n FROM history_events WHERE user_id=?').get(device.user_id).n,operations:db.prepare('SELECT COUNT(*) n FROM library_ops WHERE user_id=?').get(device.user_id).n}})
     send(socket,'state',{...remote.getRemoteState(),target:'desktop'})
     send(socket,'theme',desktopTheme())
     socket.on('message',async raw => {
@@ -90,6 +93,7 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
         switch (message.type) {
           case 'hello':
             if (!device.legacy) store.updateDeviceName(device.id, device.user_id, body.deviceName)
+            socket.capabilities = new Set(Array.isArray(body.capabilities) ? body.capabilities.filter(item => typeof item === 'string').slice(0, 50) : [])
             break
           case 'state': snapshots.set(device.id,{...body,updatedAt:Date.now()}); break
           case 'ack': {
@@ -101,7 +105,7 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
               const tracks=body.value?.queue;
               if(!Array.isArray(tracks)||tracks.length>5000)throw new Error('Invalid track query');
               const missing=[];
-              for(let index=0;index<tracks.length;index++){const track=store.matchTrack(tracks[index]);if(!track||track.file_path.startsWith('ghost://')||!require('fs').existsSync(track.file_path))missing.push(index)}
+              for(let index=0;index<tracks.length;index++){const track=store.matchTrack(tracks[index]);if((!track||track.file_path.startsWith('ghost://')||!require('fs').existsSync(track.file_path))&&!store.hasTrackTombstone(device.user_id,tracks[index]))missing.push(index)}
               send(socket,'ack',{ok:true,missing},message.id);break;
             }
             const result=await remote.sendRemoteCommand({action:body.action,value:body.value,ts:Date.now()})
@@ -116,14 +120,22 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
             reconcilePlaylists(store, device.user_id)
             store.applyPendingVideoClips(device.user_id)
             libraryRefresh.accepted(0, store.takeVideoClipChanges())
-            send(socket,'library.ops',store.pull('library_ops',device.user_id,body.cursor),message.id)
+            send(socket,'library.ops',store.pull('library_ops',device.user_id,body.cursor,{trackLifecycle:socket.capabilities?.has('track_lifecycle')||body.trackLifecycle===true}),message.id)
             break
+          case 'catalog.push': {
+            if (device.legacy) throw new Error('Pair this device before syncing')
+            const result = mobileCatalog.accept({ userId: device.user_id, deviceId: device.id, body })
+            libraryRefresh.accepted(result.changed)
+            send(socket, 'ack', { ok: true, ...result }, message.id)
+            break
+          }
           case 'library.push': {
             if (device.legacy) throw new Error('Pair this device before syncing')
             // Capture desktop changes before applying phone edits. Snapshot the
             // resulting state afterwards so remote operations are not echoed.
             reconcilePlaylists(store, device.user_id)
             const accepted = store.applyOps(body.items,device.user_id,device.id)
+            try { await store.flushPendingTrash() } catch {}
             savePlaylistSnapshot(store, device.user_id)
             libraryRefresh.accepted(accepted, store.takeVideoClipChanges())
             send(socket,'ack',{ok:true,accepted},message.id)
@@ -171,18 +183,33 @@ function createLink({ server, db, remote, enabled = () => true, advertiseDesktop
       ensureDiscovery(true)
       const pairing=store.createPairing(currentUser())
       const info=remote.getRemoteConnectionInfo()
-      const host=info.primary?new URL(info.primary).hostname:null
+      const hosts=(info.urls||[]).map(u=>{try{return new URL(u).hostname}catch{return null}}).filter(Boolean)
+      let host=info.primary?new URL(info.primary).hostname:null
+      if (hosts.length>1) {
+        try {
+          const routed=await require('../cast/mediaServer').routeAddressFor('192.0.2.1',80)
+          if (routed && hosts.includes(routed)) host=routed
+        } catch {}
+      }
       const uri=host?`lokal://pair?${new URLSearchParams({host,port:String(Number(process.env.PORT)||3421),id:store.deviceId,code:pairing.code})}`:null
-      return {...pairing,uri,qrDataUrl:uri?await QRCode.toDataURL(uri,{width:256,margin:2}):null,name:os.hostname()}
+      return {...pairing,uri,qrDataUrl:uri?await QRCode.toDataURL(uri,{width:256,margin:2}):null,name:os.hostname(),platform:process.platform}
     },
-    pair(body,address) { const result=store.pair(body,address);closeDevice(body.deviceId,'paired again');return result },
+    pair(body,address) { const result=store.pair(body,address);closeDevice(body.deviceId,'paired again');return {...result,name:os.hostname(),platform:process.platform} },
     devices() { return store.devices(currentUser()).map(device=>({...device,connected:sockets.has(device.id),state:snapshots.get(device.id)||null})) },
     renameDevice(id, name) {
       const user = currentUser()
       if (!store.renameDevice(id, user, name)) return {ok:false,error:'The device is unavailable.'}
       return {ok:true,device:store.devices(user).find(device=>device.id===id)}
     },
-    revoke(id) { const result=store.revoke(id,currentUser());if(result)closeDevice(id);return {ok:result} },
+    revoke(id) {
+      const user = currentUser()
+      const result = store.revoke(id, user)
+      if (result) {
+        closeDevice(id)
+        libraryRefresh.accepted(mobileCatalog.revokeDevice(user, id))
+      }
+      return { ok: result }
+    },
     commandDevice(id,command) {
       const socket=sockets.get(id)
       if (!socket || !store.devices(currentUser()).some(d=>d.id===id&&!d.revoked)) return Promise.resolve({ok:false,error:'Phone is not connected.'})

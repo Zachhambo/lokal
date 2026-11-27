@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { createRequire } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveMobileLinkedTracks, isMobileLinkedTrack } from '../src/mobileLinkedTracks.js'
-import { isPlayable, saveToLibrary } from '../src/onlineTracks.js'
+import { isPlayable, saveToLibrary, streamRef } from '../src/onlineTracks.js'
 import { api } from '../src/api.js'
 const require = createRequire(import.meta.url)
 const { sameRecording } = require('../electron/recordingIdentity.js')
@@ -115,6 +115,24 @@ test('mobile likes use desktop provider priority and retain likes, history and p
   } finally { fixture.db.close() }
 })
 
+test('mobile-only catalogue rows resolve through this PC configured online providers and keep their catalogue link', async () => {
+  const fixture = database()
+  try {
+    fixture.db.exec('CREATE TABLE link_mobile_catalog(user_id TEXT, device_id TEXT, track_key TEXT, track_id TEXT, snapshot_id TEXT, updated_at INTEGER, PRIMARY KEY(user_id, device_id, track_key))')
+    fixture.db.prepare('UPDATE tracks SET file_path=? WHERE id=?').run('ghost://mobile/link_phone', mobile.id)
+    fixture.db.prepare('INSERT INTO link_mobile_catalog VALUES(?,?,?,?,?,?)').run('owner', 'phone-1', 'phone-recording', mobile.id, 'snap_1', 1000)
+    const catalogue = { ...mobile, id: 'link_phone', file_path: 'ghost://mobile/link_phone' }
+    assert.equal(isMobileLinkedTrack(catalogue), true)
+    assert.equal(isPlayable(catalogue), false)
+    assert.equal(streamRef(catalogue), null, 'there is no direct phone audio URL')
+    const c = client(fixture)
+    const [found] = await resolveMobileLinkedTracks([catalogue], c, { prepareStreams: false })
+    assert.equal(found.id, stream.id)
+    assert.deepEqual(c.searched, [addon], 'resolution follows the PC configured provider order')
+    assert.equal(fixture.db.prepare('SELECT track_id FROM link_mobile_catalog WHERE device_id=?').get('phone-1').track_id, stream.id, 'catalogue association follows the resolved PC stream')
+  } finally { fixture.db.close() }
+})
+
 test('local copies are preferred without searching online', async () => {
   const fixture = database()
   try {
@@ -137,7 +155,7 @@ test('unavailable or cancelled desktop lookup never erases the mobile like', asy
       const rows = await resolveMobileLinkedTracks([mobile], c, {
         isCurrent: () => current,
         resolve: async candidates => {
-          assert.deepEqual(Object.keys(candidates[0]).sort(), ['album', 'artist', 'artwork_url', 'duration', 'title'])
+          assert.deepEqual(Object.keys(candidates[0]).sort(), ['album', 'artist', 'artwork_url', 'duration', 'genre', 'isrc', 'title', 'year'])
           if (cancelled) current = false
           return cancelled ? [stream] : []
         },

@@ -101,10 +101,10 @@ function createCastMedia({
     return null
   }
 
-  function artworkFor(source, deviceHost) {
+  function artworkFor(source, deviceHost, localAddress = null) {
     if (source?.file) {
       const added = server.add({ kind: 'artwork', path: source.file }, 'cover.jpg')
-      return { url: server.urlFor(added.path, deviceHost), key: added.key }
+      return { url: server.urlFor(added.path, deviceHost, localAddress), key: added.key }
     }
     return { url: source?.url || null, key: null }
   }
@@ -141,7 +141,7 @@ function createCastMedia({
    * @param options { deviceHost, convert: true to convert even what could be relayed (a retry) }
    * @returns { trackId, url, mime, duration, metadata, keys, converted }
    */
-  async function prepare(track, { deviceHost, convert: forceConvert = false, receiver = 'chromecast' } = {}) {
+  async function prepare(track, { deviceHost, localAddress = null, convert: forceConvert = false, receiver = 'chromecast' } = {}) {
     const libraryTrack = trackRow(track?.id) || {}
     const row = { ...libraryTrack, ...track }
     if (!row?.id) throw new Error('Nothing to play')
@@ -157,12 +157,20 @@ function createCastMedia({
     const ref = streamRef(row)
     if (ref) {
       if (forceConvert || receiver === 'sonos') {
-        const stream = await resolveStream(ref.provider, ref.id)
+        let stream = await resolveStream(ref.provider, ref.id)
+        if (stream?.type === 'live' && stream.job?.promise) {
+          await stream.job.promise
+          if (stream.job.status !== 'done' || !stream.job.result) {
+            throw new Error(stream.job.error || 'Audio preparation cancelled')
+          }
+          stream = stream.job.result
+        }
         const plan = { action: 'convert', to: 'flac', ext: '.flac', mime: 'audio/flac', rate: receiver === 'sonos' ? 48000 : null, depth: receiver === 'sonos' ? 16 : 24 }
         // Lossy sources stay lossy: AAC is plenty for what YouTube or SoundCloud send.
         if (!/flac|wav|alac/i.test(String(stream.mime || ''))) Object.assign(plan, { to: 'aac', ext: '.m4a', mime: 'audio/mp4', depth: null })
         const dest = cachePath(`${ref.provider}:${ref.id}`, plan)
         const source = stream.file || stream.url
+        if (!source) throw new Error('This online song has no convertible audio stream')
         await convertOnce(dest, convertArgs(source, dest, plan, { headers: stream.file ? null : stream.headers }))
         use(dest)
         files.push(dest)
@@ -178,7 +186,7 @@ function createCastMedia({
           fetchRange: async (range, signal) => (await fetchStream(ref.provider, ref.id, { range, signal })).res,
         }, 'song')
         keys.push(added.key)
-        url = server.urlFor(added.path, deviceHost)
+        url = server.urlFor(added.path, deviceHost, localAddress)
       }
     } else {
       const file = String(row.file_path || '')
@@ -220,9 +228,9 @@ function createCastMedia({
         'song' + path.extname(playbackFile).toLowerCase(),
       )
       keys.push(added.key)
-      url = server.urlFor(added.path, deviceHost)
+      url = server.urlFor(added.path, deviceHost, localAddress)
     }
-    const art = artworkFor(cover, deviceHost)
+    const art = artworkFor(cover, deviceHost, localAddress)
     if (art.key) keys.push(art.key)
     return {
       trackId: String(row.id),
@@ -254,8 +262,8 @@ function createCastMedia({
   }
 
   /** A song's cover for Lokal's receiver (its Up Next row): { url, key } (key: to take it down). */
-  function artwork(track, { deviceHost } = {}) {
-    return artworkFor(artworkSource(track || {}, trackRow(track?.id) || {}), deviceHost)
+  function artwork(track, { deviceHost, localAddress = null } = {}) {
+    return artworkFor(artworkSource(track || {}, trackRow(track?.id) || {}), deviceHost, localAddress)
   }
 
   return { prepare, release, artwork, unpublish: key => { if (key) server.remove(key) } }

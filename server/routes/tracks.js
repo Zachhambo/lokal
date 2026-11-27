@@ -502,12 +502,12 @@ router.get('/', (req, res) => {
   }
   const params = []
   // A query string: "problems=false" must not count as on.
-  const files = require('../../electron/trackErrors').truthy(problems) ? null : require('../../electron/libraryTracks').trackFileFilter(includeGhosts)
+  const files = require('../../electron/trackErrors').truthy(problems) ? null : require('../../electron/libraryTracks').trackFileFilter(source === 'mobile' ? '1' : includeGhosts, db)
   const where = files ? [files] : []
   if (id) { where.push('id = ?'); params.push(id) }
   if (artistName) { where.push('artist = ?'); params.push(artistName) }
   if (artistId) { where.push('id IN (SELECT track_id FROM artist_track_links WHERE artist_id = ?)'); params.push(artistId) }
-  const sourceWhere = require('../../electron/ipc/scanner').sourceFilter(source)
+  const sourceWhere = require('../../electron/ipc/scanner').sourceFilter(source, require('../../electron/ipc/remote').getRemoteState().userId || 'guest', db)
   if (sourceWhere) { where.push(sourceWhere.sql); params.push(...sourceWhere.params) }
   const genreWhere = require('../../electron/ipc/scanner').genreFilter(typeof genre === 'string' ? genre : '')
   if (genreWhere) { where.push(genreWhere.sql); params.push(...genreWhere.params) }
@@ -902,6 +902,7 @@ router.post('/batch-delete', async (req, res, next) => {
   try {
     const { ids = [] } = req.body
     const db = getDB()
+    const lifecycleSnapshots = require('../../electron/link/trackLifecycle').snapshot(db, ids)
     const filePaths = ids.map(id => db.prepare('SELECT file_path FROM tracks WHERE id = ?').get(id)?.file_path)
     for (const id of ids) {
       db.prepare('DELETE FROM artist_track_links WHERE track_id = ?').run(id)
@@ -914,6 +915,7 @@ router.post('/batch-delete', async (req, res, next) => {
       db.prepare('DELETE FROM tracks WHERE id = ?').run(id)
     }
     forgetDownloads(ids)
+    try { await require('../../electron/link/trackLifecycle').afterDelete(db, lifecycleSnapshots) } catch (error) { console.warn('link track lifecycle:', error.message) }
     res.json({ ok: true, files: await removeTrackFiles(db, filePaths) })
   } catch (e) { next(e) }
 })

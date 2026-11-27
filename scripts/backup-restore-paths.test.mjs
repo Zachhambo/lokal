@@ -145,3 +145,149 @@ test('keeps a configured removable library even while it is disconnected', async
   assert.deepEqual(result.onlineFolders, [other])
   assert.equal(result.mappings[0].folder, null)
 })
+
+test('relocates Lokal Mobile tracks nested inside the main music folder when importing from Windows to Linux', async t => {
+  const { music, storageDir, readable } = await fixture(t)
+  const mobileDir = path.join(music, 'Lokal Mobile')
+  const mobileTrack = path.join(mobileDir, 'A Good Day.flac')
+  const mobileCover = path.join(mobileDir, 'cover.jpg')
+  const nestedDownloadsDir = path.join(music, 'Downloads')
+  const nestedDownload = path.join(nestedDownloadsDir, 'Track.flac')
+  await fs.mkdir(mobileDir, { recursive: true })
+  await fs.mkdir(nestedDownloadsDir, { recursive: true })
+  await Promise.all([mobileTrack, mobileCover, nestedDownload].map(f => fs.writeFile(f, 'fixture')))
+
+  const winRoot = 'D:\\Music'
+  const winMobile = 'D:\\Music\\Lokal Mobile'
+  const winDownloads = 'D:\\Music\\Downloads'
+  const payload = {
+    version: 1,
+    settings: {
+      music_folder: winRoot,
+      music_folders: JSON.stringify([winRoot]),
+      phone_download_root: winMobile,
+      download_root: winDownloads,
+    },
+    tracks: [
+      {
+        id: 'mobile-1',
+        file_path: 'D:\\Music\\Lokal Mobile\\A Good Day.flac',
+        artwork_path: 'D:\\Music\\Lokal Mobile\\cover.jpg',
+        download_source: 'mobile',
+        last_modified: 999,
+      },
+      {
+        id: 'dl-1',
+        file_path: 'D:\\Music\\Downloads\\Track.flac',
+        download_source: 'web',
+        last_modified: 888,
+      },
+    ],
+  }
+
+  // Fresh destination with only the main music folder selected (no phone_download_root).
+  const restored = await prepareRestore(
+    payload,
+    {},
+    { primary: music, mappings: [music] },
+    { storageDir, readable },
+  )
+
+  assert.deepEqual(restored.library, { relocated: 2, unmatched: 0 })
+  assert.equal(restored.data.tracks[0].file_path, mobileTrack)
+  assert.equal(restored.data.tracks[0].artwork_path, mobileCover)
+  assert.equal(restored.data.tracks[0].download_source, 'mobile')
+  assert.equal(restored.data.tracks[0].last_modified, null)
+  assert.equal(restored.data.tracks[1].file_path, nestedDownload)
+  assert.ok(restored.refreshFolders.includes(music))
+})
+
+test('relocates separate Lokal Mobile, legacy phone-downloads, unmapped nested roots, and Windows case differences', async t => {
+  const { music, storageDir, readable } = await fixture(t)
+  const mobileDir = path.join(music, 'Lokal Mobile')
+  const separateTrack = path.join(mobileDir, 'Oui oui xtndo.flac')
+  const legacyTrack = path.join(mobileDir, 'Legacy Phone.flac')
+  const casedDir = path.join(mobileDir, 'Artist')
+  const casedTrack = path.join(casedDir, 'Midnight Communication.flac')
+  await fs.mkdir(casedDir, { recursive: true })
+  await Promise.all([separateTrack, legacyTrack, casedTrack].map(f => fs.writeFile(f, 'fixture')))
+
+  const payload = {
+    version: 1,
+    settings: {
+      music_folder: 'D:\\Music',
+      music_folders: JSON.stringify(['D:\\Music', 'D:\\Music\\Lokal Mobile']),
+      phone_download_root: 'E:\\Lokal Mobile',
+    },
+    tracks: [
+      {
+        id: 'sep-mobile',
+        file_path: 'E:\\Lokal Mobile\\Oui oui xtndo.flac',
+        download_source: 'mobile',
+      },
+      {
+        id: 'legacy-mobile',
+        file_path: 'C:\\Users\\user\\AppData\\Roaming\\lokal\\data\\phone-downloads\\Legacy Phone.flac',
+        download_source: 'mobile',
+      },
+      {
+        id: 'cased-mobile',
+        file_path: 'D:\\Music\\lokal mobile\\artist\\MIDNIGHT COMMUNICATION.FLAC',
+        download_source: 'mobile',
+      },
+    ],
+  }
+
+  // Only primary music folder mapped; nested D:\Music\Lokal Mobile left unmapped (null).
+  const restored = await prepareRestore(
+    payload,
+    {},
+    { primary: music, mappings: [music, undefined] },
+    { storageDir, readable },
+  )
+
+  assert.deepEqual(restored.library, { relocated: 3, unmatched: 0 })
+  assert.deepEqual(
+    restored.data.tracks.map(track => track.file_path),
+    [separateTrack, legacyTrack, casedTrack],
+  )
+})
+
+
+test('maps a separate Lokal Mobile destination independently from the main music folder', async t => {
+  const { root, music, storageDir, readable } = await fixture(t)
+  const mobileRoot = path.join(root, 'Lokal Mobile')
+  const mobileTrack = path.join(mobileRoot, 'Artist', 'Track.flac')
+  const mainTrack = path.join(music, 'Album', 'Main.flac')
+  await Promise.all([mobileTrack, mainTrack].map(async file => {
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, 'fixture')
+  }))
+
+  const sourceMusic = 'C:\\\\Music'
+  const sourceMobile = 'C:\\\\Music\\\\Lokal Mobile'
+  const payload = {
+    settings: {
+      music_folder: sourceMusic,
+      music_folders: JSON.stringify([sourceMusic]),
+      phone_download_root: sourceMobile,
+    },
+    tracks: [
+      { id: 'phone-track', file_path: 'C:\\\\Music\\\\Lokal Mobile\\\\Artist\\\\Track.flac', download_source: 'mobile' },
+      { id: 'main-track', file_path: 'C:\\\\Music\\\\Album\\\\Main.flac' },
+    ],
+  }
+  const restored = await prepareRestore(payload, {}, {
+    primary: music,
+    mappings: [music],
+    phoneRoot: mobileRoot,
+  }, { storageDir, readable })
+
+  assert.equal(restored.data.settings.music_folder, music)
+  assert.equal(restored.data.settings.phone_download_root, mobileRoot)
+  assert.equal(restored.data.settings.phone_download_root_device, String((await fs.stat(mobileRoot)).dev))
+  assert.equal(restored.data.tracks[0].file_path, mobileTrack)
+  assert.equal(restored.data.tracks[1].file_path, mainTrack)
+  assert.deepEqual(restored.library, { relocated: 2, unmatched: 0 })
+  assert.ok(restored.refreshFolders.includes(music))
+})

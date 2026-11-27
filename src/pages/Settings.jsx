@@ -1088,6 +1088,18 @@ export default function Settings() {
     }
   }
 
+  const chooseRestoreMobileFolder = async () => {
+    try {
+      const folder = await api.openFolder()
+      if (!folder) return
+      setImportPreview(current => current?.library
+        ? { ...current, library: { ...current.library, phoneRoot: folder, phoneRootSelected: true } }
+        : current)
+    } catch (error) {
+      alert(t('Could not select a mobile folder: {error}', { error: t(error.message) }))
+    }
+  }
+
   const chooseRestoreFolder = async (index) => {
     try {
       const folder = await api.openFolder()
@@ -1119,6 +1131,7 @@ export default function Settings() {
       const result = await api.importAllData(importPreview.data, library && {
         primary: library.primary,
         mappings: library.mappings.map(entry => entry.folder),
+        ...(library.phoneRootSelected ? { phoneRoot: library.phoneRoot } : {}),
       })
       if (!result || result.error) throw new Error(t(result?.error || 'Import failed'))
       // A failed pre-import settings save must not retry over the restored DB.
@@ -3584,6 +3597,22 @@ activeCategory === 'data' ? usersTried
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+              {api.isElectron && importPreview.data?.settings?.phone_download_root && (
+                <div className="space-y-2 border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{t('Lokal Mobile folder on this PC')}</p>
+                      <p className="break-all text-xs text-muted">{importPreview.data.settings.phone_download_root}</p>
+                      <p className="break-all text-xs text-white/80">{importPreview.library.phoneRoot || t('No mobile folder selected')}</p>
+                    </div>
+                    <button type="button" onClick={chooseRestoreMobileFolder} disabled={importingAllData}
+                      className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-white disabled:opacity-50">
+                      {t('Choose folder')}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted">{t('Choose the existing Lokal Mobile folder separately when it is not inside your main music folder. Tracks and artwork will be reconnected there.')}</p>
                 </div>
               )}
               <p className="text-xs text-muted">{t('After import, Lokal opens as Guest. Sign in to a restored account to see its history, likes and playlists. If you forgot its password, use Reset Password under Settings → Data → Accounts.')}</p>

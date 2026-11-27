@@ -1037,6 +1037,7 @@ function registerStreamProtocol(protocol, net) {
           ? new Response(picture.bytes, { status: 200, headers: { 'content-type': picture.mime, 'cache-control': 'private, max-age=3600' } })
           : new Response('No full artwork', { status: 404 })
       }
+
       if (provider === 'yt' && accountSession) await accountSession.credentials()
       if (provider === 'ytv') {
         // The player asking why the video's stream failed.

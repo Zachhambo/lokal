@@ -252,3 +252,208 @@ test('a browsed external Sonos queue item relinquishes ownership without sending
   assert.equal(ended.reason, 'stopped')
   assert.equal(f.commands.filter(c => c.action === 'Stop').length, stops)
 })
+
+test('UpnpDiscovery sends SSDP M-SEARCH on every physical LAN interface with explicit multicast interface', async t => {
+  const { EventEmitter } = require('events')
+  const sockets = []
+  const discovery = new UpnpDiscovery({
+    interfaces: () => [{ address: '192.168.1.23' }, { address: '10.0.0.9' }],
+    mdns: null,
+    createSocket: () => {
+      const sock = new EventEmitter()
+      sock.bound = null
+      sock.ttl = null
+      sock.multicastInterface = null
+      sock.sent = []
+      sock.closed = false
+      sock.bind = (port, address, cb) => {
+        if (typeof address === 'function') { cb = address; address = null }
+        sock.bound = { port, address }
+        cb?.()
+      }
+      sock.setMulticastTTL = ttl => { sock.ttl = ttl }
+      sock.setMulticastInterface = addr => { sock.multicastInterface = addr }
+      sock.send = (buf, port, host) => sock.sent.push({ text: String(buf), port, host })
+      sock.close = () => { sock.closed = true }
+      sockets.push(sock)
+      return sock
+    },
+    fetchImpl: async url => {
+      assert.equal(url, 'http://192.168.1.50:1400/xml/device_description.xml')
+      return response('<device><deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType><UDN>uuid:RINCON_50</UDN><manufacturer>Sonos, Inc.</manufacturer><roomName>Office</roomName><modelName>Sonos One</modelName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/MediaRenderer/AVTransport/Control</controlURL></service></serviceList></device>')
+    },
+  })
+  t.after(() => discovery.stop())
+  const found = new Promise(resolve => discovery.once('change', resolve))
+  discovery.scan()
+  assert.equal(sockets.length, 2)
+  assert.deepEqual(sockets.map(s => s.bound.address), ['192.168.1.23', '10.0.0.9'])
+  assert.deepEqual(sockets.map(s => s.multicastInterface), ['192.168.1.23', '10.0.0.9'])
+  assert.deepEqual(sockets.map(s => s.ttl), [4, 4])
+  assert.ok(sockets.every(s => s.sent.length === 2 && s.sent.some(m => m.text.includes('ZonePlayer:1'))))
+  sockets[0].emit('message', Buffer.from('HTTP/1.1 200 OK\r\nLOCATION: http://192.168.1.50:1400/xml/device_description.xml\r\n\r\n'))
+  const list = await found
+  assert.equal(list.length, 1)
+  assert.equal(list[0].name, 'Office')
+  assert.equal(list[0].sonos, true)
+})
+
+test('UpnpDiscovery finds Sonos via mDNS _sonos._tcp.local (even when SSDP gets no reply) and expands visible ZoneGroupTopology rooms', async t => {
+  const { EventEmitter } = require('events')
+  const { SONOS_MDNS_SERVICE } = require('../electron/cast/upnp')
+  const mdns = new EventEmitter()
+  mdns.queries = []
+  mdns.destroyed = 0
+  mdns.query = q => mdns.queries.push(q)
+  mdns.destroy = () => { mdns.destroyed++ }
+
+  const topology = '<ZoneGroups><ZoneGroup Coordinator="RINCON_50">' +
+    '<ZoneGroupMember UUID="RINCON_50" Location="http://192.168.1.50:1400/xml/device_description.xml"/>' +
+    '<ZoneGroupMember UUID="RINCON_51" Location="http://192.168.1.51:1400/xml/device_description.xml"/>' +
+    '<ZoneGroupMember UUID="RINCON_SUB" Location="http://192.168.1.52:1400/xml/device_description.xml" Invisible="1"/>' +
+    '</ZoneGroup></ZoneGroups>'
+  const xmlFor = (uuid, room) => response(
+    `<device><deviceType>urn:schemas-upnp-org:device:ZonePlayer:1</deviceType><UDN>uuid:${uuid}</UDN><manufacturer>Sonos, Inc.</manufacturer><roomName>${room}</roomName><serviceList>` +
+    '<service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/MediaRenderer/AVTransport/Control</controlURL></service>' +
+    '<service><serviceType>urn:schemas-upnp-org:service:ZoneGroupTopology:1</serviceType><controlURL>/ZoneGroupTopology/Control</controlURL></service>' +
+    '</serviceList></device>'
+  )
+
+  const fetched = []
+  const discovery = new UpnpDiscovery({
+    interfaces: () => [],
+    createSocket: () => {
+      const sock = new EventEmitter()
+      sock.bind = (_p, cb) => cb?.()
+      sock.send = () => {}
+      sock.close = () => {}
+      return sock
+    },
+    mdns: () => mdns,
+    fetchImpl: async (url, options = {}) => {
+      fetched.push(url)
+      if (options.method === 'POST') return response(`<ZoneGroupState>${escapeXml(topology)}</ZoneGroupState>`)
+      if (url.includes('192.168.1.50')) return xmlFor('RINCON_50', 'Living Room')
+      if (url.includes('192.168.1.51')) return xmlFor('RINCON_51', 'Bedroom')
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+  t.after(() => discovery.stop())
+  const twoFound = new Promise(resolve => {
+    discovery.on('change', list => { if (list.length === 2) resolve(list) })
+  })
+  discovery.scan()
+  assert.ok(mdns.queries.some(q => q.questions.some(entry => entry.name === SONOS_MDNS_SERVICE && entry.type === 'PTR')))
+  // Split mDNS packets: PTR -> SRV (port 1443 on Sonos S2) -> A.
+  mdns.emit('response', { answers: [{ type: 'PTR', name: SONOS_MDNS_SERVICE, data: 'Sonos-50.' + SONOS_MDNS_SERVICE }] })
+  assert.ok(mdns.queries.some(q => q.questions.some(entry => entry.name === 'Sonos-50.' + SONOS_MDNS_SERVICE && entry.type === 'SRV')))
+  mdns.emit('response', { answers: [{ type: 'SRV', name: 'Sonos-50.' + SONOS_MDNS_SERVICE, data: { target: 'Sonos-50.local', port: 1443 } }] })
+  assert.ok(mdns.queries.some(q => q.questions.some(entry => entry.name === 'sonos-50.local' && entry.type === 'A')))
+  mdns.emit('response', { answers: [{ type: 'A', name: 'Sonos-50.local', data: '192.168.1.50', ttl: 120 }] })
+
+  const list = await twoFound
+  assert.deepEqual(list.map(d => d.name).sort(), ['Bedroom', 'Living Room'])
+  assert.ok(!fetched.some(url => url.includes('192.168.1.52')), 'bonded invisible speakers are not probed')
+  discovery.stop()
+  assert.equal(mdns.destroyed, 1)
+})
+
+test('UpnpController reports a Linux firewall error when Sonos never fetches from the media server, and clears it once a request arrives', async t => {
+  const f = fixture()
+  let requestCount = 0
+  const media = {
+    prepare: async track => ({
+      trackId: String(track.id),
+      url: `http://192.168.1.4:3422/token/key/${track.id}.flac`,
+      duration: 180,
+      mime: 'audio/flac',
+      metadata: { title: `Song ${track.id}`, artist: 'Artist', albumName: 'Album', images: [] },
+    }),
+    release: () => {},
+  }
+  const server = {
+    start: async () => 3422,
+    stop: () => {},
+    get port() { return 3422 },
+    get requestCount() { return requestCount },
+  }
+  const controller = new UpnpController({
+    media,
+    server,
+    fetchImpl: f.fetchImpl,
+    reachabilityTimeoutMs: 60,
+    platform: 'linux',
+  })
+  t.after(() => controller.cleanup())
+  await controller.connect(device(true))
+  f.setState('TRANSITIONING')
+  await controller.setWindow({ current: { id: 'a', title: 'Test Song' }, upcoming: [], play: true })
+  const end = Date.now() + 1000
+  while (Date.now() < end && !/TCP port 3422/.test(controller.status().error || '')) {
+    await new Promise(resolve => setTimeout(resolve, 15))
+  }
+  assert.match(controller.status().error || '', /TCP port 3422/)
+  assert.match(controller.status().error || '', /firewall/i)
+  requestCount = 1
+  f.setUri('http://192.168.1.4:3422/token/key/a.flac')
+  f.setState('PLAYING')
+  await controller.poll()
+  assert.equal(controller.status().error, null)
+})
+
+test('UpnpDiscovery listens for multicast SSDP NOTIFY announcements on 239.255.255.250:1900 and describe() accepts AVTransport devices regardless of deviceType', async t => {
+  const { EventEmitter } = require('events')
+  const notifySock = new EventEmitter()
+  notifySock.boundPort = null
+  notifySock.memberships = []
+  notifySock.closed = false
+  notifySock.bind = (port, cb) => { notifySock.boundPort = port; cb?.() }
+  notifySock.addMembership = (group, iface) => notifySock.memberships.push({ group, iface })
+  notifySock.close = () => { notifySock.closed = true }
+
+  const probed = []
+  const discovery = new UpnpDiscovery({
+    interfaces: () => [{ address: '192.168.1.178' }],
+    mdns: null,
+    createSocket: () => {
+      const sock = new EventEmitter()
+      sock.bind = (_p, _a, cb) => cb?.()
+      sock.send = () => {}
+      sock.close = () => {}
+      return sock
+    },
+    createNotifySocket: () => notifySock,
+    fetchImpl: async url => {
+      probed.push(url)
+      return response(
+        '<device><deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType>' +
+        '<UDN>uuid:TURNTABLE_1</UDN><manufacturer>Victrola</manufacturer><friendlyName>Stream Turntable</friendlyName>' +
+        '<serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>' +
+        '<controlURL>/AVTransport/control</controlURL></service></serviceList></device>'
+      )
+    },
+  })
+  t.after(() => discovery.stop())
+
+  const found = new Promise(resolve => discovery.once('change', resolve))
+  discovery.scan()
+  assert.equal(notifySock.boundPort, 1900)
+  assert.deepEqual(notifySock.memberships, [{ group: '239.255.255.250', iface: '192.168.1.178' }])
+
+  // Non-audio devices and ssdp:byebye announcements are ignored.
+  notifySock.emit('message', Buffer.from('NOTIFY * HTTP/1.1\r\nNT: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\nNTS: ssdp:alive\r\nLOCATION: http://192.168.1.1/rootDesc.xml\r\n\r\n'))
+  notifySock.emit('message', Buffer.from('NOTIFY * HTTP/1.1\r\nNT: urn:schemas-upnp-org:device:MediaRenderer:1\r\nNTS: ssdp:byebye\r\nLOCATION: http://192.168.1.88:1400/desc.xml\r\n\r\n'))
+  assert.equal(probed.length, 0)
+
+  // A MediaRenderer/AVTransport ssdp:alive NOTIFY triggers probing even when M-SEARCH replies are blocked.
+  notifySock.emit('message', Buffer.from('NOTIFY * HTTP/1.1\r\nNT: urn:schemas-upnp-org:service:AVTransport:1\r\nNTS: ssdp:alive\r\nLOCATION: http://192.168.1.90:49152/description.xml\r\n\r\n'))
+  const list = await found
+  assert.equal(list.length, 1)
+  assert.equal(list[0].name, 'Stream Turntable')
+  assert.equal(list[0].services.AVTransport.url, 'http://192.168.1.90:49152/AVTransport/control')
+
+  discovery.stop()
+  assert.equal(notifySock.closed, true)
+})
+
+

@@ -22,7 +22,7 @@ const SORTS = {
   random: 'RANDOM()',
 }
 const MAX_LIMIT = 5000
-const SOURCES = ['local', 'yt', 'sc', 'mono', 'soulseek', 'addon', 'web']
+const SOURCES = ['local', 'yt', 'sc', 'mono', 'soulseek', 'addon', 'web', 'mobile', 'mobile-downloads']
 const TIERS = ['hires', 'lossless', 'high', 'low', 'suspect']
 
 const like = (text) => `%${String(text).replace(/[\\%_]/g, char => `\\${char}`)}%`
@@ -109,11 +109,21 @@ const FIELDS = {
     // The tier's columns are unqualified; they're only on tracks.
     return op === 'not' ? `NOT ${filter.sql}` : filter.sql
   },
-  source: (op, value) => {
+  source: (op, value, _params, db) => {
     if (!SOURCES.includes(value)) return null
-    const sql = value === 'local' ? 't.download_source IS NULL'
-      : value === 'addon' ? "t.download_source LIKE 'a-%'"
-        : `t.download_source = '${value}'`
+    let sql
+    if (value === 'local') sql = 't.download_source IS NULL'
+    else if (value === 'addon') sql = "t.download_source LIKE 'a-%'"
+    else if (value === 'mobile') {
+      let hasCatalog = false
+      try {
+        hasCatalog = !!db?.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='link_mobile_catalog'").get()
+      } catch {}
+      sql = hasCatalog
+        ? "(t.file_path LIKE 'ghost://mobile/%' OR (t.file_path LIKE 'ghost://%' AND t.id IN (SELECT track_id FROM link_mobile_catalog)))"
+        : "t.file_path LIKE 'ghost://mobile/%'"
+    } else if (value === 'mobile-downloads') sql = "t.download_source = 'mobile' AND t.file_path NOT LIKE 'ghost://%'"
+    else sql = `t.download_source = '${value}'`
     return op === 'not' ? `NOT (${sql})` : sql
   },
 }
@@ -137,7 +147,14 @@ function smartQuery(db, input, userId, columns = 't.*') {
   const params = []
   const conditions = rules.rules.map(rule => FIELDS[rule.field](rule.op, rule.value, params, db)).filter(Boolean)
   const where = conditions.length ? `AND (${conditions.join(rules.match === 'any' ? ' OR ' : ' AND ')})` : ''
-  const sql = `SELECT ${columns} FROM tracks t WHERE t.file_path NOT LIKE 'ghost://%' ${where} ORDER BY ${SORTS[rules.sort]}${rules.limit ? ` LIMIT ${rules.limit}` : ''}`
+  let hasCatalog = false
+  try {
+    hasCatalog = !!db?.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='link_mobile_catalog'").get()
+  } catch {}
+  const fileClause = hasCatalog
+    ? "(t.file_path NOT LIKE 'ghost://%' OR t.file_path LIKE 'ghost://mobile/%' OR t.id IN (SELECT track_id FROM link_mobile_catalog))"
+    : "(t.file_path NOT LIKE 'ghost://%' OR t.file_path LIKE 'ghost://mobile/%')"
+  const sql = `SELECT ${columns} FROM tracks t WHERE ${fileClause} ${where} ORDER BY ${SORTS[rules.sort]}${rules.limit ? ` LIMIT ${rules.limit}` : ''}`
   return { sql, params, named: { uid: userId || 'guest' } }
 }
 

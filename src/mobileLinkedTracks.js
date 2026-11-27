@@ -4,11 +4,12 @@ import { mapLimited, resolveRecommendationTracks, isAddonVerificationRequiredErr
 import { announceTrackMerges } from './mergedTracks.js'
 
 export const isMobileLinkedTrack = track =>
-  !!track?.id && String(track.file_path || '').startsWith('ghost://link/') &&
+  !!track?.id && (String(track.file_path || '').startsWith('ghost://mobile/') || String(track.file_path || '').startsWith('ghost://link/')) &&
   !!String(track.title || '').trim() && !!String(track.artist || '').trim()
 
 /** Use this PC's sources, then move the synced identity onto the playable row.
  * Provider credentials/URLs from the phone are never used for resolution.
+ * All matching and playback resolution use this PC's configured providers.
  * Keep unplayable ordinary imports on their existing manual-resolution path.
  */
 export async function resolveMobileLinkedTracks(tracks, client = api, options = {}) {
@@ -21,6 +22,7 @@ export async function resolveMobileLinkedTracks(tracks, client = api, options = 
       const candidate = {
         title: track.title, artist: track.artist, album: track.album,
         duration: track.duration, artwork_url: track.artwork_url,
+        isrc: track.isrc, year: track.year, genre: track.genre,
       }
       try {
         const [found] = await resolve([candidate], client, {

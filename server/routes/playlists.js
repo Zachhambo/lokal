@@ -467,7 +467,7 @@ function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = nul
     return alias?.track_id === targetTrackId ? { ok: true, track: target } : { error: 'Ghost track not found' }
   }
   const mobileStream = options.resolveMobileStream === true &&
-    String(ghost.file_path || '').startsWith('ghost://link/') &&
+    /^ghost:\/\/(?:link|mobile)\//.test(String(ghost.file_path || '')) &&
     !!require('../../electron/online/sources').streamRef(target)
   // Only synced mobile metadata may be linked to a verified, persisted online
   // recording. Ordinary imported ghosts must still resolve to real files.
@@ -496,6 +496,9 @@ function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = nul
 
   const run = db.transaction(() => {
     applyImportedMetadata(db, targetTrackId, ghost)
+    if (ghost.artwork_path) {
+      db.prepare("UPDATE tracks SET artwork_path = COALESCE(NULLIF(artwork_path, ''), ?) WHERE id = ?").run(ghost.artwork_path, targetTrackId)
+    }
 
     if (options.dedupePlaylist) {
       // Resolving several ghost rows can legitimately find the same library
@@ -515,8 +518,24 @@ function resolveGhostTrack(db, ghostTrackId, targetTrackId, sourceIdentity = nul
     // A streamed ghost can have been liked and played: keep that on the file.
     db.prepare('UPDATE OR IGNORE user_likes SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)
     db.prepare('UPDATE OR IGNORE play_history SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)
-    // Mobile sync identities and qualified listening events must follow the
-    // same recording, including a subsequent stream -> downloaded-file merge.
+    // Mobile sync identities, phone catalogue associations and qualified
+    // listening events must follow the same recording, including a subsequent
+    // stream -> downloaded-file merge.
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='link_mobile_catalog'").get()) {
+      db.prepare(`
+        UPDATE link_mobile_catalog AS mobile
+        SET track_id = ?
+        WHERE track_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM link_mobile_catalog AS current
+            WHERE current.user_id = mobile.user_id
+              AND current.device_id = mobile.device_id
+              AND current.track_key = mobile.track_key
+              AND current.track_id = ?
+          )
+      `).run(targetTrackId, ghostTrackId, targetTrackId)
+      db.prepare('DELETE FROM link_mobile_catalog WHERE track_id = ?').run(ghostTrackId)
+    }
     for (const table of ['track_aliases', 'link_track_aliases', 'listening_events']) {
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
         db.prepare('UPDATE ' + table + ' SET track_id = ? WHERE track_id = ?').run(targetTrackId, ghostTrackId)

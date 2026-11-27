@@ -310,7 +310,7 @@ router.post('/history/artwork', async (req, res) => {
   if (!recorded) return res.status(404).json({ error: 'Unknown mobile play.' })
   const id = 'link_' + require('../../electron/link/store').hash(key)
   const row = db.prepare('SELECT file_path,artwork_path FROM tracks WHERE id=?').get(id)
-  if (!row || !String(row.file_path).startsWith('ghost://link/')) {
+  if (!row || (!String(row.file_path).startsWith('ghost://link/') && !String(row.file_path).startsWith('ghost://mobile/'))) {
     // The history event already resolved to a real desktop recording (or its
     // placeholder was promoted to one). Mark the cover transfer complete,
     // rather than making the phone decode and retry it every sync.
@@ -330,12 +330,63 @@ router.post('/history/artwork', async (req, res) => {
     const artwork = await require('../../electron/artwork/thumb').writeCover(
       root, id + '-mobile-history', bytes
     )
-    db.prepare("UPDATE tracks SET artwork_path=?,download_source='mobile' WHERE id=? AND file_path LIKE 'ghost://link/%'")
+    db.prepare("UPDATE tracks SET artwork_path=?,download_source='mobile' WHERE id=? AND (file_path LIKE 'ghost://link/%' OR file_path LIKE 'ghost://mobile/%')")
       .run(artwork,id)
     require('../../electron/ipc/remote').events.emit('library', { type: 'mobile-history-artwork' })
     return res.set('Cache-Control', 'private, no-store').json({ ok: true })
   } catch (error) {
     return res.status(500).json({ error: 'Could not save mobile artwork.' })
+  }
+})
+
+// Phone catalogue entries for tracks not stored on this PC can carry a local
+// cover thumbnail from the phone. Accept bounded JPEGs only for ghost tracks
+// associated with the paired device's catalogue that do not already have art.
+router.post('/catalog/artwork', async (req, res) => {
+  const userId = pairedUser(req, res)
+  if (!userId) return
+  const key = req.body?.track_key
+  const encoded = req.body?.image_base64
+  if (typeof key !== 'string' || !key.trim() || key.length > 1500 ||
+      typeof encoded !== 'string' || encoded.length > 240000 ||
+      !/^[a-zA-Z0-9+/]+={0,2}$/.test(encoded)) {
+    return res.status(400).json({ error: 'Invalid catalog artwork.' })
+  }
+  const db = getDB()
+  const linkStore = require('../../electron/link/store')
+  const catalogRow = db.prepare(
+    'SELECT track_id FROM link_mobile_catalog WHERE user_id=? AND device_id=? AND track_key=? LIMIT 1'
+  ).get(userId, req.linkDevice.id, key)
+  const trackId = catalogRow?.track_id || ('link_' + linkStore.hash(key))
+  const row = db.prepare('SELECT id,file_path,artwork_path FROM tracks WHERE id=?').get(trackId)
+  if (!row) {
+    return catalogRow
+      ? res.json({ ok: true, noPlaceholder: true })
+      : res.status(404).json({ error: 'Unknown mobile catalog track.' })
+  }
+  if (!String(row.file_path || '').startsWith('ghost://')) {
+    return res.json({ ok: true, noPlaceholder: true })
+  }
+  const fs = require('fs')
+  if (row.artwork_path && fs.existsSync(row.artwork_path)) {
+    return res.json({ ok: true, alreadyPresent: true })
+  }
+  const bytes = Buffer.from(encoded, 'base64')
+  if (bytes.length < 20 || bytes.length > 180000 ||
+      !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) {
+    return res.status(415).json({ error: 'Expected a bounded JPEG thumbnail.' })
+  }
+  try {
+    const root = require('path').join(require('../../electron/ipc/db').getStorageDir(), 'artwork')
+    const artwork = await require('../../electron/artwork/thumb').writeCover(
+      root, row.id + '-mobile-catalog', bytes
+    )
+    db.prepare("UPDATE tracks SET artwork_path=? WHERE id=? AND (artwork_path IS NULL OR artwork_path='') AND file_path LIKE 'ghost://%'")
+      .run(artwork, row.id)
+    require('../../electron/ipc/remote').events.emit('library', { type: 'mobile-catalog-artwork' })
+    return res.set('Cache-Control', 'private, no-store').json({ ok: true })
+  } catch (error) {
+    return res.status(500).json({ error: 'Could not save mobile catalog artwork.' })
   }
 })
 
